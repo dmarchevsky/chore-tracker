@@ -3,23 +3,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { Login } from './pages/Login';
 import { Spinner } from './shared/ui';
+import { MeShell } from './me/MeShell';
+import { ChoreList } from './me/ChoreList';
+import { ChoreView } from './me/ChoreView';
+import { Money } from './me/Money';
+import { Rules } from './me/Rules';
 
 const qc = new QueryClient({
   defaultOptions: { queries: { staleTime: 15_000, retry: 1, refetchOnWindowFocus: false } },
 });
-
-function MePlaceholder() {
-  const { me, logout } = useAuth();
-  return (
-    <div className="p-6">
-      <p className="text-lg">Hi {me?.display_name} 👋</p>
-      <p className="text-slate-400">Your chores land here (feat/phase5-kid-pwa).</p>
-      <button className="mt-4 text-sky-400 underline" onClick={logout}>
-        Sign out
-      </button>
-    </div>
-  );
-}
 
 function AdminPlaceholder() {
   const { me, logout } = useAuth();
@@ -48,14 +40,18 @@ function Shell() {
   return (
     <Routes>
       <Route path="/login" element={<Navigate to={home} replace />} />
-      <Route
-        path="/me/*"
-        element={me.role === 'child' ? <MePlaceholder /> : <Navigate to={home} replace />}
-      />
-      <Route
-        path="/admin/*"
-        element={me.role === 'admin' ? <AdminPlaceholder /> : <Navigate to={home} replace />}
-      />
+      {me.role === 'child' ? (
+        <Route path="/me" element={<MeShell />}>
+          <Route index element={<ChoreList scope="today" title="Today" />} />
+          <Route path="week" element={<ChoreList scope="week" title="This week" />} />
+          <Route path="history" element={<ChoreList scope="history" title="History" />} />
+          <Route path="money" element={<Money />} />
+          <Route path="rules" element={<Rules />} />
+          <Route path="chores/:id" element={<ChoreView />} />
+        </Route>
+      ) : (
+        <Route path="/admin/*" element={<AdminPlaceholder />} />
+      )}
       <Route path="*" element={<Navigate to={home} replace />} />
     </Routes>
   );

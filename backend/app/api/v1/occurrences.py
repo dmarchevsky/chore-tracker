@@ -19,8 +19,15 @@ from app.models import (
     UserRole,
 )
 from app.models.occurrence import SUBMITTABLE, TERMINAL
+from app.models.verification import Verification
 from app.schemas.chore import AssigneeSwap, OccurrenceOut
-from app.schemas.submission import DecisionRequest, DisputeRequest, GeoIn, SubmissionOut
+from app.schemas.submission import (
+    DecisionRequest,
+    DisputeRequest,
+    GeoIn,
+    SubmissionOut,
+    VerificationOut,
+)
 from app.services import audit, notifications, review
 from app.services.media import sign_media
 
@@ -69,6 +76,38 @@ async def _get_scoped(db: DbDep, user: User, occurrence_id: uuid.UUID) -> ChoreO
 @router.get("/{occurrence_id}", response_model=OccurrenceOut)
 async def get_occurrence(occurrence_id: uuid.UUID, db: DbDep, user: CurrentUser) -> ChoreOccurrence:
     return await _get_scoped(db, user, occurrence_id)
+
+
+@router.get("/{occurrence_id}/verifications")
+async def occurrence_verifications(
+    occurrence_id: uuid.UUID, db: DbDep, user: CurrentUser
+) -> list[dict]:
+    """Verdicts newest-first. A child sees only the friendly message — never confidence
+    numbers or anti-cheat flags (spec §11); the raw model I/O is admin-only via
+    `/verifications/{id}`."""
+    await _get_scoped(db, user, occurrence_id)
+    rows = (
+        (
+            await db.execute(
+                select(Verification)
+                .where(Verification.occurrence_id == occurrence_id)
+                .order_by(Verification.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if user.role == UserRole.child:
+        return [
+            {
+                "verdict": str(v.verdict),
+                "child_message": v.child_message,
+                "image_quality_issue": v.image_quality_issue,
+                "created_at": v.created_at.isoformat(),
+            }
+            for v in rows
+        ]
+    return [VerificationOut.model_validate(v).model_dump(mode="json") for v in rows]
 
 
 @router.patch("/{occurrence_id}/assignee", response_model=OccurrenceOut)
