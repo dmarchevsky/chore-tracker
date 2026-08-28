@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     # --- General ------------------------------------------------------------
     tz: str = Field(default="America/Los_Angeles", alias="TZ")
     environment: str = Field(default="dev", alias="ENVIRONMENT")
+    # "json" (default) for structured audit logging (spec §5); "text" for local dev.
+    log_format: str = Field(default="json", alias="LOG_FORMAT")
     # Public origin the PWA + webhooks are reached at (spec §12.2).
     public_base_url: str = Field(default="http://localhost:8088", alias="PUBLIC_BASE_URL")
 

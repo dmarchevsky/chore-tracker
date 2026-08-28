@@ -9,9 +9,10 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from app import obs
 from app.worker.scheduler import run_forever
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+obs.configure_logging()
 log = logging.getLogger("chorekeeper.worker")
 
 

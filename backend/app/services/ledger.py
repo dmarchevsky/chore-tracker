@@ -16,6 +16,7 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import obs
 from app.models import ChoreOccurrence, LedgerEntry, LedgerKind, User
 
 _EARN_WHERE = text("kind IN ('earning','penalty')")
@@ -73,7 +74,9 @@ async def _insert_earn_kind(
             )
         ).scalar_one()
     await db.flush()
-    return await db.get(LedgerEntry, new_id)
+    entry = await db.get(LedgerEntry, new_id)
+    obs.log_ledger_entry(entry)
+    return entry
 
 
 async def credit_earning(
@@ -128,6 +131,7 @@ async def reverse_entry(
     db.add(comp)
     await db.flush()
     entry.reversed_by_entry_id = comp.id
+    obs.log_ledger_entry(comp)
     return comp
 
 
@@ -153,6 +157,7 @@ async def record_adjustment(
     )
     db.add(entry)
     await db.flush()
+    obs.log_ledger_entry(entry)
     return entry
 
 
@@ -185,6 +190,7 @@ async def record_payout(
     )
     db.add(entry)
     await db.flush()
+    obs.log_ledger_entry(entry)
 
     if covers_through is not None:
         lock_at = now or datetime.now(UTC)

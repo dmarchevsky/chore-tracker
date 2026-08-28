@@ -7,6 +7,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from app import obs
 from app.api.v1 import api_router
 from app.config import get_settings
 
@@ -33,6 +34,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 def create_app() -> FastAPI:
+    obs.configure_logging()
     settings = get_settings()
     app = FastAPI(
         title="ChoreKeeper API",
