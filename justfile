@@ -44,8 +44,8 @@ lint:
     cd {{backend}} && uv run ruff check . && uv run ruff format --check .
 
 # --- Later phases (placeholders) --------------------------------------
-eval:
-    @echo "Phase 4: run eval/ harness against the Phase 0 labeled set"
+eval *args:
+    cd {{backend}} && uv run python -m eval.run {{args}}
 
 backup:
     @echo "Phase 6: pg_dump + media rsync to TrueNAS"
