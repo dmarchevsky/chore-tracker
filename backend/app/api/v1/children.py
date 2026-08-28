@@ -13,11 +13,12 @@ from sqlalchemy import select
 
 from app.auth.deps import AdminUser, DbDep, require_self_or_admin
 from app.auth.passwords import hash_password
+from app.auth.sessions import revoke_user_sessions
 from app.config import get_settings
 from app.models import CheckinToken, Household, LedgerEntry, User, UserRole
 from app.schemas.ledger import BalanceOut, LedgerEntryOut
 from app.schemas.user import CheckinTokenOut, PasswordReset, UserCreate, UserOut, UserUpdate
-from app.services import checkin
+from app.services import audit, checkin
 from app.services.ledger import balance_cents
 
 router = APIRouter(prefix="/children", tags=["children"])
@@ -41,7 +42,7 @@ async def list_children(db: DbDep, _: AdminUser) -> list[User]:
 
 
 @router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-async def create_child(payload: UserCreate, db: DbDep, _: AdminUser) -> User:
+async def create_child(payload: UserCreate, db: DbDep, admin: AdminUser) -> User:
     if payload.role != UserRole.child:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "this endpoint creates child accounts")
     household = (await db.execute(select(Household).limit(1))).scalar_one()
@@ -59,6 +60,14 @@ async def create_child(payload: UserCreate, db: DbDep, _: AdminUser) -> User:
     )
     db.add(user)
     await db.flush()
+    await audit.record(
+        db,
+        actor=admin,
+        action="child.create",
+        entity_type="user",
+        entity_id=user.id,
+        after={"username": user.username, "display_name": user.display_name},
+    )
     return user
 
 
@@ -68,29 +77,51 @@ async def get_child(child_id: uuid.UUID, db: DbDep, _: AdminUser) -> User:
 
 
 @router.patch("/{child_id}", response_model=UserOut)
-async def update_child(child_id: uuid.UUID, payload: UserUpdate, db: DbDep, _: AdminUser) -> User:
+async def update_child(
+    child_id: uuid.UUID, payload: UserUpdate, db: DbDep, admin: AdminUser
+) -> User:
     user = await _get_child(db, child_id)
+    before = {"display_name": user.display_name, "is_active": user.is_active}
     if payload.display_name is not None:
         user.display_name = payload.display_name
     if payload.is_active is not None:
         user.is_active = payload.is_active
+    if not user.is_active:
+        await revoke_user_sessions(db, user.id)  # a disabled kid is logged out now
+    await audit.record(
+        db,
+        actor=admin,
+        action="child.update",
+        entity_type="user",
+        entity_id=user.id,
+        before=before,
+        after={"display_name": user.display_name, "is_active": user.is_active},
+    )
     return user
 
 
 @router.post("/{child_id}/password-reset", status_code=status.HTTP_204_NO_CONTENT)
 async def reset_child_password(
-    child_id: uuid.UUID, payload: PasswordReset, db: DbDep, _: AdminUser
+    child_id: uuid.UUID, payload: PasswordReset, db: DbDep, admin: AdminUser
 ) -> None:
     # spec §15 Q4 default: admin resets a kid's password from the panel, no email.
     user = await _get_child(db, child_id)
     user.password_hash = hash_password(payload.new_password)
+    await revoke_user_sessions(db, user.id)  # force re-login with the new password
+    await audit.record(
+        db, actor=admin, action="child.password_reset", entity_type="user", entity_id=user.id
+    )
 
 
 @router.delete("/{child_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def deactivate_child(child_id: uuid.UUID, db: DbDep, _: AdminUser) -> None:
+async def deactivate_child(child_id: uuid.UUID, db: DbDep, admin: AdminUser) -> None:
     # Soft disable — never delete, history hangs off this user (spec §4.1 `active`).
     user = await _get_child(db, child_id)
     user.is_active = False
+    await revoke_user_sessions(db, user.id)
+    await audit.record(
+        db, actor=admin, action="child.deactivate", entity_type="user", entity_id=user.id
+    )
 
 
 @router.get("/{child_id}/balance", response_model=BalanceOut)

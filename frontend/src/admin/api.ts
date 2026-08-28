@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Chore, LedgerEntry, Occurrence } from '../api/types';
+import type { Child, Chore, LedgerEntry, Occurrence } from '../api/types';
 
 export interface AdminSubmission {
   id: string;
@@ -102,10 +102,56 @@ export function useDeactivateChore() {
 }
 
 export const useChildren = () =>
-  useQuery({
-    queryKey: ['children'],
-    queryFn: () => api.get<{ id: string; display_name: string; is_active: boolean }[]>('/children'),
+  useQuery({ queryKey: ['children'], queryFn: () => api.get<Child[]>('/children') });
+
+const invalidateChildren = (qc: ReturnType<typeof useQueryClient>) =>
+  void qc.invalidateQueries({ queryKey: ['children'] });
+
+export function useCreateChild() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { username: string; display_name: string; password: string }) =>
+      api.post<Child>('/children', body),
+    onSuccess: () => invalidateChildren(qc),
   });
+}
+
+export function useUpdateChild() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string;
+      body: { display_name?: string; is_active?: boolean };
+    }) => api.patch<Child>(`/children/${id}`, body),
+    onSuccess: () => invalidateChildren(qc),
+  });
+}
+
+export function useResetChildPassword() {
+  return useMutation({
+    mutationFn: ({ id, new_password }: { id: string; new_password: string }) =>
+      api.post(`/children/${id}/password-reset`, { new_password }),
+  });
+}
+
+export function useDeactivateChild() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del(`/children/${id}`),
+    onSuccess: () => invalidateChildren(qc),
+  });
+}
+
+export function useRotateCheckinToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/children/${id}/checkin-token/rotate`),
+    onSuccess: (_d, id) => void qc.invalidateQueries({ queryKey: ['checkin-token', id] }),
+  });
+}
 
 export const useChildBalance = (childId: string) =>
   useQuery({

@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import func, select
+
+from app.auth import SESSION_COOKIE
+from app.models import AuditLog
 
 pytestmark = pytest.mark.asyncio
 
@@ -48,6 +52,79 @@ async def test_admin_creates_and_lists_child(client, admin_user, totp_now):
     assert dl.status_code == 204
     got = await client.get(f"/api/v1/children/{child_id}")
     assert got.json()["is_active"] is False
+
+
+async def test_create_omits_role_and_is_audited(client, admin_user, totp_now, db_session):
+    headers = await _admin_client(client, admin_user, totp_now)
+    r = await client.post(
+        "/api/v1/children",
+        json={"username": "dora", "display_name": "Dora", "password": "dora-pass"},
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text  # role defaults to child
+
+    n = (
+        await db_session.execute(
+            select(func.count()).select_from(AuditLog).where(AuditLog.action == "child.create")
+        )
+    ).scalar_one()
+    assert n == 1
+
+
+async def test_password_reset_revokes_the_childs_sessions(client, admin_user, totp_now):
+    headers = await _admin_client(client, admin_user, totp_now)
+    child_id = (
+        await client.post(
+            "/api/v1/children",
+            json={"username": "dora", "display_name": "Dora", "password": "dora-pass"},
+            headers=headers,
+        )
+    ).json()["id"]
+
+    client.cookies.clear()
+    assert (
+        await client.post("/api/v1/auth/login", json={"username": "dora", "password": "dora-pass"})
+    ).status_code == 200
+    child_cookie = client.cookies.get(SESSION_COOKIE)
+    assert (await client.get("/api/v1/auth/me")).status_code == 200
+
+    headers = await _admin_client(client, admin_user, totp_now)
+    rp = await client.post(
+        f"/api/v1/children/{child_id}/password-reset",
+        json={"new_password": "brand-new-pass"},
+        headers=headers,
+    )
+    assert rp.status_code == 204
+
+    client.cookies.clear()
+    client.cookies.set(SESSION_COOKIE, child_cookie)
+    assert (await client.get("/api/v1/auth/me")).status_code == 401
+
+
+async def test_deactivate_blocks_login_and_is_audited(client, admin_user, totp_now, db_session):
+    headers = await _admin_client(client, admin_user, totp_now)
+    child_id = (
+        await client.post(
+            "/api/v1/children",
+            json={"username": "dora", "display_name": "Dora", "password": "dora-pass"},
+            headers=headers,
+        )
+    ).json()["id"]
+
+    assert (await client.delete(f"/api/v1/children/{child_id}", headers=headers)).status_code == 204
+
+    client.cookies.clear()
+    blocked = await client.post(
+        "/api/v1/auth/login", json={"username": "dora", "password": "dora-pass"}
+    )
+    assert blocked.status_code == 401
+
+    n = (
+        await db_session.execute(
+            select(func.count()).select_from(AuditLog).where(AuditLog.action == "child.deactivate")
+        )
+    ).scalar_one()
+    assert n == 1
 
 
 async def test_child_cannot_list_children(client, child_user):

@@ -15,7 +15,7 @@ export function Money() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
-        <h1 className="text-lg font-bold">Kids &amp; money</h1>
+        <h1 className="text-lg font-bold">Money</h1>
         <select
           className="inp max-w-xs"
           value={childId}

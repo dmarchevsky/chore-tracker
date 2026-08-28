@@ -1,5 +1,14 @@
 export type Role = 'admin' | 'child';
 
+export interface Child {
+  id: string;
+  username: string;
+  display_name: string;
+  role: Role;
+  is_active: boolean;
+  totp_enrolled: boolean;
+}
+
 export interface Me {
   id: string;
   username: string;

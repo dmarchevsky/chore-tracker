@@ -11,7 +11,8 @@ from app.models import UserRole
 class UserCreate(BaseModel):
     username: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_.-]+$")
     display_name: str = Field(min_length=1, max_length=120)
-    role: UserRole
+    # This endpoint only mints child accounts (spec §4.3); default so callers can omit it.
+    role: UserRole = UserRole.child
     password: str = Field(min_length=4, max_length=256)
 
 

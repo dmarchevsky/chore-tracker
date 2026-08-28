@@ -6,7 +6,7 @@ import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -63,3 +63,14 @@ async def revoke_session(db: AsyncSession, session_id: str) -> None:
     row = await db.get(SessionRow, sid)
     if row is not None and row.revoked_at is None:
         row.revoked_at = _now()
+
+
+async def revoke_user_sessions(db: AsyncSession, user_id: uuid.UUID) -> int:
+    """Revoke every live session for a user — on deactivation or a password reset."""
+    result = await db.execute(
+        update(SessionRow)
+        .where(SessionRow.user_id == user_id, SessionRow.revoked_at.is_(None))
+        .values(revoked_at=_now())
+        .execution_options(synchronize_session=False)
+    )
+    return result.rowcount or 0
