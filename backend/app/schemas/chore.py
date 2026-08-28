@@ -155,3 +155,9 @@ class OccurrencePreviewItem(BaseModel):
     due_at: datetime
     window_open_at: datetime
     assignee_id: uuid.UUID | None
+
+
+class AssigneeSwap(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    assignee_id: uuid.UUID | None = None
