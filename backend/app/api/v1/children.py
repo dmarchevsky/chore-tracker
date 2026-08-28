@@ -13,9 +13,11 @@ from sqlalchemy import select
 
 from app.auth.deps import AdminUser, DbDep, require_self_or_admin
 from app.auth.passwords import hash_password
-from app.models import Household, LedgerEntry, User, UserRole
+from app.config import get_settings
+from app.models import CheckinToken, Household, LedgerEntry, User, UserRole
 from app.schemas.ledger import BalanceOut, LedgerEntryOut
-from app.schemas.user import PasswordReset, UserCreate, UserOut, UserUpdate
+from app.schemas.user import CheckinTokenOut, PasswordReset, UserCreate, UserOut, UserUpdate
+from app.services import checkin
 from app.services.ledger import balance_cents
 
 router = APIRouter(prefix="/children", tags=["children"])
@@ -152,3 +154,29 @@ async def get_ledger_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="ledger-{child_id}.csv"'},
     )
+
+
+def _token_out(row: CheckinToken) -> CheckinTokenOut:
+    base = get_settings().public_base_url.rstrip("/")
+    stale = (
+        row.last_used_at is None
+        or (datetime.now(row.last_used_at.tzinfo) - row.last_used_at).total_seconds() > 48 * 3600
+    )
+    return CheckinTokenOut(
+        token=row.token,
+        webhook_url=f"{base}/api/v1/checkin/{row.token}",
+        last_used_at=row.last_used_at,
+        stale=stale,
+    )
+
+
+@router.get("/{child_id}/checkin-token", response_model=CheckinTokenOut)
+async def get_checkin_token(child_id: uuid.UUID, db: DbDep, _: AdminUser) -> CheckinTokenOut:
+    child = await _get_child(db, child_id)
+    return _token_out(await checkin.get_or_create_token(db, child))
+
+
+@router.post("/{child_id}/checkin-token/rotate", response_model=CheckinTokenOut)
+async def rotate_checkin_token(child_id: uuid.UUID, db: DbDep, _: AdminUser) -> CheckinTokenOut:
+    child = await _get_child(db, child_id)
+    return _token_out(await checkin.rotate_token(db, child))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -33,3 +34,10 @@ class UserOut(BaseModel):
     role: UserRole
     is_active: bool
     totp_enrolled: bool
+
+
+class CheckinTokenOut(BaseModel):
+    token: str
+    webhook_url: str
+    last_used_at: datetime | None
+    stale: bool

@@ -1,6 +1,7 @@
 """SQLAlchemy models. Import every module here so Alembic autogenerate sees them."""
 
 from app.models.audit import AuditLog
+from app.models.checkin import CheckinToken
 from app.models.chore import AssignmentMode, Chore, ProofType, VerificationMode
 from app.models.household import Household
 from app.models.job import JobState, VerificationJob
@@ -27,6 +28,7 @@ __all__ = [
     "TERMINAL",
     "AssignmentMode",
     "AuditLog",
+    "CheckinToken",
     "Chore",
     "ChoreOccurrence",
     "Household",

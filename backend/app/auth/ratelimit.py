@@ -22,6 +22,22 @@ class _AccountState:
 
 _ip_hits: dict[str, deque[float]] = defaultdict(deque)
 _accounts: dict[str, _AccountState] = defaultdict(_AccountState)
+_token_hits: dict[str, deque[float]] = defaultdict(deque)
+
+_TOKEN_WINDOW_S = 3600
+_TOKEN_MAX = 20  # spec §6.2
+
+
+def token_allowed(token: str, *, now: float | None = None) -> bool:
+    """20 check-in webhook calls per hour per token (spec §6.2)."""
+    now = now if now is not None else time.monotonic()
+    hits = _token_hits[token]
+    while hits and now - hits[0] > _TOKEN_WINDOW_S:
+        hits.popleft()
+    if len(hits) >= _TOKEN_MAX:
+        return False
+    hits.append(now)
+    return True
 
 
 def ip_allowed(ip: str, *, now: float | None = None) -> bool:
@@ -58,3 +74,4 @@ def reset() -> None:
     """Test helper."""
     _ip_hits.clear()
     _accounts.clear()
+    _token_hits.clear()
