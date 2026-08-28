@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 import pytest
+
 from app.services.rotation import (
     RotationError,
     RotationPeriod,
