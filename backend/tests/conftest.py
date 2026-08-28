@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 
 import pytest
 import pytest_asyncio
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("SESSION_SECRET", "test-secret")
+os.environ.setdefault("MEDIA_ROOT", tempfile.mkdtemp(prefix="ck-media-"))
 
 from app.auth import ratelimit
 from app.auth.passwords import hash_password
