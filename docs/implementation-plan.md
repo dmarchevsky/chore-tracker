@@ -5,7 +5,7 @@
 - **Phase 0 — VLM bake-off:** not started
 - **Phase 1 — Core skeleton:** ✅ done (baseline commit)
 - **Phase 2 — Chores & scheduler:** ✅ done
-- **Phase 3 — Submissions & manual verification:** not started
+- **Phase 3 — Submissions & manual verification:** ✅ done
 - **Phase 4 — LLM verification:** not started
 - **Phase 5 — Kid PWA:** not started
 - **Phase 6 — Hardening & operations:** not started
@@ -189,12 +189,23 @@ Original work items (for reference):
 
 ---
 
-## Phase 3 — Submissions & manual verification
+## Phase 3 — Submissions & manual verification  ✅ done
 
 **Goal:** full loop end-to-end with `verification_mode: manual` — phone photo → admin inbox →
 approve credits the exact amount **exactly once**; double-approve does not double-pay.
 
-Work items:
+**Accepted:** migration `0003` (`submissions` + `submission_media`, `verifications`,
+`ledger_entries` with the partial exactly-once index); `media.py` ingest pipeline
+(EXIF, orient, 1568px, JPEG q85, sha256 + dHash, content-addressed) + HMAC-signed
+5-minute media URLs served only through the authz'd API; `ledger.py`
+(credit/debit/reverse/adjust/payout, exactly-once, late multiplier, settlement lock);
+`review.py` state-machine orchestration for `POST /occurrences/{id}/submissions`,
+`/decision`, `/dispute` + `?inbox=true`; `geo.py` check-in math; `/payouts` +
+`/children/{id}/balance` `/ledger` `/ledger.csv`; seed grows 30 days of mixed-state
+occurrences. `just test` green (98 tests). Shipped over 6 feature branches.
+`llm_auto`/`llm_assist` currently route to SUBMITTED; Phase 4 takes them over.
+
+Original work items (for reference):
 1. Migration `0003`: `submissions`, `verifications`, `ledger_entries`
    (partial unique index on `(occurrence_id, kind) where kind in ('earning','penalty')`),
    payout rows via `ledger_entries` kind `payout`.
