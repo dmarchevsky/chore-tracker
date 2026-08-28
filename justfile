@@ -52,3 +52,19 @@ backup:
 
 restore:
     @echo "Phase 6: restore from last night's backup"
+
+# --- Frontend (PWA) --------------------------------------------------
+web-install:
+    cd frontend && npm ci
+
+web-dev:
+    cd frontend && npm run dev
+
+web-build:
+    cd frontend && npm run build
+
+web-lint:
+    cd frontend && npm run lint && npm run typecheck
+
+web-test *args:
+    cd frontend && npm run test {{args}}

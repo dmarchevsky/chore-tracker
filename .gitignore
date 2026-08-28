@@ -8,5 +8,6 @@ __pycache__/
 data/
 node_modules/
 dist/
+dev-dist/
 .worktrees/
 backend/eval/labeled/
