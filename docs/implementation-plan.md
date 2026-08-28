@@ -4,7 +4,7 @@
 
 - **Phase 0 — VLM bake-off:** not started
 - **Phase 1 — Core skeleton:** ✅ done (baseline commit)
-- **Phase 2 — Chores & scheduler:** not started
+- **Phase 2 — Chores & scheduler:** ✅ done
 - **Phase 3 — Submissions & manual verification:** not started
 - **Phase 4 — LLM verification:** not started
 - **Phase 5 — Kid PWA:** not started
@@ -151,12 +151,19 @@ green from a clean clone (13 tests). API on host **:8088**.
 
 ---
 
-## Phase 2 — Chores & scheduler
+## Phase 2 — Chores & scheduler  ✅ done
 
 **Goal:** the four brief chores configurable via API; 14-day horizon generates correct
 occurrences incl. biweekly rotation; idempotent; DST + month-boundary unit tests.
 
-Work items:
+**Accepted:** migration `0002` (`chores`, `chore_occurrences`); `cadence.py` +
+`rotation.py` (DST-safe, monthly clamp, biweekly = Alice/Alice/Bea/Bea);
+`scheduler.py` stateless reconcile (generate / open_due_windows / detect_missed) wired
+into the worker loop; chores CRUD + `/chores/preview` + `/occurrences` list +
+`/occurrences/{id}/assignee` swap with audit; seed grows the four brief chores.
+`just test` green (69 tests). Shipped over 4 feature branches.
+
+Original work items (for reference):
 1. Migration `0002`: `chores` (all §4.1 fields), `chore_occurrences`
    (`unique(chore_id, due_at, assignee_id)`, status enum, `was_late`, `settlement_locked_at`).
 2. `app/services/cadence.py` — parse `daily|weekdays|weekends|weekly(on=[…])|monthly(day=N)|custom_rule`
