@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: chore
+          POSTGRES_PASSWORD: chore
+          POSTGRES_DB: chore
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chore -d chore"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgresql+asyncpg://chore:chore@localhost:5432/chore
+      TEST_DATABASE_URL: postgresql+asyncpg://chore:chore@localhost:5432/chore_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.32"
+      - run: uv python install 3.12
+      - run: uv sync --frozen
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Migrations apply cleanly
+        run: uv run alembic upgrade head
+      - name: Tests
+        run: uv run pytest -q

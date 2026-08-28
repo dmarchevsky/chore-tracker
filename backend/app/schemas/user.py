@@ -1,0 +1,35 @@
+from __future__ import annotations
+
+import uuid
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.models import UserRole
+
+
+class UserCreate(BaseModel):
+    username: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_.-]+$")
+    display_name: str = Field(min_length=1, max_length=120)
+    role: UserRole
+    password: str = Field(min_length=4, max_length=256)
+
+
+class UserUpdate(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=120)
+    is_active: bool | None = None
+
+
+class PasswordReset(BaseModel):
+    # Admin resets a kid's password from the panel (spec §15 Q4 default).
+    new_password: str = Field(min_length=4, max_length=256)
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    username: str
+    display_name: str
+    role: UserRole
+    is_active: bool
+    totp_enrolled: bool

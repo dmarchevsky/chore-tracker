@@ -1,0 +1,51 @@
+[project]
+name = "chorekeeper"
+version = "0.1.0"
+description = "Self-hosted chore tracking & local-VLM proof verification"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "pydantic>=2.10",
+    "pydantic-settings>=2.6",
+    "argon2-cffi>=23.1",
+    "pyotp>=2.9",
+    "python-multipart>=0.0.12",
+    "httpx>=0.28",
+    "pillow>=11.0",
+    "itsdangerous>=2.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "respx>=0.21",
+    "ruff>=0.8",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["app", "tests"]
+extend-exclude = ["migrations/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "C4", "PIE", "RUF"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+pythonpath = ["."]
+testpaths = ["tests"]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:passlib",
+]
