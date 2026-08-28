@@ -24,7 +24,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://chore:chore@db:5432/chore
       MEDIA_ROOT: /data/media
       SESSION_SECRET: dev-insecure-change-me
-      LLM_VISION_BASE_URL: http://llm-vision:8081/v1
+      LLM_VISION_BASE_URL: ${LLM_VISION_BASE_URL:-http://llm-vision:8081/v1}
+      LLM_VISION_MODEL: ${LLM_VISION_MODEL:-}
+      LLM_VISION_API_KEY: ${LLM_VISION_API_KEY:-not-needed}
       TZ: America/Los_Angeles
     depends_on:
       db:
@@ -44,7 +46,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://chore:chore@db:5432/chore
       MEDIA_ROOT: /data/media
       SESSION_SECRET: dev-insecure-change-me
-      LLM_VISION_BASE_URL: http://llm-vision:8081/v1
+      LLM_VISION_BASE_URL: ${LLM_VISION_BASE_URL:-http://llm-vision:8081/v1}
+      LLM_VISION_MODEL: ${LLM_VISION_MODEL:-}
+      LLM_VISION_API_KEY: ${LLM_VISION_API_KEY:-not-needed}
       TZ: America/Los_Angeles
     depends_on:
       db:

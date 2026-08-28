@@ -14,6 +14,7 @@ from app.models.occurrence import (
     OccurrenceStatus,
 )
 from app.models.session import Session
+from app.models.settings import HouseholdSettings
 from app.models.submission import (
     Submission,
     SubmissionKind,
@@ -33,6 +34,7 @@ __all__ = [
     "Chore",
     "ChoreOccurrence",
     "Household",
+    "HouseholdSettings",
     "JobState",
     "LedgerEntry",
     "LedgerKind",

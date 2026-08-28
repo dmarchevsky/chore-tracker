@@ -15,6 +15,7 @@ import httpx
 from pydantic import BaseModel, Field, ValidationError
 
 from app.config import Settings, get_settings
+from app.services.llm_config import LlmConfig
 from app.services.verification.prompts import RESPONSE_SCHEMA, SYSTEM_PROMPT
 
 TEMPERATURE = 0.1
@@ -69,24 +70,29 @@ async def run_vision(
     *,
     task_prompt: str,
     images: list[bytes],
+    config: LlmConfig | None = None,
     settings: Settings | None = None,
 ) -> tuple[ModelResponse, dict, dict]:
-    """Return (parsed, raw_request, raw_response). Raises LLMError on any infra failure."""
-    s = settings or get_settings()
+    """Return (parsed, raw_request, raw_response). Raises LLMError on any infra failure.
+
+    ``config`` (DB-resolved, spec §7.2) takes precedence; ``settings`` is the env-only
+    fallback kept for callers without a DB session.
+    """
+    cfg = config or LlmConfig.from_settings(settings or get_settings())
     user_content: list[dict] = [{"type": "text", "text": task_prompt}]
     user_content += [{"type": "image_url", "image_url": {"url": _data_url(b)}} for b in images]
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
-    body = _payload(s.llm_vision_model, messages)
-    url = s.llm_vision_base_url.rstrip("/") + "/chat/completions"
-    headers = {"Authorization": f"Bearer {s.llm_vision_api_key}"}
+    body = _payload(cfg.model, messages)
+    url = cfg.base_url.rstrip("/") + "/chat/completions"
+    headers = {"Authorization": f"Bearer {cfg.api_key}"}
 
     raw_request = {**body, "messages": _redact(messages)}
 
     try:
-        async with httpx.AsyncClient(timeout=s.llm_timeout_s) as client:
+        async with httpx.AsyncClient(timeout=cfg.timeout_s) as client:
             raw = await _post_and_read(client, url, headers, body)
             try:
                 return _parse(raw["_content"]), raw_request, raw
@@ -95,9 +101,7 @@ async def run_vision(
             # one repair round (spec §7.2)
             messages.append({"role": "assistant", "content": raw["_content"]})
             messages.append({"role": "user", "content": _REPAIR})
-            raw2 = await _post_and_read(
-                client, url, headers, _payload(s.llm_vision_model, messages)
-            )
+            raw2 = await _post_and_read(client, url, headers, _payload(cfg.model, messages))
             try:
                 return _parse(raw2["_content"]), raw_request, raw2
             except (ValidationError, ValueError, json.JSONDecodeError) as exc:

@@ -19,7 +19,6 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.models import (
     Chore,
     ChoreOccurrence,
@@ -31,6 +30,7 @@ from app.models import (
 from app.models.chore import VerificationMode
 from app.models.verification import Verdict, Verification
 from app.services import anti_cheat, ledger, notifications
+from app.services.llm_config import get_llm_config
 from app.services.media import read_media
 from app.services.verification import build_task_prompt, derive_verdict, run_vision
 from app.services.verification.llm import LLMError
@@ -99,9 +99,12 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
         checks=checks,
     )
 
+    cfg = await get_llm_config(db)
     try:
         images = [read_media(m.storage_path) for m in media_rows]
-        response, raw_req, raw_resp = await run_vision(task_prompt=prompt, images=images)
+        response, raw_req, raw_resp = await run_vision(
+            task_prompt=prompt, images=images, config=cfg
+        )
     except LLMError as exc:
         v = _write_verification(
             db,
@@ -109,7 +112,7 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
             sub,
             Verdict.error,
             reasoning=str(exc),
-            model_name=get_settings().llm_vision_model,
+            model_name=cfg.model,
         )
         occ.status = OccurrenceStatus.needs_review
         occ.verification_error = str(exc)[:200]
@@ -137,7 +140,7 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
         child_message=result.child_message,
         checks=result.checks,
         image_quality_issue=result.image_quality_issue,
-        model_name=get_settings().llm_vision_model,
+        model_name=cfg.model,
         raw_request=raw_req,
         raw_response=raw_resp,
     )

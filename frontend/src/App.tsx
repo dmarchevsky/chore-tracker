@@ -14,6 +14,7 @@ import { Chores } from './admin/Chores';
 import { Kids } from './admin/Kids';
 import { Money as AdminMoney } from './admin/Money';
 import { Jobs } from './admin/Jobs';
+import { Settings } from './admin/Settings';
 
 const qc = new QueryClient({
   defaultOptions: { queries: { staleTime: 15_000, retry: 1, refetchOnWindowFocus: false } },
@@ -49,6 +50,7 @@ function Shell() {
           <Route path="kids" element={<Kids />} />
           <Route path="money" element={<AdminMoney />} />
           <Route path="jobs" element={<Jobs />} />
+          <Route path="settings" element={<Settings />} />
         </Route>
       )}
       <Route path="*" element={<Navigate to={home} replace />} />

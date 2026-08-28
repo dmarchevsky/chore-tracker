@@ -194,6 +194,58 @@ export interface JobsDashboard {
 export const useJobsDashboard = () =>
   useQuery({ queryKey: ['admin-jobs'], queryFn: () => api.get<JobsDashboard>('/admin/jobs') });
 
+export interface AdminSettings {
+  llm: {
+    base_url: string;
+    model: string;
+    api_key_set: boolean;
+    timeout_s: number;
+    max_retries: number;
+  };
+  verification: { auto_pass_threshold: number; auto_fail_threshold: number };
+  source: Record<string, 'db' | 'env'>;
+}
+
+export type SettingsPatch = Partial<{
+  llm_base_url: string | null;
+  llm_model: string | null;
+  llm_api_key: string | null;
+  llm_timeout_s: number | null;
+  llm_max_retries: number | null;
+  auto_pass_threshold: number | null;
+  auto_fail_threshold: number | null;
+}>;
+
+export const useSettings = () =>
+  useQuery({ queryKey: ['settings'], queryFn: () => api.get<AdminSettings>('/admin/settings') });
+
+export function useUpdateSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SettingsPatch) => api.patch<AdminSettings>('/admin/settings', body),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['settings'] }),
+  });
+}
+
+export interface LlmModels {
+  reachable: boolean;
+  models: string[];
+  error?: string;
+  status_code?: number;
+}
+
+export function useLlmModels(baseUrl: string, apiKey: string) {
+  return useQuery({
+    enabled: false, // probe on demand via refetch()
+    queryKey: ['llm-models', baseUrl],
+    queryFn: () => {
+      const qs = new URLSearchParams({ base_url: baseUrl });
+      if (apiKey) qs.set('api_key', apiKey);
+      return api.get<LlmModels>(`/admin/llm/models?${qs.toString()}`);
+    },
+  });
+}
+
 export const useCheckinToken = (childId: string) =>
   useQuery({
     enabled: !!childId,

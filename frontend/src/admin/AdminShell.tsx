@@ -7,6 +7,7 @@ const tabs = [
   { to: '/admin/kids', label: 'Kids' },
   { to: '/admin/money', label: 'Money' },
   { to: '/admin/jobs', label: 'Ops' },
+  { to: '/admin/settings', label: 'Settings' },
 ];
 
 export function AdminShell() {
