@@ -6,7 +6,7 @@
 - **Phase 1 — Core skeleton:** ✅ done (baseline commit)
 - **Phase 2 — Chores & scheduler:** ✅ done
 - **Phase 3 — Submissions & manual verification:** ✅ done
-- **Phase 4 — LLM verification:** not started
+- **Phase 4 — LLM verification:** ✅ done
 - **Phase 5 — Kid PWA:** not started
 - **Phase 6 — Hardening & operations:** not started
 - **Phase 7 — Nice-to-haves:** backlog
@@ -237,12 +237,21 @@ not double-pay.
 
 ---
 
-## Phase 4 — LLM verification
+## Phase 4 — LLM verification  ✅ done
 
 **Goal:** auto-pass and auto-fail both work end to end; killing the LLM container routes new
 submissions to `NEEDS_REVIEW` with an error note and **zero** incorrect ledger entries.
 
-Work items:
+**Accepted:** migration `0004` (`verification_jobs` + occurrence `prompt_token` /
+`verification_error`); `queue.py` (FOR UPDATE SKIP LOCKED, retry-to-3-then-park,
+requeue-stuck); `anti_cheat.py` (dHash dedup over 120 d, EXIF staleness, NO_EXIF,
+screenshot heuristic); `verification/` package (prompts + schema from §7.3, httpx client
+with one repair retry, verdict banding); `worker/verify.py` pipeline wired into the
+minute tick; `just eval` calibration harness. `llm_auto` auto-terminates, `llm_assist`
+always routes to review, infra errors fail open with no ledger write. `just test` green
+(132 tests). Shipped over 5 feature branches.
+
+Original work items (for reference):
 1. Migration `0004`: `verification_jobs` (state, attempts, `locked_at`).
 2. `app/worker/queue.py` — claim jobs with `FOR UPDATE SKIP LOCKED`; retry policy; requeue
    rows `running` > 10 min on startup.
