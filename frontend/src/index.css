@@ -12,3 +12,9 @@ body {
   @apply bg-slate-950 text-slate-100 antialiased;
   -webkit-tap-highlight-color: transparent;
 }
+
+@layer components {
+  .inp {
+    @apply w-full rounded-lg bg-slate-800 p-2 text-sm;
+  }
+}

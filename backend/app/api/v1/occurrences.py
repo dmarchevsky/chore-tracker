@@ -110,6 +110,38 @@ async def occurrence_verifications(
     return [VerificationOut.model_validate(v).model_dump(mode="json") for v in rows]
 
 
+@router.get("/{occurrence_id}/submissions", response_model=list[SubmissionOut])
+async def occurrence_submissions(
+    occurrence_id: uuid.UUID, db: DbDep, user: CurrentUser
+) -> list[dict]:
+    """All attempts for an occurrence, newest-first, with signed media URLs (spec §4.2)."""
+    from sqlalchemy.orm import selectinload
+
+    from app.models import Submission
+    from app.services.media import sign_media
+
+    await _get_scoped(db, user, occurrence_id)
+    subs = (
+        (
+            await db.execute(
+                select(Submission)
+                .where(Submission.occurrence_id == occurrence_id)
+                .options(selectinload(Submission.media))
+                .order_by(Submission.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    out = []
+    for s in subs:
+        data = SubmissionOut.model_validate(s).model_dump(mode="json")
+        for m in data["media"]:
+            m["url"] = sign_media(str(s.id), m["idx"])
+        out.append(data)
+    return out
+
+
 @router.patch("/{occurrence_id}/assignee", response_model=OccurrenceOut)
 async def swap_assignee(
     occurrence_id: uuid.UUID, body: AssigneeSwap, db: DbDep, admin: AdminUser

@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    admin_jobs,
     auth,
     checkin,
     children,
@@ -21,4 +22,5 @@ api_router.include_router(submissions.router)
 api_router.include_router(payouts.router)
 api_router.include_router(checkin.router)
 api_router.include_router(push.router)
+api_router.include_router(admin_jobs.router)
 api_router.include_router(health.router)
