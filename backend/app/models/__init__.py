@@ -6,6 +6,7 @@ from app.models.chore import AssignmentMode, Chore, ProofType, VerificationMode
 from app.models.household import Household
 from app.models.job import JobState, VerificationJob
 from app.models.ledger import EARN_KINDS, LedgerEntry, LedgerKind
+from app.models.notification import NotificationLog, PushSubscription
 from app.models.occurrence import (
     SUBMITTABLE,
     TERMINAL,
@@ -35,8 +36,10 @@ __all__ = [
     "JobState",
     "LedgerEntry",
     "LedgerKind",
+    "NotificationLog",
     "OccurrenceStatus",
     "ProofType",
+    "PushSubscription",
     "Session",
     "Submission",
     "SubmissionKind",

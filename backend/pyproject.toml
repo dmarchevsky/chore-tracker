@@ -17,6 +17,7 @@ dependencies = [
     "httpx>=0.28",
     "pillow>=11.0",
     "itsdangerous>=2.2",
+    "pywebpush>=2.4.0",
 ]
 
 [dependency-groups]

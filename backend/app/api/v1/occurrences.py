@@ -21,7 +21,7 @@ from app.models import (
 from app.models.occurrence import SUBMITTABLE, TERMINAL
 from app.schemas.chore import AssigneeSwap, OccurrenceOut
 from app.schemas.submission import DecisionRequest, DisputeRequest, GeoIn, SubmissionOut
-from app.services import audit, review
+from app.services import audit, notifications, review
 from app.services.media import sign_media
 
 router = APIRouter(prefix="/occurrences", tags=["occurrences"])
@@ -203,4 +203,5 @@ async def dispute(
         entity_id=occ.id,
         after={"message": body.message, "status_at_dispute": occ.status},
     )
+    await notifications.notify_dispute(db, occ, body.message)
     return {"status": "filed"}

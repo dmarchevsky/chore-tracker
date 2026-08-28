@@ -30,7 +30,7 @@ from app.models import (
 )
 from app.models.chore import VerificationMode
 from app.models.verification import Verdict, Verification
-from app.services import anti_cheat, ledger
+from app.services import anti_cheat, ledger, notifications
 from app.services.media import read_media
 from app.services.verification import build_task_prompt, derive_verdict, run_vision
 from app.services.verification.llm import LLMError
@@ -103,7 +103,7 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
         images = [read_media(m.storage_path) for m in media_rows]
         response, raw_req, raw_resp = await run_vision(task_prompt=prompt, images=images)
     except LLMError as exc:
-        _write_verification(
+        v = _write_verification(
             db,
             occ,
             sub,
@@ -114,6 +114,8 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
         occ.status = OccurrenceStatus.needs_review
         occ.verification_error = str(exc)[:200]
         await queue.complete(db, job)  # a human handles it; not a job-level retry
+        await notifications.notify_verdict(db, occ, v)
+        await notifications.notify_needs_review(db, occ)
         log.warning("verify job %s: LLM error -> NEEDS_REVIEW: %s", job.id, exc)
         return
 
@@ -125,7 +127,7 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
         flags=list(sub.flags),
     )
 
-    _write_verification(
+    v = _write_verification(
         db,
         occ,
         sub,
@@ -141,6 +143,9 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
     )
     await _apply_outcome(db, occ, mode, result.outcome)
     await queue.complete(db, job)
+    await notifications.notify_verdict(db, occ, v)
+    if occ.status == OccurrenceStatus.needs_review:
+        await notifications.notify_needs_review(db, occ)
     log.info("verify job %s -> %s (conf %.2f)", job.id, result.outcome, result.confidence)
 
 

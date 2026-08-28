@@ -26,7 +26,7 @@ from app.models import (
 )
 from app.models.chore import ProofType, VerificationMode
 from app.models.verification import Verdict, Verification
-from app.services import audit, ledger
+from app.services import audit, ledger, notifications
 from app.services.geo import evaluate_checkin
 from app.services.media import ingest_photo
 
@@ -136,21 +136,25 @@ async def route_submission(
 
     if submission.flags:  # any anti-cheat / quality flag -> human looks (spec §6.1)
         occurrence.status = OccurrenceStatus.needs_review
+        await notifications.notify_needs_review(db, occurrence)
         return
 
     if mode is VerificationMode.auto_accept:
         if submission.kind is SubmissionKind.location and submission.geo_within is False:
             occurrence.status = OccurrenceStatus.needs_review
+            await notifications.notify_needs_review(db, occurrence)
             return
-        await _record_verification(
+        v = await _record_verification(
             db, occurrence, submission, Verdict.pass_, "auto-accepted", by="system"
         )
         occurrence.status = OccurrenceStatus.verified_pass
         await ledger.credit_earning(db, occurrence=occurrence, reason="auto-accepted")
+        await notifications.notify_verdict(db, occurrence, v)
         return
 
     # manual -> waits for a human; llm_* -> waits for the verification worker (spec §7.1).
     occurrence.status = OccurrenceStatus.submitted
+    await notifications.notify_needs_review(db, occurrence)
     if mode in _LLM_MODES:
         from app.worker.queue import enqueue
 
@@ -207,7 +211,7 @@ async def apply_decision(
     else:  # pragma: no cover - schema enum guards this
         raise SubmissionError(f"unknown action {action!r}")
 
-    await _record_verification(db, occurrence, None, verdict, reason, by="user", actor=admin)
+    v = await _record_verification(db, occurrence, None, verdict, reason, by="user", actor=admin)
     await audit.record(
         db,
         actor=admin,
@@ -217,6 +221,10 @@ async def apply_decision(
         before={"status": before},
         after={"status": occurrence.status, "amount_override_cents": amount_override_cents},
     )
+    if action == "redo":
+        await notifications.notify_redo(db, occurrence, reason)
+    else:
+        await notifications.notify_verdict(db, occurrence, v)
 
 
 async def _earn_entries(db: AsyncSession, occurrence_id) -> list[LedgerEntry]:
