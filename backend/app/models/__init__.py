@@ -3,6 +3,7 @@
 from app.models.audit import AuditLog
 from app.models.chore import AssignmentMode, Chore, ProofType, VerificationMode
 from app.models.household import Household
+from app.models.job import JobState, VerificationJob
 from app.models.ledger import EARN_KINDS, LedgerEntry, LedgerKind
 from app.models.occurrence import (
     SUBMITTABLE,
@@ -29,6 +30,7 @@ __all__ = [
     "Chore",
     "ChoreOccurrence",
     "Household",
+    "JobState",
     "LedgerEntry",
     "LedgerKind",
     "OccurrenceStatus",
@@ -42,6 +44,7 @@ __all__ = [
     "UserRole",
     "Verdict",
     "Verification",
+    "VerificationJob",
     "VerificationKind",
     "VerificationMode",
 ]

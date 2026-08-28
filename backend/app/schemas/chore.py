@@ -149,6 +149,8 @@ class OccurrenceOut(BaseModel):
     settlement_locked_at: datetime | None
     reward_cents: int
     penalty_cents: int
+    prompt_token: str | None = None
+    verification_error: str | None = None
 
 
 class OccurrencePreviewItem(BaseModel):
