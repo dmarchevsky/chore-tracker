@@ -82,8 +82,12 @@ async def get_media(
     media = next((m for m in sub.media if m.idx == idx), None)
     if media is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "media not found")
+    # After retention pruning only the 256px thumbnail survives (spec §14 Q2).
+    path = media.thumbnail_path if media.original_deleted_at else media.storage_path
+    if path is None:
+        raise HTTPException(status.HTTP_410_GONE, "media pruned by retention policy")
     try:
-        data = read_media(media.storage_path)
+        data = read_media(path)
     except MediaError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 

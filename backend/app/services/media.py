@@ -25,6 +25,7 @@ from PIL import Image, ImageOps
 from app.config import get_settings
 
 MAX_LONG_EDGE = 1568
+THUMB_LONG_EDGE = 256  # retained after the original is pruned (spec §14 Q2)
 JPEG_QUALITY = 85
 DEFAULT_URL_TTL_S = 300  # 5 minutes (spec §10)
 
@@ -127,13 +128,56 @@ def ingest_photo(raw: bytes, *, household_id: str, now: datetime | None = None) 
 
 
 def read_media(storage_path: str) -> bytes:
+    return _resolve_under_root(storage_path).read_bytes()
+
+
+def _resolve_under_root(storage_path: str) -> Path:
     root = _media_root().resolve()
     full = (root / storage_path).resolve()
     if not full.is_relative_to(root):
         raise MediaError("path escapes MEDIA_ROOT")
     if not full.is_file():
         raise MediaError("media not found")
-    return full.read_bytes()
+    return full
+
+
+def thumb_storage_path(storage_path: str) -> str:
+    """Content-addressed thumbnail path derived from the original's sha256 stem."""
+    p = Path(storage_path)
+    household = p.parts[0] if len(p.parts) > 1 else ""
+    sha = p.stem
+    return f"{household}/thumbs/{sha[:2]}/{sha}.jpg"
+
+
+def write_thumbnail(storage_path: str) -> str:
+    """Render a <=256px JPEG from the stored original and persist it; return its rel path.
+
+    Called by the retention job just before the original is deleted (spec §14 Q2).
+    """
+    raw = read_media(storage_path)
+    img = ImageOps.exif_transpose(Image.open(io.BytesIO(raw)))
+    img.thumbnail((THUMB_LONG_EDGE, THUMB_LONG_EDGE), Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+
+    rel = thumb_storage_path(storage_path)
+    dest = _media_root() / rel
+    if not dest.exists():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_suffix(".jpg.tmp")
+        tmp.write_bytes(buf.getvalue())
+        os.replace(tmp, dest)
+    return rel
+
+
+def delete_original(storage_path: str) -> bool:
+    """Best-effort unlink of a stored original. Returns True if a file was removed."""
+    try:
+        full = _resolve_under_root(storage_path)
+    except MediaError:
+        return False
+    full.unlink(missing_ok=True)
+    return True
 
 
 # --- signed URLs ---------------------------------------------------------------

@@ -97,4 +97,11 @@ class SubmissionMedia(TimestampMixin, Base):
     storage_path: Mapped[str] = mapped_column(String(255))
     exif: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
 
+    # Retention (spec §14 Q2): after MEDIA_RETENTION_DAYS the original is deleted and only
+    # a 256px thumbnail (+ the verdict, on the verification row) is kept.
+    thumbnail_path: Mapped[str | None] = mapped_column(String(255), default=None)
+    original_deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+
     submission: Mapped[Submission] = relationship(back_populates="media")
