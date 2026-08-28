@@ -12,11 +12,12 @@ from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query, status
+from pydantic import ValidationError
 from sqlalchemy import select
 
 from app.auth.deps import AdminUser, DbDep
 from app.models import Chore, ChoreOccurrence, Household, OccurrenceStatus, User, UserRole
-from app.schemas.chore import ChoreCreate, ChoreOut, ChoreUpdate, OccurrencePreviewItem
+from app.schemas.chore import ChoreBase, ChoreCreate, ChoreOut, ChoreUpdate, OccurrencePreviewItem
 from app.services import audit
 from app.services.cadence import due_datetimes
 from app.services.scheduler import resolve_assignees
@@ -52,9 +53,26 @@ async def _validate_assignees(db: DbDep, household_id: uuid.UUID, ids: list[uuid
         raise HTTPException(422, f"unknown or non-child assignee(s): {sorted(map(str, missing))}")
 
 
-def _apply_payload_to_model(chore: Chore, data: dict) -> None:
-    for field, value in data.items():
-        setattr(chore, field, value)
+async def _drop_future_occurrences(db: DbDep, chore: Chore) -> int:
+    """Delete not-yet-started future occurrences; the scheduler re-materialises them from
+    the current definition on its next pass (spec §4.1)."""
+    now = datetime.now(UTC)
+    rows = (
+        (
+            await db.execute(
+                select(ChoreOccurrence).where(
+                    ChoreOccurrence.chore_id == chore.id,
+                    ChoreOccurrence.due_at > now,
+                    ChoreOccurrence.status.in_([OccurrenceStatus.pending, OccurrenceStatus.open]),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for occ in rows:
+        await db.delete(occ)
+    return len(rows)
 
 
 @router.get("", response_model=list[ChoreOut])
@@ -110,32 +128,32 @@ async def update_chore(
 
     data = payload.model_dump(exclude_unset=True)
     before = {k: getattr(chore, k) for k in data}
-    _apply_payload_to_model(chore, data)
+
+    # Re-validate the *whole* definition with the patch merged in, so cross-field
+    # invariants (fixed needs an assignee, rotating needs >=2 + period + anchor,
+    # auto_fail <= auto_pass, photo proof needs photo_count) still hold and the JSONB
+    # fields get the same normalisation as the create path.
+    effective = {k: getattr(chore, k) for k in ChoreBase.model_fields}
+    effective.update(data)
+    try:
+        validated = ChoreCreate.model_validate(effective)
+    except ValidationError as exc:
+        raise HTTPException(422, f"invalid chore update: {exc.errors()}") from exc
+
+    if data.keys() & {"assignment_mode", "fixed_assignee_id", "assignee_ids"}:
+        ids = list(validated.assignee_ids)
+        if validated.fixed_assignee_id:
+            ids.append(validated.fixed_assignee_id)
+        await _validate_assignees(db, chore.household_id, ids)
+
+    normalized = _dump(validated)
+    for field in data:
+        setattr(chore, field, normalized[field])
     await db.flush()
 
     regenerated = 0
     if apply == "future_generated":
-        # Drop not-yet-started future occurrences; the scheduler re-materialises them
-        # from the new definition on its next pass (spec §4.1 "apply to all future").
-        now = datetime.now(UTC)
-        rows = (
-            (
-                await db.execute(
-                    select(ChoreOccurrence).where(
-                        ChoreOccurrence.chore_id == chore.id,
-                        ChoreOccurrence.due_at > now,
-                        ChoreOccurrence.status.in_(
-                            [OccurrenceStatus.pending, OccurrenceStatus.open]
-                        ),
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for occ in rows:
-            await db.delete(occ)
-        regenerated = len(rows)
+        regenerated = await _drop_future_occurrences(db, chore)
 
     await audit.record(
         db,
@@ -156,8 +174,15 @@ async def deactivate_chore(chore_id: uuid.UUID, db: DbDep, admin: AdminUser) -> 
     if chore is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "chore not found")
     chore.active = False  # soft delete — history hangs off occurrences (spec §4.1)
+    await db.flush()
+    dropped = await _drop_future_occurrences(db, chore)  # stop generating work for it
     await audit.record(
-        db, actor=admin, action="chore.deactivate", entity_type="chore", entity_id=chore.id
+        db,
+        actor=admin,
+        action="chore.deactivate",
+        entity_type="chore",
+        entity_id=chore.id,
+        after={"dropped_future": dropped},
     )
 
 
@@ -203,8 +228,15 @@ def _dump(payload: ChoreCreate) -> dict:
     return data
 
 
+def _jsonable(v: object) -> object:
+    if hasattr(v, "isoformat"):  # date / time / datetime
+        return v.isoformat()
+    if isinstance(v, uuid.UUID):
+        return str(v)
+    if isinstance(v, list):
+        return [_jsonable(x) for x in v]
+    return v
+
+
 def _json(d: dict) -> dict:
-    out: dict = {}
-    for k, v in d.items():
-        out[k] = v.isoformat() if hasattr(v, "isoformat") else v
-    return out
+    return {k: _jsonable(v) for k, v in d.items()}

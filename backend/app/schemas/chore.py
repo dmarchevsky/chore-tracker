@@ -107,6 +107,15 @@ class ChoreUpdate(BaseModel):
 
     title: str | None = Field(default=None, min_length=1, max_length=160)
     description: str | None = None
+
+    # Reassignment (spec §4.1) — proof_type / start_date stay immutable (they would
+    # invalidate existing occurrences and their proof/money history).
+    assignment_mode: AssignmentMode | None = None
+    fixed_assignee_id: uuid.UUID | None = None
+    assignee_ids: list[uuid.UUID] | None = None
+    rotation_period: RotationPeriod | None = None
+    rotation_anchor_date: date | None = None
+
     cadence: str | None = Field(default=None, min_length=1, max_length=120)
     due_time: time | None = None
     window_open_offset_s: int | None = Field(default=None, le=0, ge=-14 * 24 * 3600)

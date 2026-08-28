@@ -36,6 +36,8 @@ export interface Occurrence {
   verification_error: string | null;
 }
 
+export type AssignmentMode = 'fixed' | 'rotating' | 'anyone' | 'all';
+
 export interface Chore {
   id: string;
   title: string;
@@ -46,9 +48,24 @@ export interface Chore {
   allow_gallery_upload: boolean;
   prompt_token_enabled: boolean;
   verification_mode: string;
+  verification_rule: string | null;
   reward_cents: number;
   penalty_cents: number;
+  late_multiplier: number;
   due_time: string;
+  cadence: string;
+  assignment_mode: AssignmentMode;
+  fixed_assignee_id: string | null;
+  assignee_ids: string[];
+  rotation_period: 'weekly' | 'biweekly' | null;
+  rotation_anchor_date: string | null;
+  window_open_offset_s: number;
+  grace_period_s: number;
+  start_date: string;
+  end_date: string | null;
+  active: boolean;
+  auto_pass_threshold: number;
+  auto_fail_threshold: number;
 }
 
 export interface SubmissionMedia {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 
 import pytest
@@ -35,6 +36,23 @@ async def _admin_headers(client, admin_user, totp_now) -> dict:
     )
     assert r.status_code == 200
     return {"X-CSRF-Token": r.json()["csrf_token"]}
+
+
+def _fixed_body(a: User, **over) -> dict:
+    body = {
+        "title": "Dishes",
+        "assignment_mode": "fixed",
+        "fixed_assignee_id": str(a.id),
+        "cadence": "daily",
+        "due_time": "08:00:00",
+        "start_date": "2025-01-01",
+        "proof_type": "photo",
+        "photo_count": 1,
+        "verification_mode": "manual",
+        "reward_cents": 100,
+    }
+    body.update(over)
+    return body
 
 
 def _rotating_body(a: User, b: User, **over) -> dict:
@@ -156,6 +174,92 @@ async def test_patch_future_generated_drops_pending_occurrences(
     )
     assert r.status_code == 200
     assert (await db_session.execute(future_pending)).scalar_one() == 0
+
+
+async def test_patch_reassigns_fixed_chore(client, admin_user, child_user, second_child, totp_now):
+    h = await _admin_headers(client, admin_user, totp_now)
+    chore_id = (
+        await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)
+    ).json()["id"]
+
+    r = await client.patch(
+        f"/api/v1/chores/{chore_id}",
+        json={"fixed_assignee_id": str(second_child.id)},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["fixed_assignee_id"] == str(second_child.id)
+
+
+async def test_patch_reassign_rejects_unknown_assignee(client, admin_user, child_user, totp_now):
+    h = await _admin_headers(client, admin_user, totp_now)
+    chore_id = (
+        await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)
+    ).json()["id"]
+
+    r = await client.patch(
+        f"/api/v1/chores/{chore_id}",
+        json={"fixed_assignee_id": "00000000-0000-0000-0000-000000000009"},
+        headers=h,
+    )
+    assert r.status_code == 422
+
+
+async def test_patch_to_rotating_needs_two_assignees(
+    client, admin_user, child_user, second_child, totp_now
+):
+    h = await _admin_headers(client, admin_user, totp_now)
+    chore_id = (
+        await client.post(
+            "/api/v1/chores", json=_rotating_body(child_user, second_child), headers=h
+        )
+    ).json()["id"]
+
+    r = await client.patch(
+        f"/api/v1/chores/{chore_id}",
+        json={"assignee_ids": [str(child_user.id)]},
+        headers=h,
+    )
+    assert r.status_code == 422
+
+
+async def test_patch_rejects_threshold_inversion(client, admin_user, child_user, totp_now):
+    h = await _admin_headers(client, admin_user, totp_now)
+    chore_id = (
+        await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)
+    ).json()["id"]
+
+    # default auto_pass_threshold is 0.85; a higher auto_fail is invalid (spec §6.3).
+    r = await client.patch(
+        f"/api/v1/chores/{chore_id}", json={"auto_fail_threshold": 0.95}, headers=h
+    )
+    assert r.status_code == 422
+
+
+async def test_deactivate_drops_future_occurrences(
+    client, admin_user, child_user, totp_now, db_session
+):
+    h = await _admin_headers(client, admin_user, totp_now)
+    chore_id = (
+        await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)
+    ).json()["id"]
+
+    await generate_occurrences(db_session)
+    await db_session.commit()
+
+    future_for_chore = (
+        select(func.count())
+        .select_from(ChoreOccurrence)
+        .where(
+            ChoreOccurrence.chore_id == uuid.UUID(chore_id),
+            ChoreOccurrence.due_at > datetime.now(UTC),
+            ChoreOccurrence.status.in_([OccurrenceStatus.pending, OccurrenceStatus.open]),
+        )
+    )
+    assert (await db_session.execute(future_for_chore)).scalar_one() > 0
+
+    assert (await client.delete(f"/api/v1/chores/{chore_id}", headers=h)).status_code == 204
+    assert (await db_session.execute(future_for_chore)).scalar_one() == 0
 
 
 async def test_delete_is_soft(client, admin_user, child_user, second_child, totp_now):
