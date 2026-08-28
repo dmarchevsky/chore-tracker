@@ -246,6 +246,24 @@ export function useLlmModels(baseUrl: string, apiKey: string) {
   });
 }
 
+export function useTotpEnroll() {
+  return useMutation({
+    mutationFn: () => api.post<{ secret: string; provisioning_uri: string }>('/auth/totp/enroll'),
+  });
+}
+
+export function useTotpConfirm() {
+  return useMutation({
+    mutationFn: (totp_code: string) => api.post('/auth/totp/confirm', { totp_code }),
+  });
+}
+
+export function useTotpReset() {
+  return useMutation({
+    mutationFn: (password: string) => api.post('/auth/totp/reset', { password }),
+  });
+}
+
 export const useCheckinToken = (childId: string) =>
   useQuery({
     enabled: !!childId,

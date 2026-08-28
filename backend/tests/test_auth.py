@@ -83,6 +83,51 @@ async def test_fresh_admin_bootstraps_totp(client, admin_no_totp):
     assert r.status_code == 200
 
 
+async def test_totp_reset_with_password_lets_admin_re_enroll(client, admin_user, totp_now):
+    r = await _login(client, username="parent", password="parent-pass", totp_code=totp_now())
+    csrf = r.json()["csrf_token"]
+
+    reset = await client.post(
+        "/api/v1/auth/totp/reset",
+        json={"password": "parent-pass"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert reset.status_code == 200
+    assert reset.json()["totp_enrolled"] is False
+
+    # password alone now logs in (bootstrap window) and enrollment can start again
+    await client.post("/api/v1/auth/logout", headers={"X-CSRF-Token": csrf})
+    r = await _login(client, username="parent", password="parent-pass")
+    assert r.status_code == 200
+    enroll = await client.post(
+        "/api/v1/auth/totp/enroll", headers={"X-CSRF-Token": r.json()["csrf_token"]}
+    )
+    assert enroll.status_code == 200
+
+
+async def test_totp_reset_wrong_password_rejected(client, admin_user, totp_now):
+    r = await _login(client, username="parent", password="parent-pass", totp_code=totp_now())
+    csrf = r.json()["csrf_token"]
+    bad = await client.post(
+        "/api/v1/auth/totp/reset",
+        json={"password": "not-it"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert bad.status_code == 401
+    assert (await client.get("/api/v1/auth/me")).json()["totp_enrolled"] is True
+
+
+async def test_totp_reset_forbidden_for_child(client, child_user):
+    r = await _login(client, username="alice", password="alice-pass")
+    csrf = r.json()["csrf_token"]
+    bad = await client.post(
+        "/api/v1/auth/totp/reset",
+        json={"password": "alice-pass"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert bad.status_code == 403
+
+
 async def test_login_ip_rate_limited(client, child_user):
     # 10 requests/min/IP (spec §12.1); the 11th is throttled regardless of validity.
     for _ in range(10):

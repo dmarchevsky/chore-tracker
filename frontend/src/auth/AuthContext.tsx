@@ -8,6 +8,7 @@ interface AuthState {
   loading: boolean;
   login: (username: string, password: string, totp?: string) => Promise<void>;
   logout: () => Promise<void>;
+  refresh: () => Promise<void>;
 }
 
 const Ctx = createContext<AuthState | null>(null);
@@ -41,6 +42,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [apply],
   );
 
+  const refresh = useCallback(async () => {
+    try {
+      apply(await api.get<Me>('/auth/me'));
+    } catch {
+      apply(null);
+    }
+  }, [apply]);
+
   const logout = useCallback(async () => {
     try {
       await api.post('/auth/logout');
@@ -50,7 +59,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     apply(null);
   }, [apply]);
 
-  const value = useMemo(() => ({ me, loading, login, logout }), [me, loading, login, logout]);
+  const value = useMemo(
+    () => ({ me, loading, login, logout, refresh }),
+    [me, loading, login, logout, refresh],
+  );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

@@ -19,7 +19,9 @@ from app.schemas.auth import (
     MeResponse,
     TotpConfirmRequest,
     TotpEnrollResponse,
+    TotpResetRequest,
 )
+from app.services import audit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -125,6 +127,34 @@ async def totp_confirm(
     if not verify_code(user.totp_secret, payload.totp_code):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "code did not verify")
     user.totp_enrolled = True
+    from app.auth.sessions import load_session
+
+    loaded = await load_session(db, request.cookies.get(SESSION_COOKIE) or "")
+    csrf = loaded[0].csrf_token if loaded else ""
+    return _me(user, csrf)
+
+
+@router.post("/totp/reset", response_model=MeResponse)
+async def totp_reset(
+    payload: TotpResetRequest,
+    request: Request,
+    user: Annotated[User, Depends(current_user)],
+    db: DbDep,
+) -> MeResponse:
+    """Re-authenticate, then clear TOTP so the admin can enroll a new phone (spec §12.1)."""
+    if user.role != UserRole.admin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "admin only")
+    if payload.password is not None:
+        ok = verify_password(user.password_hash, payload.password)
+    else:
+        ok = bool(user.totp_secret) and verify_code(user.totp_secret, payload.totp_code or "")
+    if not ok:
+        ratelimit.record_failure(user.username)
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "re-authentication failed")
+
+    user.totp_secret = None
+    user.totp_enrolled = False
+    await audit.record(db, actor=user, action="totp.reset", entity_type="user", entity_id=user.id)
     from app.auth.sessions import load_session
 
     loaded = await load_session(db, request.cookies.get(SESSION_COOKIE) or "")

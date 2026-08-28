@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react';
-import { useLlmModels, useSettings, useUpdateSettings } from './api';
+import { QRCodeSVG } from 'qrcode.react';
+import {
+  useLlmModels,
+  useSettings,
+  useTotpConfirm,
+  useTotpEnroll,
+  useTotpReset,
+  useUpdateSettings,
+} from './api';
 import type { SettingsPatch } from './api';
+import { useAuth } from '../auth/AuthContext';
 import { Button, Card, Spinner } from '../shared/ui';
 
 export function Settings() {
@@ -141,6 +150,8 @@ export function Settings() {
         </div>
       </Card>
 
+      <TwoFactor />
+
       <div className="flex items-center gap-3">
         <Button className="min-h-0 px-4 py-2 text-sm" onClick={submit} disabled={save.isPending}>
           Save
@@ -152,6 +163,122 @@ export function Settings() {
         )}
       </div>
     </div>
+  );
+}
+
+function TwoFactor() {
+  const { me, refresh } = useAuth();
+  const enroll = useTotpEnroll();
+  const confirm = useTotpConfirm();
+  const reset = useTotpReset();
+  const [uri, setUri] = useState<string | null>(null);
+  const [secret, setSecret] = useState('');
+  const [code, setCode] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function begin() {
+    setMsg(null);
+    try {
+      const r = await enroll.mutateAsync();
+      setUri(r.provisioning_uri);
+      setSecret(r.secret);
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  }
+
+  async function finish() {
+    setMsg(null);
+    try {
+      await confirm.mutateAsync(code.trim());
+      await refresh();
+      setUri(null);
+      setCode('');
+      setMsg('Two-factor is on.');
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  }
+
+  async function doReset() {
+    setMsg(null);
+    const pw = window.prompt('Confirm your password to reset the authenticator');
+    if (!pw) return;
+    try {
+      await reset.mutateAsync(pw);
+      await refresh();
+      setMsg('Authenticator cleared — set up a new one below.');
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  }
+
+  return (
+    <Card className="flex flex-col gap-3">
+      <h2 className="font-bold">Two-factor (Google Authenticator)</h2>
+
+      {me?.totp_enrolled && !uri && (
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-emerald-400">Enabled for {me.username}.</span>
+          <Button
+            className="min-h-0 px-3 py-2 text-sm"
+            variant="ghost"
+            onClick={doReset}
+            disabled={reset.isPending}
+          >
+            Move to a new phone / reset
+          </Button>
+        </div>
+      )}
+
+      {!me?.totp_enrolled && !uri && (
+        <Button
+          className="min-h-0 self-start px-3 py-2 text-sm"
+          onClick={begin}
+          disabled={enroll.isPending}
+        >
+          Set up Google Authenticator
+        </Button>
+      )}
+
+      {uri && (
+        <div className="flex flex-col gap-2 text-sm">
+          <p className="text-slate-400">
+            In Google Authenticator: <b>+</b> → <b>Scan a QR code</b>.
+          </p>
+          <div className="w-fit rounded-lg bg-white p-2">
+            <QRCodeSVG value={uri} size={160} />
+          </div>
+          <p className="break-all text-xs text-slate-500">
+            or enter this key manually: <code>{secret}</code>
+          </p>
+          <div className="flex gap-2">
+            <input
+              className="inp"
+              inputMode="numeric"
+              placeholder="6-digit code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+            />
+            <Button
+              className="min-h-0 px-3 py-2 text-sm"
+              onClick={finish}
+              disabled={code.trim().length < 6 || confirm.isPending}
+            >
+              Confirm
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {msg && (
+        <span
+          className={`text-sm ${msg.includes('on.') || msg.includes('cleared') ? 'text-emerald-400' : 'text-rose-400'}`}
+        >
+          {msg}
+        </span>
+      )}
+    </Card>
   );
 }
 
