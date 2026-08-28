@@ -7,7 +7,7 @@
 - **Phase 2 — Chores & scheduler:** ✅ done
 - **Phase 3 — Submissions & manual verification:** ✅ done
 - **Phase 4 — LLM verification:** ✅ done
-- **Phase 5 — Kid PWA:** not started
+- **Phase 5 — Kid PWA:** ✅ built (device sign-off pending — see docs/device-checklist.md)
 - **Phase 6 — Hardening & operations:** not started
 - **Phase 7 — Nice-to-haves:** backlog
 
@@ -284,12 +284,27 @@ Original work items (for reference):
 
 ---
 
-## Phase 5 — Kid PWA
+## Phase 5 — Kid PWA  ✅ built (device sign-off pending)
 
 **Goal:** installable and verified on **one iPhone + one Android**; full chore lock-screen →
 verdict in < 60 s; airplane-mode submission uploads on reconnect; both check-in automations fire.
 
-Work items:
+**Accepted (code):** Vite + React + TS + Tailwind + `vite-plugin-pwa`, all assets bundled
+locally. Backend: per-kid `/checkin/{token}` geofence webhook (migration `0005`) and
+Web Push + notification log (migration `0006`, `pywebpush`, best-effort, never blocks the
+state machine). Kid `/me/*`: today/week/history lists, `getUserMedia` capture with labeled
+slots + downscale + permission recovery + gallery escape hatch, IndexedDB offline queue,
+location check-in, verdict view (no confidence/flags), redo/dispute, balance + statement,
+read-only rules, VAPID subscribe gated on Home-Screen install. Admin `/admin/*`: review
+inbox + split detail (signed media, EXIF/flags, raw model I/O), decisions + bulk approve,
+chores CRUD + preview, kids & money + payouts + CSV, ops dashboard (queue depth, stuck
+jobs, check-in staleness). `just test` (147 backend) + `npm test` (10 Vitest) green;
+`just web-serve` builds + serves the PWA.
+
+**Remaining:** the on-device acceptance run (spec §14.5) — captured in
+`docs/device-checklist.md`; can't be done from CI.
+
+Original work items (for reference):
 1. Frontend scaffold: Vite + React + TS + Tailwind + TanStack Query + `vite-plugin-pwa`
    (installable, offline shell, Web Push). Vendor all fonts/JS locally — no CDN (§5).
 2. Two shells behind one auth: `/admin/*` (tables, filters, review split-view) and `/me/*`

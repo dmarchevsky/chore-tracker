@@ -56,12 +56,12 @@ services:
       - media_data:/data/media
 
   web:
-    image: nginx:1.27-alpine
-    profiles: ["frontend"]
+    build: ./frontend
+    profiles: ["web"]
     depends_on:
       - api
     ports:
-      - "5173:80"
+      - "5173:80"  # the installable PWA + /api proxy — device-test target
 
   proxy:
     image: caddy:2

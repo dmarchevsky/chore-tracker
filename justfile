@@ -68,3 +68,6 @@ web-lint:
 
 web-test *args:
     cd frontend && npm run test {{args}}
+
+web-serve:
+    {{compose}} --profile web up -d --build web

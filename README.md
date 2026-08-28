@@ -5,6 +5,13 @@ Self-hosted chore tracking with local-VLM proof verification. See
 [docs/implementation-plan.md](docs/implementation-plan.md) for the phased build plan, and
 [CLAUDE.md](CLAUDE.md) for the development workflow (worktrees, quality gates, push flow).
 
+## Frontend
+
+`frontend/` is the React + Vite + Tailwind PWA (kid `/me/*` + admin `/admin/*`).
+`just web-dev` runs the Vite dev server (proxying `/api` to `:8088`); `just web-serve`
+builds it and serves it behind nginx on `:5173`. Device acceptance:
+[docs/device-checklist.md](docs/device-checklist.md).
+
 ## Status
 
 **Phase 1 (core skeleton) — done.** Postgres schema + Alembic, FastAPI app, local-account
