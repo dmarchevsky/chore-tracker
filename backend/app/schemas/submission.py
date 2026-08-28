@@ -30,6 +30,7 @@ class SubmissionMediaOut(BaseModel):
     bytes: int
     mime: str
     exif: dict[str, Any] | None
+    url: str | None = None  # signed, short-TTL — filled by the media router
 
 
 class SubmissionOut(BaseModel):
