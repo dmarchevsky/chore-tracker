@@ -29,7 +29,9 @@ class PushSubscribeIn(BaseModel):
 
 
 @router.get("/vapid-key")
-async def vapid_key() -> dict:
+async def vapid_key(user: CurrentUser) -> dict:
+    # Authenticated like every other endpoint (spec §12.1 endpoint inventory): the PWA
+    # only needs this key after login, right before POST /push/subscribe.
     return {"public_key": get_settings().vapid_public_key}
 
 

@@ -56,6 +56,9 @@ async def test_subscribe_and_resubscribe_is_idempotent(client, db_session, child
 
 
 async def test_vapid_key_endpoint(client, child_user):
+    # Unauthenticated callers are turned away (spec §12.1 endpoint inventory).
+    assert (await client.get("/api/v1/push/vapid-key")).status_code == 401
+
     await _kid_login(client)
     r = await client.get("/api/v1/push/vapid-key")
     assert r.status_code == 200 and "public_key" in r.json()

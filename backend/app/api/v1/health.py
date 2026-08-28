@@ -6,7 +6,7 @@ import httpx
 from fastapi import APIRouter
 from sqlalchemy import text
 
-from app.auth.deps import DbDep
+from app.auth.deps import AdminUser, DbDep
 from app.config import get_settings
 
 router = APIRouter(tags=["health"])
@@ -19,8 +19,8 @@ async def health(db: DbDep) -> dict[str, str]:
 
 
 @router.get("/health/llm")
-async def health_llm() -> dict[str, object]:
-    """VLM reachability. Fully wired in Phase 4; probe is harmless before then."""
+async def health_llm(_: AdminUser) -> dict[str, object]:
+    """VLM reachability — admin-only; the plain liveness probe is `/health` (spec §10)."""
     s = get_settings()
     url = s.llm_vision_base_url.rstrip("/") + "/models"
     try:
