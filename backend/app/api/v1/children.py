@@ -1,18 +1,26 @@
-"""Child-account management (admin) — spec §10 `/children`."""
+"""Child-account management + balances/statements — spec §4.3, §10 `/children`."""
 
 from __future__ import annotations
 
+import csv
+import io
 import uuid
+from datetime import datetime
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 
-from app.auth.deps import AdminUser, DbDep
+from app.auth.deps import AdminUser, DbDep, require_self_or_admin
 from app.auth.passwords import hash_password
-from app.models import Household, User, UserRole
+from app.models import Household, LedgerEntry, User, UserRole
+from app.schemas.ledger import BalanceOut, LedgerEntryOut
 from app.schemas.user import PasswordReset, UserCreate, UserOut, UserUpdate
+from app.services.ledger import balance_cents
 
 router = APIRouter(prefix="/children", tags=["children"])
+
+SelfOrAdmin = Annotated[User, Depends(require_self_or_admin("child_id"))]
 
 
 async def _get_child(db: DbDep, child_id: uuid.UUID) -> User:
@@ -81,3 +89,66 @@ async def deactivate_child(child_id: uuid.UUID, db: DbDep, _: AdminUser) -> None
     # Soft disable — never delete, history hangs off this user (spec §4.1 `active`).
     user = await _get_child(db, child_id)
     user.is_active = False
+
+
+@router.get("/{child_id}/balance", response_model=BalanceOut)
+async def get_balance(child_id: uuid.UUID, db: DbDep, _: SelfOrAdmin) -> BalanceOut:
+    await _get_child(db, child_id)
+    # Balance may be negative — penalties are allowed to drive it below zero (spec §15 Q3).
+    return BalanceOut(child_id=child_id, balance_cents=await balance_cents(db, child_id))
+
+
+async def _ledger_rows(
+    db: DbDep, child_id: uuid.UUID, from_: datetime | None, to: datetime | None
+) -> list[LedgerEntry]:
+    stmt = (
+        select(LedgerEntry).where(LedgerEntry.child_id == child_id).order_by(LedgerEntry.created_at)
+    )
+    if from_ is not None:
+        stmt = stmt.where(LedgerEntry.created_at >= from_)
+    if to is not None:
+        stmt = stmt.where(LedgerEntry.created_at <= to)
+    return list((await db.execute(stmt)).scalars())
+
+
+@router.get("/{child_id}/ledger", response_model=list[LedgerEntryOut])
+async def get_ledger(
+    child_id: uuid.UUID,
+    db: DbDep,
+    _: SelfOrAdmin,
+    from_: Annotated[datetime | None, Query(alias="from")] = None,
+    to: datetime | None = None,
+) -> list[LedgerEntry]:
+    await _get_child(db, child_id)
+    return await _ledger_rows(db, child_id, from_, to)
+
+
+@router.get("/{child_id}/ledger.csv")
+async def get_ledger_csv(
+    child_id: uuid.UUID,
+    db: DbDep,
+    _: SelfOrAdmin,
+    from_: Annotated[datetime | None, Query(alias="from")] = None,
+    to: datetime | None = None,
+) -> Response:
+    await _get_child(db, child_id)
+    rows = await _ledger_rows(db, child_id, from_, to)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["created_at", "kind", "amount_cents", "currency", "reason", "occurrence_id"])
+    for r in rows:
+        w.writerow(
+            [
+                r.created_at.isoformat(),
+                r.kind,
+                r.amount_cents,
+                r.currency,
+                r.reason,
+                r.occurrence_id or "",
+            ]
+        )
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="ledger-{child_id}.csv"'},
+    )
