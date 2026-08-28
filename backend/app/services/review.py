@@ -149,10 +149,12 @@ async def route_submission(
         await ledger.credit_earning(db, occurrence=occurrence, reason="auto-accepted")
         return
 
-    # manual + (phase 3) llm_* all wait for a human; Phase 4 replaces this for llm_*.
+    # manual -> waits for a human; llm_* -> waits for the verification worker (spec §7.1).
     occurrence.status = OccurrenceStatus.submitted
     if mode in _LLM_MODES:
-        occurrence.status = OccurrenceStatus.submitted  # TODO(phase4): enqueue LLM job
+        from app.worker.queue import enqueue
+
+        await enqueue(db, occurrence_id=occurrence.id, submission_id=submission.id)
 
 
 async def apply_decision(
