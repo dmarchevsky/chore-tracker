@@ -59,23 +59,17 @@ services:
     volumes:
       - media_data:/data/media
 
-  web:
-    build: ./frontend
-    profiles: ["web"]
-    depends_on:
-      - api
-    ports:
-      - "5173:80"  # the installable PWA + /api proxy — device-test target
-
+  # Single front door: Caddy serves the built PWA, proxies /api, owns the
+  # security headers (spec §12.2). Behind the `proxy` profile for LAN device
+  # tests; the Cloudflare Tunnel deployment brings it up via
+  # docker-compose.tunnel.yml (see docs/remote-access.md).
   proxy:
-    image: caddy:2
+    build: ./frontend
     profiles: ["proxy"]
     depends_on:
       - api
     ports:
-      - "8080:80"
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - "5173:80"  # installable PWA + /api proxy — LAN device-test target
 
   # Vision LLM is an external llama-server for now (spec §7.2). Wired in Phase 4.
   # llm-vision:

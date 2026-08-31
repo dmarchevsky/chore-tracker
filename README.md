@@ -9,8 +9,14 @@ Self-hosted chore tracking with local-VLM proof verification. See
 
 `frontend/` is the React + Vite + Tailwind PWA (kid `/me/*` + admin `/admin/*`).
 `just web-dev` runs the Vite dev server (proxying `/api` to `:8088`); `just web-serve`
-builds it and serves it behind nginx on `:5173`. Device acceptance:
+builds it and serves it behind Caddy on `:5173`. Device acceptance:
 [docs/device-checklist.md](docs/device-checklist.md).
+
+## Remote access
+
+`just tunnel-up` runs the Cloudflare Tunnel deployment (`docker-compose.tunnel.yml`) — one
+outbound-only ingress, no open ports, admin behind Cloudflare Access. Full setup + the
+security tradeoffs: [docs/remote-access.md](docs/remote-access.md).
 
 ## Status
 
@@ -37,9 +43,10 @@ Interactive docs at `/docs` when `ENVIRONMENT=dev`.
 - `backend/` — FastAPI + async SQLAlchemy 2.0, managed by `uv`. Worker shares the image
   (`python -m app.worker`).
 - `backend/migrations/` — Alembic (async env).
-- `deploy/Caddyfile` — reverse proxy (fleshed out in Phase 6).
-- `docker-compose.yml` — `db`, `api`, `worker`; `web`/`proxy` behind profiles;
-  `llm-vision` wired in Phase 4.
+- `frontend/Caddyfile` — the front door: serves the PWA, proxies `/api`, sets the strict
+  security headers. Built into the `proxy` image.
+- `docker-compose.yml` — `db`, `api`, `worker`; `proxy` behind a profile;
+  `llm-vision` wired in Phase 4. `docker-compose.tunnel.yml` — Cloudflare Tunnel overlay.
 
 ## Auth notes
 

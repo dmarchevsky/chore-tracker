@@ -1,0 +1,47 @@
+# ChoreKeeper front door (spec §12.2). Sits behind cloudflared; terminates nothing
+# itself — Cloudflare does TLS. Serves the built PWA, proxies /api, and sets the
+# strict security-header + cache-control set the app assumes when internet-facing.
+{
+	admin off
+	servers {
+		# cloudflared connects from the compose bridge network.
+		trusted_proxies static private_ranges
+	}
+}
+
+:80 {
+	encode gzip zstd
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Cross-Origin-Opener-Policy "same-origin"
+		Permissions-Policy "camera=(self), geolocation=(self), microphone=(), payment=()"
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+		-Server
+	}
+
+	# API + signed media — proxied to the app, never cached at any layer
+	# (a cached signed media URL served to the wrong session is the failure mode).
+	@api path /api/*
+	handle @api {
+		header Cache-Control "private, no-store"
+		reverse_proxy api:8000
+	}
+
+	# Static PWA
+	handle {
+		root * /srv
+
+		@sw path /sw.js /registerSW.js
+		header @sw Cache-Control "no-cache"
+
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+
+		try_files {path} /index.html
+		file_server
+	}
+}

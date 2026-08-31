@@ -24,11 +24,12 @@ criteria. Build order follows the spec exactly.
 
 **Decided with the user:**
 - Cover **all phases 0–7**.
-- **Descoped:** external/remote access via Cloudflare Tunnel (§12.2 — `cloudflared` service,
-  Cloudflare Access). The app is still built *as if* internet-reachable (strict CSP, HSTS,
-  secure cookies, TOTP, rate limits) and Tailscale for the operator path is retained, but no
-  tunnel service is composed or configured here. Adding it later is a compose-only change
-  with no app code impact.
+- ~~**Descoped:** external/remote access via Cloudflare Tunnel~~ — **wired** (§12.2):
+  `cloudflared` + a single Caddy front door in `docker-compose.tunnel.yml`, Cloudflare
+  Access on the admin paths, plus the small app hardening the LAN-only assumptions needed
+  (proxy-aware client IP, `TrustedHost`, `Secure` cookies in prod, `Cf-Access-Jwt-Assertion`
+  check). Setup + tradeoffs in [remote-access.md](remote-access.md). Tailscale stays the
+  operator path.
 - Backend stack **exactly as spec'd**: Python 3.12, FastAPI + uvicorn, async SQLAlchemy 2.0 +
   Alembic, Postgres 17, Pydantic v2. Worker = same image, different entrypoint.
 - Python tooling: **uv** for env/deps, **ruff** for lint+format, **pytest** for tests.
@@ -336,17 +337,20 @@ Original work items (for reference):
 
 ---
 
-## Phase 6 — Hardening & operations  (remote-access wiring descoped)
+## Phase 6 — Hardening & operations
 
 **Goal:** a restore from last night's backup into a clean env reproduces all balances exactly;
 a security scan shows no unauthenticated endpoint other than `/health` and `/checkin/{token}`.
 
 Work items:
-1. Security headers / CSP: strict CSP (no external origins), HSTS, secure + `SameSite` cookies,
-   no directory listing, no debug endpoints in prod — configured in `proxy` (caddy) + app
-   middleware. **No `cloudflared` service, no Cloudflare Access** (descoped).
-2. Retain the operator path: document Tailscale for SSH / Postgres / `llama-server` /
-   `/admin/jobs`; `/api/admin/*` IP-restricted to the Tailscale CIDR when that path is used.
+1. ✅ Security headers / CSP: strict CSP, HSTS + `preload`, `Secure` cookies in prod, no
+   directory listing, `/docs` off in prod — in the Caddy `proxy` + app middleware.
+   ✅ **`cloudflared` service + Cloudflare Access** — `docker-compose.tunnel.yml`,
+   [remote-access.md](remote-access.md).
+2. Operator path: Tailscale for SSH / Postgres / `llama-server` / `/admin/jobs`. ✅ the
+   tunnel overlay binds `api` + `db` to `127.0.0.1`; ✅ `/api/v1/admin/*` + `/health/llm`
+   require a `Cf-Access-Jwt-Assertion` when `CF_ACCESS_*` is set (Tailscale-CIDR IP
+   restriction still an option, not built).
 3. Rate limits across auth + `/checkin` + submission endpoints (Postgres-backed counters).
 4. Retention jobs (worker cron-style ticks): photos → after `MEDIA_RETENTION_DAYS` (180)
    delete original, keep 256px thumbnail + verdict (Q2 default); geo points → 30 days.

@@ -1,0 +1,50 @@
+# Cloudflare Tunnel deployment overlay (spec §12.2). See docs/remote-access.md.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
+#
+# Requires Compose v2.24+ for the `!override` tag. Reads these from .env:
+#   CLOUDFLARE_TUNNEL_TOKEN  SESSION_SECRET  PUBLIC_BASE_URL  ALLOWED_HOSTS
+#   CF_ACCESS_TEAM_DOMAIN  CF_ACCESS_AUD
+
+services:
+  # Outbound-only connection to Cloudflare's edge — the sole ingress path.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env}
+    depends_on:
+      - proxy
+    restart: unless-stopped
+
+  # Bring the front door up by default in this deployment (no profile).
+  proxy:
+    profiles: !override []
+    ports: !override []          # reachable only via cloudflared on the compose net
+    depends_on:
+      - api
+
+  api:
+    profiles: !override []
+    ports: !override ["127.0.0.1:8088:8000"]   # operator-only; not on the LAN
+    environment:
+      ENVIRONMENT: prod                # HSTS on, /docs + /openapi.json off
+      COOKIE_SECURE: "true"
+      TRUST_PROXY_HEADERS: "true"      # believe CF-Connecting-IP behind the tunnel
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?}
+      CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:-}
+      CF_ACCESS_AUD: ${CF_ACCESS_AUD:-}
+    command: !override >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000
+             --proxy-headers --forwarded-allow-ips='*'"
+
+  worker:
+    environment:
+      ENVIRONMENT: prod
+      SESSION_SECRET: ${SESSION_SECRET:?}
+
+  db:
+    ports: !override ["127.0.0.1:5432:5432"]

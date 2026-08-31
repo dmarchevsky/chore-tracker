@@ -70,4 +70,16 @@ web-test *args:
     cd frontend && npm run test {{args}}
 
 web-serve:
-    {{compose}} --profile web up -d --build web
+    {{compose}} --profile proxy up -d --build proxy
+
+# --- Remote access — Cloudflare Tunnel (docs/remote-access.md) --------
+tunnel := compose + " -f docker-compose.yml -f docker-compose.tunnel.yml"
+
+tunnel-up:
+    {{tunnel}} up -d --build
+
+tunnel-down:
+    {{tunnel}} down
+
+tunnel-logs service="cloudflared":
+    {{tunnel}} logs -f {{service}}
