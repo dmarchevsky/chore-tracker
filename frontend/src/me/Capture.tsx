@@ -72,14 +72,38 @@ export function Capture({ chore, promptToken, onSubmit, busy }: Props) {
     };
   }, []);
 
-  async function shoot() {
+  async function grabJpeg(): Promise<Blob | null> {
+    const track = streamRef.current?.getVideoTracks?.()[0];
+    // Preferred path: pull the frame straight from the track. drawImage(<video>)
+    // returns an all-black frame on some Android/Samsung devices that composite the
+    // camera preview on a hardware surface the 2D canvas can't read back.
+    const IC = (
+      window as unknown as {
+        ImageCapture?: new (t: MediaStreamTrack) => { grabFrame(): Promise<ImageBitmap> };
+      }
+    ).ImageCapture;
+    if (track && IC) {
+      try {
+        const bmp = await new IC(track).grabFrame();
+        const blob = await toDownscaledJpeg(bmp);
+        bmp.close();
+        return blob;
+      } catch {
+        /* fall through to the <video> path */
+      }
+    }
     const v = videoRef.current;
-    if (!v || !v.videoWidth) return;
+    if (!v || v.readyState < 2 || !v.videoWidth) return null;
     const c = document.createElement('canvas');
     c.width = v.videoWidth;
     c.height = v.videoHeight;
-    c.getContext('2d')!.drawImage(v, 0, 0);
-    const blob = await toDownscaledJpeg(Object.assign(c, { width: c.width, height: c.height }));
+    c.getContext('2d')?.drawImage(v, 0, 0);
+    return toDownscaledJpeg(Object.assign(c, { width: c.width, height: c.height }));
+  }
+
+  async function shoot() {
+    const blob = await grabJpeg();
+    if (!blob) return;
     setShots((prev) => prev.map((b, i) => (i === active ? blob : b)));
     setActive((a) => Math.min(a + 1, slots.length - 1));
   }

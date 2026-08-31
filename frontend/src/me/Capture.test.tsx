@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Chore } from '../api/types';
 import { Capture } from './Capture';
+
+vi.mock('../pwa/downscale', () => ({
+  toDownscaledJpeg: vi.fn().mockResolvedValue(new Blob(['jpeg'], { type: 'image/jpeg' })),
+  fileToDownscaledJpeg: vi.fn().mockResolvedValue(new Blob(['jpeg'])),
+}));
+import { toDownscaledJpeg } from '../pwa/downscale';
 
 const chore = {
   photo_prompts: [],
@@ -17,6 +23,7 @@ function setMediaDevices(md: unknown) {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   setMediaDevices(undefined);
 });
 
@@ -40,6 +47,30 @@ describe('Capture', () => {
 
     await waitFor(() => expect(screen.getByLabelText('Take photo')).toBeEnabled());
     expect(getUserMedia).toHaveBeenCalled();
+  });
+
+  it('captures the frame via ImageCapture (drawImage(<video>) is black on some Android)', async () => {
+    const track = { stop: vi.fn() };
+    const stream = {
+      getTracks: () => [track],
+      getVideoTracks: () => [track],
+    } as unknown as MediaStream;
+    setMediaDevices({ getUserMedia: vi.fn().mockResolvedValue(stream) });
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    vi.stubGlobal('URL', { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} });
+    const grabFrame = vi.fn().mockResolvedValue({ width: 640, height: 480, close: vi.fn() });
+    vi.stubGlobal(
+      'ImageCapture',
+      class {
+        grabFrame = grabFrame;
+      },
+    );
+
+    render(<Capture chore={chore} promptToken={null} onSubmit={noop} busy={false} />);
+    fireEvent.click(await screen.findByLabelText('Take photo'));
+
+    await waitFor(() => expect(grabFrame).toHaveBeenCalled());
+    expect(toDownscaledJpeg).toHaveBeenCalledWith(expect.objectContaining({ width: 640 }));
   });
 
   it('surfaces the failure name when getUserMedia rejects', async () => {
