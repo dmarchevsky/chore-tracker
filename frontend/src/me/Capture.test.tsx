@@ -10,9 +10,6 @@ const chore = {
 } as unknown as Chore;
 const noop = async () => {};
 
-function setSecure(value: boolean) {
-  Object.defineProperty(window, 'isSecureContext', { value, configurable: true });
-}
 function setMediaDevices(md: unknown) {
   Object.defineProperty(navigator, 'mediaDevices', { value: md, configurable: true });
 }
@@ -20,22 +17,20 @@ function setMediaDevices(md: unknown) {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-  setSecure(false);
   setMediaDevices(undefined);
 });
 
 describe('Capture', () => {
-  it('explains the https requirement on an insecure / unsupported origin', () => {
-    setSecure(false);
-    setMediaDevices(undefined);
+  it('explains how to unblock the camera when getUserMedia is missing', () => {
+    setMediaDevices(undefined); // jsdom default — like plain http on a LAN IP
     render(<Capture chore={chore} promptToken={null} onSubmit={noop} busy={false} />);
 
-    expect(screen.getByText(/secure https address/i)).toBeInTheDocument();
+    expect(screen.getByText(/blocking the camera on http:\/\/localhost/i)).toBeInTheDocument();
+    expect(screen.getByText(/unsafely-treat-insecure-origin-as-secure/i)).toBeInTheDocument();
     expect(screen.queryByLabelText('Take photo')).not.toBeInTheDocument();
   });
 
   it('shows a live viewfinder when a camera stream is available', async () => {
-    setSecure(true);
     const stream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
     const getUserMedia = vi.fn().mockResolvedValue(stream);
     setMediaDevices({ getUserMedia });
@@ -45,5 +40,18 @@ describe('Capture', () => {
 
     await waitFor(() => expect(screen.getByLabelText('Take photo')).toBeEnabled());
     expect(getUserMedia).toHaveBeenCalled();
+  });
+
+  it('surfaces the failure name when getUserMedia rejects', async () => {
+    const getUserMedia = vi.fn().mockRejectedValue({ name: 'NotReadableError' });
+    setMediaDevices({ getUserMedia });
+
+    render(<Capture chore={chore} promptToken={null} onSubmit={noop} busy={false} />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Couldn't start the camera \(NotReadableError\)/i),
+      ).toBeInTheDocument(),
+    );
   });
 });

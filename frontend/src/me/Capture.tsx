@@ -3,7 +3,7 @@ import type { Chore } from '../api/types';
 import { Button, Card } from '../shared/ui';
 import { fileToDownscaledJpeg, toDownscaledJpeg } from '../pwa/downscale';
 
-type Perm = 'starting' | 'live' | 'denied' | 'error' | 'gallery' | 'insecure';
+type Perm = 'starting' | 'live' | 'denied' | 'error' | 'gallery' | 'unsupported';
 
 interface Props {
   chore: Chore;
@@ -18,6 +18,7 @@ export function Capture({ chore, promptToken, onSubmit, busy }: Props) {
     : Array.from({ length: Math.max(chore.photo_count, 1) }, (_, i) => `Photo ${i + 1}`);
 
   const [perm, setPerm] = useState<Perm>('starting');
+  const [reason, setReason] = useState('');
   const [shots, setShots] = useState<(Blob | null)[]>(() => slots.map(() => null));
   const [note, setNote] = useState('');
   const [active, setActive] = useState(0);
@@ -27,11 +28,12 @@ export function Capture({ chore, promptToken, onSubmit, busy }: Props) {
   useEffect(() => {
     let cancelled = false;
     const gum = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
-    // getUserMedia only exists on a secure origin (https or localhost). Over plain
-    // http on a LAN IP, Chrome/Android just makes it undefined — say so instead of
-    // showing a black viewfinder.
-    if (!window.isSecureContext || !gum) {
-      setPerm('insecure');
+    // getUserMedia is only exposed on a "potentially trustworthy" origin — https,
+    // localhost, or an origin allow-listed via chrome://flags. Note: that flag enables
+    // getUserMedia without necessarily flipping window.isSecureContext, so gate on the
+    // API actually being present, not on isSecureContext.
+    if (!gum) {
+      setPerm('unsupported');
       return;
     }
 
@@ -53,9 +55,15 @@ export function Capture({ chore, promptToken, onSubmit, busy }: Props) {
     gum({ video: { facingMode: 'environment' }, audio: false })
       .catch(() => gum({ video: true, audio: false })) // Samsung multi-camera fallback
       .then(attach)
-      .catch((e: unknown) =>
-        setPerm((e as { name?: string })?.name === 'NotAllowedError' ? 'denied' : 'error'),
-      );
+      .catch((e: unknown) => {
+        const name = (e as { name?: string })?.name ?? '';
+        if (name === 'NotAllowedError' || name === 'SecurityError') {
+          setPerm('denied');
+        } else {
+          setReason(name);
+          setPerm('error');
+        }
+      });
 
     return () => {
       cancelled = true;
@@ -84,16 +92,16 @@ export function Capture({ chore, promptToken, onSubmit, busy }: Props) {
 
   const allFilled = shots.every(Boolean);
 
-  if (perm === 'denied' || perm === 'error' || perm === 'insecure') {
+  if (perm === 'denied' || perm === 'error' || perm === 'unsupported') {
     return (
       <Card>
         <p className="font-semibold">Camera isn’t available</p>
         <p className="mt-1 text-sm text-slate-400">
           {perm === 'denied'
             ? 'Allow camera access in your browser settings, then reload this page.'
-            : perm === 'insecure'
-              ? 'Open the app at its secure https address — the camera is blocked over plain http.'
-              : "Couldn't start the camera on this device."}
+            : perm === 'unsupported'
+              ? `This browser is blocking the camera on ${window.location.origin}. Open the app over its https address, or in Chrome enable chrome://flags/#unsafely-treat-insecure-origin-as-secure for exactly that origin and relaunch.`
+              : `Couldn't start the camera${reason ? ` (${reason})` : ''}. Close any other app using the camera, then reload.`}
         </p>
         {chore.allow_gallery_upload && (
           <label className="mt-3 inline-block cursor-pointer rounded-xl bg-slate-800 px-4 py-3 text-sm font-semibold">
