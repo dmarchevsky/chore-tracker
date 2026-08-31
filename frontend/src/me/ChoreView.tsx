@@ -40,6 +40,15 @@ export function ChoreView() {
     queryFn: () => api.get<KidVerdict[]>(`/occurrences/${id}/verifications`),
     retry: false,
   });
+  const sent = useQuery({
+    enabled: !!id && !!occ.data && occ.data.status !== 'pending' && occ.data.status !== 'open',
+    queryKey: ['submissions', id],
+    queryFn: () =>
+      api.get<{ id: string; media: { idx: number; url: string | null }[] }[]>(
+        `/occurrences/${id}/submissions`,
+      ),
+    retry: false,
+  });
   const dispute = useDispute(id);
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
@@ -104,6 +113,7 @@ export function ChoreView() {
 
   const isLocation = c.proof_type === 'location' || c.proof_type === 'photo+location';
   const isAck = c.proof_type === 'acknowledgement' || c.proof_type === 'none';
+  const sentPhotos = sent.data?.[0]?.media ?? [];
 
   return (
     <div className="flex flex-col gap-4 pt-2">
@@ -122,6 +132,22 @@ export function ChoreView() {
         <p className="text-base">{message}</p>
         {flash && <p className="mt-2 text-sm text-emerald-400">{flash}</p>}
       </Card>
+
+      {sentPhotos.length > 0 && (
+        <div>
+          <p className="text-sm font-semibold text-slate-400">What you sent</p>
+          <div className="mt-2 flex gap-2 overflow-x-auto">
+            {sentPhotos.map((m) => (
+              <img
+                key={m.idx}
+                src={m.url ?? ''}
+                alt={`photo ${m.idx + 1}`}
+                className="h-24 w-24 shrink-0 rounded-lg object-cover"
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {actionable &&
         (isAck ? (

@@ -4,7 +4,8 @@ import { AuthProvider, useAuth } from './auth/AuthContext';
 import { Login } from './pages/Login';
 import { Spinner } from './shared/ui';
 import { MeShell } from './me/MeShell';
-import { ChoreList } from './me/ChoreList';
+import { Pending } from './me/Pending';
+import { Complete } from './me/Complete';
 import { ChoreView } from './me/ChoreView';
 import { Money as KidMoney } from './me/Money';
 import { Rules } from './me/Rules';
@@ -36,9 +37,8 @@ function Shell() {
       <Route path="/login" element={<Navigate to={home} replace />} />
       {me.role === 'child' ? (
         <Route path="/me" element={<MeShell />}>
-          <Route index element={<ChoreList scope="today" title="Today" />} />
-          <Route path="week" element={<ChoreList scope="week" title="This week" />} />
-          <Route path="history" element={<ChoreList scope="history" title="History" />} />
+          <Route index element={<Pending />} />
+          <Route path="complete" element={<Complete />} />
           <Route path="money" element={<KidMoney />} />
           <Route path="rules" element={<Rules />} />
           <Route path="chores/:id" element={<ChoreView />} />

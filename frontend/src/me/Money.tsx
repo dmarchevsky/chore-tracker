@@ -3,12 +3,20 @@ import { useBalance, useLedger } from '../api/hooks';
 import { Card, Spinner } from '../shared/ui';
 import { money } from '../shared/format';
 
+const KIND_LABEL: Record<string, string> = {
+  earning: 'Chore done',
+  bonus: 'Bonus',
+  penalty: 'Missed chore',
+  payout: 'Paid out',
+  adjustment: 'Adjustment',
+};
+
 export function Money() {
   const { me } = useAuth();
-  const balance = useBalance(me!.id);
-  const ledger = useLedger(me!.id);
+  const balance = useBalance(me?.id ?? '');
+  const ledger = useLedger(me?.id ?? '');
 
-  if (balance.isLoading || ledger.isLoading) return <Spinner />;
+  if (!me || balance.isLoading || ledger.isLoading) return <Spinner />;
 
   return (
     <div className="flex flex-col gap-3 pt-2">
@@ -24,15 +32,17 @@ export function Money() {
         </p>
       </Card>
       <div className="flex flex-col gap-2">
-        {(ledger.data ?? []).map((e) => (
+        {/* backend returns oldest-first; show newest at the top */}
+        {[...(ledger.data ?? [])].reverse().map((e) => (
           <div key={e.id} className="flex justify-between border-b border-slate-800 py-2 text-sm">
             <div>
-              <p>{e.reason || e.kind}</p>
+              <p>{e.reason || KIND_LABEL[e.kind] || e.kind}</p>
               <p className="text-xs text-slate-500">
                 {new Date(e.created_at).toLocaleDateString()}
               </p>
             </div>
             <span className={e.amount_cents < 0 ? 'text-rose-400' : 'text-emerald-400'}>
+              {e.amount_cents > 0 ? '+' : ''}
               {money(e.amount_cents)}
             </span>
           </div>

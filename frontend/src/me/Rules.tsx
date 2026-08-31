@@ -1,6 +1,17 @@
 import { useChores } from '../api/hooks';
+import type { Chore } from '../api/types';
 import { Card, Spinner } from '../shared/ui';
 import { money } from '../shared/format';
+
+function proofSummary(c: Chore): string {
+  if (c.proof_type === 'photo')
+    return c.photo_prompts.length
+      ? `Photo${c.photo_count > 1 ? ` ×${c.photo_count}` : ''}: ${c.photo_prompts.join(', ')}`
+      : `Take ${c.photo_count > 1 ? `${c.photo_count} photos` : 'a photo'}`;
+  if (c.proof_type === 'location' || c.proof_type === 'photo+location')
+    return 'Check in at the place';
+  return 'Just tick it off';
+}
 
 // Read-only visibility into the chore definitions — transparency reduces arguments
 // (spec §15 Q8).
@@ -25,9 +36,7 @@ export function Rules() {
               </>
             )}
           </p>
-          {c.photo_prompts?.length > 0 && (
-            <p className="mt-1 text-xs text-slate-500">Photos: {c.photo_prompts.join(', ')}</p>
-          )}
+          <p className="mt-1 text-xs text-slate-500">{proofSummary(c)}</p>
         </Card>
       ))}
     </div>

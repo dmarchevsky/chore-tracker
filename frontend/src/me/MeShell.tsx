@@ -8,9 +8,8 @@ import { isIos, isStandalone } from '../pwa/install';
 import { pushState, subscribeToPush, type PushState } from '../pwa/push';
 
 const tabs = [
-  { to: '/me', label: 'Today', end: true },
-  { to: '/me/week', label: 'Week' },
-  { to: '/me/history', label: 'History' },
+  { to: '/me', label: 'Pending', end: true },
+  { to: '/me/complete', label: 'Complete' },
   { to: '/me/money', label: 'Money' },
   { to: '/me/rules', label: 'Rules' },
 ];
