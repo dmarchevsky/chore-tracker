@@ -112,7 +112,6 @@ async def _seed_chores(db, household_id, alice: User, bea: User) -> None:
                 proof_type="photo",
                 photo_count=2,
                 photo_prompts=["sink close-up", "wide shot of the counters"],
-                prompt_token_enabled=True,
                 verification_mode="llm_auto",
                 verification_rule=(
                     "The sink basin is empty and the counters are clear of dirty dishes."
