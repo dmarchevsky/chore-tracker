@@ -4,6 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { Chores } from './Chores';
 
+// Leaflet needs a layout engine jsdom lacks; the map is a lazy chunk of its own.
+vi.mock('./FenceMap', () => ({ default: () => <div data-testid="map" /> }));
+
 function json(body: unknown, status = 200) {
   return new Response(status === 204 ? null : JSON.stringify(body), {
     status,
@@ -34,6 +37,7 @@ const CHORE = {
   rotation_anchor_date: null,
   window_open_offset_s: -43200,
   grace_period_s: 900,
+  geofence: null,
   start_date: '2025-01-01',
   end_date: null,
   active: true,
@@ -41,7 +45,7 @@ const CHORE = {
   auto_fail_threshold: 0.35,
 };
 
-function setup() {
+function setup(chores: unknown[] = [CHORE]) {
   const calls: { url: string; method: string; body: unknown }[] = [];
   vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
     const url = String(input);
@@ -53,7 +57,7 @@ function setup() {
     if (method === 'DELETE') return Promise.resolve(json(null, 204));
     if (url.includes('/children'))
       return Promise.resolve(json([{ id: 'k1', display_name: 'Alice', is_active: true }]));
-    if (url.includes('/chores')) return Promise.resolve(json([CHORE]));
+    if (url.includes('/chores')) return Promise.resolve(json(chores));
     return Promise.resolve(json([]));
   });
 
@@ -124,6 +128,43 @@ describe('admin Chores', () => {
       (calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>)
         .window_open_offset_s,
     ).toBe(-43200);
+  });
+
+  it('offers a geofence editor for location chores and PATCHes the fence', async () => {
+    const FENCED = {
+      ...CHORE,
+      id: 'c2',
+      title: 'Arrive at school',
+      proof_type: 'location',
+      photo_count: 0,
+      verification_mode: 'auto_accept',
+      geofence: { lat: 37.7749, lon: -122.4194, radius_m: 120, arrive_before: null },
+    };
+    const calls = setup([CHORE, FENCED]);
+
+    await waitFor(() => expect(screen.getByText('Arrive at school')).toBeInTheDocument());
+
+    // A photo chore has no fence to set...
+    fireEvent.click(screen.getByText('Empty the sink'));
+    await screen.findByDisplayValue('Empty the sink');
+    expect(screen.queryByRole('slider')).not.toBeInTheDocument();
+
+    // ...a location chore does.
+    fireEvent.click(screen.getByText('Arrive at school'));
+    await screen.findByDisplayValue('Arrive at school');
+    expect(screen.getByTestId('map')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('37.7749')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('slider'), { target: { value: '300' } });
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    const patch = calls.find((c) => c.method === 'PATCH')!;
+    expect((patch.body as Record<string, unknown>).geofence).toMatchObject({
+      lat: 37.7749,
+      lon: -122.4194,
+      radius_m: 300,
+    });
   });
 
   it('deactivates a chore', async () => {

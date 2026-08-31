@@ -211,6 +211,7 @@ Therefore v1 implements **active check-in**, not tracking:
 - Pass if `distance - accuracy <= radius`. Flag `LOW_ACCURACY` if `accuracy > 100m` → `NEEDS_REVIEW`.
 - Missing check-in by the deadline → `MISSED`, notification to admin. The real signal is "she didn't check in," which correlates well enough with "she isn't there" to be useful.
 - Store a **coarse** point (4 decimal places, ~11m) plus the boolean result. Do not build a location history you don't need — retention 30 days.
+- `[D]` **Defining the fence is a map picker in the admin UI**, with a draggable pin, a radius the parent can see drawn to scale, "use my current location", and a paste box that reads coordinates out of a Google/Apple Maps link. The one deliberate exception to §1 goal 6: **map tiles are fetched from `tile.openstreetmap.org`**, which learns the coordinates a parent is viewing. Scoped as tightly as it can be — Leaflet is bundled from npm (so `script-src 'self'` is unchanged), the map is a lazy chunk that loads only when a location chore's editor is open, `img-src` is the only CSP directive that names the host, and no photo, name or chore data goes with the request. The lat/lon/radius inputs stay authoritative and work with the map blank, which is what an offline household sees. Address *search* is deliberately not offered: geocoding would ship the household's address to a third party on every keystroke.
 
 If genuinely accurate arrival tracking matters, the right tool is an OS-level geofence automation.
 The app MUST expose a per-kid `POST /api/v1/checkin/{token}` webhook so this can be wired up outside
@@ -502,7 +503,9 @@ Options considered:
 
 `[D]` The app assumes it is internet-reachable. Strict CSP, HSTS, secure/SameSite
 cookies, no directory listing, no debug endpoints in prod, and `/api/admin/*` additionally IP-restricted
-to the Tailscale CIDR when that path is used.
+to the Tailscale CIDR when that path is used. The CSP names exactly one third-party host —
+`https://*.tile.openstreetmap.org` in `img-src`, for the geofence map picker (§6.2). Everything
+else, `script-src` and `connect-src` included, stays `'self'`.
 
 ---
 

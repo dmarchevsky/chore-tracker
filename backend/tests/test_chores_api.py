@@ -444,3 +444,43 @@ async def test_assignee_swap_forbidden_for_child(
         headers={"X-CSRF-Token": login.json()["csrf_token"]},
     )
     assert r.status_code == 403
+
+
+async def test_geofence_is_creatable_and_editable(client, admin_user, child_user, totp_now):
+    """geofence was missing from ChoreUpdate, so a fence could only ever be set at
+    creation — and the admin form had no control for it at all (spec §6.2)."""
+    h = await _admin_headers(client, admin_user, totp_now)
+    fence = {"lat": 37.7749, "lon": -122.4194, "radius_m": 120, "arrive_before": None}
+
+    created = await client.post(
+        "/api/v1/chores",
+        json=_fixed_body(
+            child_user,
+            proof_type="location",
+            photo_count=0,
+            geofence=fence,
+            verification_mode="auto_accept",
+        ),
+        headers=h,
+    )
+    assert created.status_code == 201, created.text
+    chore_id = created.json()["id"]
+    assert created.json()["geofence"]["radius_m"] == 120
+
+    moved = await client.patch(
+        f"/api/v1/chores/{chore_id}",
+        json={"geofence": {"lat": 40.7128, "lon": -74.0060, "radius_m": 250}},
+        headers=h,
+    )
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["geofence"] == {
+        "lat": 40.7128,
+        "lon": -74.006,
+        "radius_m": 250,
+        "arrive_before": None,
+    }
+
+    # A location chore without a fence is not a thing the state machine can evaluate.
+    cleared = await client.patch(f"/api/v1/chores/{chore_id}", json={"geofence": None}, headers=h)
+    assert cleared.status_code == 422
+    assert "geofence" in cleared.text

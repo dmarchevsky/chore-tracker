@@ -132,6 +132,7 @@ class ChoreUpdate(BaseModel):
     photo_count: int | None = Field(default=None, ge=0, le=6)
     photo_prompts: list[str] | None = None
     allow_gallery_upload: bool | None = None
+    geofence: GeofenceSpec | None = None
     prompt_token_enabled: bool | None = None
     verification_mode: VerificationMode | None = None
     verification_rule: str | None = None

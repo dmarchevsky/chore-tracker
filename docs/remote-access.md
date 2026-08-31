@@ -44,6 +44,11 @@ and `http://127.0.0.1:8088` over **Tailscale**, never through the tunnel.
 - **Kid paths are app-auth only** — long-lived session + strict CSP + the WAF login
   rate-limit + the per-token 20/h check-in cap. Deliberate: an Access wall in front of a
   12-year-old at 07:55 kills adoption.
+- **One third-party host in the CSP**: `https://*.tile.openstreetmap.org` in `img-src`, for
+  the admin geofence map picker (spec §6.2). It loads only when a parent opens a location
+  chore's editor, and it tells OSM which coordinates are being viewed — a deliberate,
+  documented exception. Drop the directive from [frontend/Caddyfile](../frontend/Caddyfile)
+  to disable it; the lat/lon/radius inputs keep working with a blank map.
 - **Client-IP trust**: with `TRUST_PROXY_HEADERS=true` the app believes `CF-Connecting-IP`.
   Set it **only** in this deployment — on the LAN a local client would spoof the header to
   dodge the login rate-limit or poison audit logs.

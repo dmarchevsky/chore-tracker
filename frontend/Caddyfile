@@ -12,6 +12,8 @@
 :80 {
 	encode gzip zstd
 
+	# The one third-party host in the whole policy: OpenStreetMap tiles for the admin
+	# geofence picker (spec §6.2). Scripts, fetches and everything else stay 'self'.
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		X-Content-Type-Options "nosniff"
@@ -19,7 +21,7 @@
 		Referrer-Policy "no-referrer"
 		Cross-Origin-Opener-Policy "same-origin"
 		Permissions-Policy "camera=(self), geolocation=(self), microphone=(), payment=()"
-		Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: blob: https://*.tile.openstreetmap.org; media-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 		-Server
 	}
 

@@ -4,6 +4,8 @@ import { api } from '../api/client';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Chore } from '../api/types';
 import { Button, Card, Spinner } from '../shared/ui';
+import { GeofenceField } from './GeofenceField';
+import { DEFAULT_FENCE, type Geofence } from '../shared/coords';
 import { money } from '../shared/format';
 
 interface PreviewItem {
@@ -26,6 +28,7 @@ const BLANK: Record<string, unknown> = {
   start_date: new Date().toISOString().slice(0, 10),
   proof_type: 'photo',
   photo_count: 1,
+  geofence: null,
   verification_mode: 'manual',
   verification_rule: '',
   reward_cents: 100,
@@ -46,6 +49,7 @@ const EDITABLE = [
   'cadence',
   'due_time',
   'window_open_offset_s',
+  'geofence',
   'verification_mode',
   'verification_rule',
   'reward_cents',
@@ -53,6 +57,9 @@ const EDITABLE = [
   'auto_pass_threshold',
   'auto_fail_threshold',
 ] as const;
+
+// Proof types that check where the kid is, and so need a fence (spec §6.2).
+const FENCED = new Set(['location', 'photo+location']);
 
 // Accepted by backend cadence parser (app/services/cadence.py).
 const CADENCE_EXAMPLES = [
@@ -188,15 +195,23 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
     return out;
   }
 
+  /** proof_type is immutable, so it is not in the PATCH allowlist — take it from the
+   *  form. A chore that doesn't check location must not carry a stale fence. */
+  function body(src: Record<string, unknown>): Record<string, unknown> {
+    const out = assignmentBody(src);
+    if (!FENCED.has(String(form.proof_type))) out.geofence = null;
+    return out;
+  }
+
   async function save() {
     setError(null);
     try {
       if (editing) {
         const patch: Record<string, unknown> = {};
         for (const k of EDITABLE) patch[k] = form[k];
-        await update.mutateAsync({ id: chore!.id, body: assignmentBody(patch) });
+        await update.mutateAsync({ id: chore!.id, body: body(patch) });
       } else {
-        await api.post('/chores', assignmentBody(form));
+        await api.post('/chores', body(form));
         await qc.invalidateQueries({ queryKey: ['chores', 'all'] });
       }
       onDone();
@@ -416,6 +431,13 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
           </select>
         </div>
       </Field>
+      {FENCED.has(String(form.proof_type)) && (
+        <GeofenceField
+          value={(form.geofence as Geofence | null) ?? DEFAULT_FENCE}
+          onChange={(g) => set('geofence', g)}
+        />
+      )}
+
       <Field label="Verification rule (natural language)">
         <input
           className="inp"

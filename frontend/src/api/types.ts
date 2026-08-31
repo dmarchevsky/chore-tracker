@@ -70,6 +70,7 @@ export interface Chore {
   rotation_anchor_date: string | null;
   window_open_offset_s: number;
   grace_period_s: number;
+  geofence: { lat: number; lon: number; radius_m: number; arrive_before: string | null } | null;
   start_date: string;
   end_date: string | null;
   active: boolean;
