@@ -130,7 +130,7 @@ async def process_checkin(
         geo_distance_m=round(chk.distance_m, 1),
         geo_within=chk.within,
         geo_captured_at=now,
-        flags=["LOW_ACCURACY"] if chk.low_accuracy else [],
+        flags=review.geo_flags(chk),
     )
     db.add(sub)
     await db.flush()

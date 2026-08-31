@@ -1,12 +1,12 @@
 """Verification worker: run the §7.1 pipeline for one queued job.
 
-1. anti-cheat scan
-2. build checklist prompt (+ prompt-token check)
-3. call the vision model (with repair retry)
-4. derive verdict + apply confidence banding
-5. write the Verification row, transition the occurrence, ledger only on a terminal
+1. build checklist prompt (+ prompt-token check) — the anti-cheat scan already ran at
+   ingest, for every verification mode, and its flags are on the submission
+2. call the vision model (with repair retry)
+3. derive verdict + apply confidence banding — any anti-cheat flag forces NEEDS_REVIEW
+4. write the Verification row, transition the occurrence, ledger only on a terminal
    auto pass/fail; llm_assist always routes to NEEDS_REVIEW
-6. (Phase 5) push notification
+5. (Phase 5) push notification
 
 Fail-open: any LLMError leaves the occurrence in NEEDS_REVIEW with verification_error and
 writes NO ledger entry — the kid never loses money because inference broke (spec §6.3).
@@ -29,7 +29,7 @@ from app.models import (
 )
 from app.models.chore import VerificationMode
 from app.models.verification import Verdict, Verification
-from app.services import anti_cheat, ledger, notifications
+from app.services import ledger, notifications
 from app.services.llm_config import get_llm_config
 from app.services.media import read_media
 from app.services.verification import build_task_prompt, derive_verdict, run_vision
@@ -87,10 +87,6 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
         .scalars()
         .all()
     )
-
-    flags = await anti_cheat.scan_submission(db, sub)
-    if flags:
-        sub.flags = sorted(set(sub.flags) | set(flags))
 
     checks, required_ids = _checklist(chore, occ)
     prompt = build_task_prompt(

@@ -13,6 +13,7 @@ from app.services.cadence import CadenceError, cadence_dates
 from app.services.rotation import RotationPeriod
 
 _PHOTO_PROOFS = {ProofType.photo, ProofType.photo_location}
+_LLM_MODES = {VerificationMode.llm_auto, VerificationMode.llm_assist}
 
 
 class GeofenceSpec(BaseModel):
@@ -91,6 +92,13 @@ class ChoreBase(BaseModel):
 
         if self.proof_type in _PHOTO_PROOFS and self.photo_count < 1:
             raise ValueError(f"proof_type {self.proof_type} needs photo_count >= 1")
+        if self.verification_mode in _LLM_MODES and self.proof_type not in _PHOTO_PROOFS:
+            # There is no image to judge, and run_vision would happily send a text-only
+            # message — under llm_auto that verdict moves money (spec §7.2).
+            raise ValueError(
+                f"verification_mode {self.verification_mode} needs a photo proof_type; "
+                f"{self.proof_type} has no image for the model to look at"
+            )
         if self.proof_type in {ProofType.location, ProofType.photo_location} and not self.geofence:
             raise ValueError(f"proof_type {self.proof_type} needs a geofence")
         return self

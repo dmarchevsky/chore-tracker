@@ -24,6 +24,7 @@ from app.models import (
     Verification,
     VerificationJob,
 )
+from app.models.verification import Verdict
 from app.services.ledger import balance_cents
 from app.worker import verify
 
@@ -256,6 +257,16 @@ async def test_duplicate_photo_is_flagged_and_reviewed(client, db_session, house
         await db_session.execute(select(Submission).where(Submission.occurrence_id == second.id))
     ).scalar_one()
     assert "DUPLICATE_SUSPECTED" in sub.flags
+
+    # The flag holds it for a human, but the model still ran: a parent deciding a flagged
+    # submission needs its read of the photo, not just the flag.
+    v = (
+        await db_session.execute(
+            select(Verification).where(Verification.occurrence_id == second.id)
+        )
+    ).scalar_one()
+    assert v.kind == "llm" and v.verdict == Verdict.needs_review
+    assert "DUPLICATE_SUSPECTED" in v.reasoning
 
 
 @respx.mock

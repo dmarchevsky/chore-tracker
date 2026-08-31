@@ -35,6 +35,11 @@ FLAG_DUPLICATE = "DUPLICATE_SUSPECTED"
 FLAG_STALE = "STALE_CAPTURE"
 FLAG_NO_EXIF = "NO_EXIF"
 FLAG_SCREENSHOT = "SCREENSHOT_SUSPECTED"
+# Raised at ingest rather than by scan_submission, but they route the same way and the
+# admin UI labels them from one list, so the names live here too.
+FLAG_GALLERY = "GALLERY_UPLOAD"
+FLAG_LOW_ACCURACY = "LOW_ACCURACY"
+FLAG_OUTSIDE_FENCE = "OUTSIDE_GEOFENCE"
 
 
 def _parse_exif_dt(value: str | None) -> datetime | None:

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import io
+import json
 from datetime import UTC, date, datetime, time
 
 import pytest
 from PIL import Image
 from sqlalchemy import func, select
 
-from app.models import Chore, ChoreOccurrence, LedgerEntry, OccurrenceStatus
+from app.models import Chore, ChoreOccurrence, LedgerEntry, OccurrenceStatus, Submission
 from app.services.ledger import balance_cents
 
 pytestmark = pytest.mark.asyncio
@@ -317,3 +318,76 @@ async def test_a_past_decision_can_be_changed_and_the_money_follows(
     # +300 earning, -300 reversal, -100 penalty. Nothing was edited in place.
     assert await _ledger_rows(db_session, occ.id) == 3
     assert await balance_cents(db_session, child_user.id) == -100
+
+
+async def test_auto_accept_photo_is_deduped_before_it_pays(
+    client, db_session, household, admin_user, child_user, totp_now
+):
+    """The anti-cheat scan used to run only in the LLM worker, so an auto_accept chore
+    paid out a recycled photo without ever comparing pHashes (spec §6.1 item 2)."""
+    first = await _mk_occ(db_session, household, child_user, mode="auto_accept", reward=200)
+    second = await _mk_occ(db_session, household, child_user, mode="auto_accept", reward=200)
+    await db_session.commit()
+
+    kh = await _kid_login(client)
+    same_photo = _jpeg((12, 200, 90))
+    for occ in (first, second):
+        r = await client.post(
+            f"/api/v1/occurrences/{occ.id}/submissions",
+            files=[("files", ("sink.jpg", same_photo, "image/jpeg"))],
+            data={"source": "camera"},
+            headers=kh,
+        )
+        assert r.status_code == 201, r.text
+
+    await db_session.refresh(first)
+    await db_session.refresh(second)
+    assert first.status == OccurrenceStatus.verified_pass  # nothing to compare it to yet
+    assert second.status == OccurrenceStatus.needs_review
+    assert (
+        "DUPLICATE_SUSPECTED"
+        in (
+            await db_session.execute(
+                select(Submission).where(Submission.occurrence_id == second.id)
+            )
+        )
+        .scalar_one()
+        .flags
+    )
+    # The duplicate is not paid until a parent says so.
+    assert await balance_cents(db_session, child_user.id) == 200
+
+
+async def test_photo_location_outside_the_fence_is_held(
+    client, db_session, household, admin_user, child_user, totp_now
+):
+    """A photo+location submission has kind == photo, so the old out-of-fence guard —
+    which only fired for kind == location — never ran for it (spec §6.2)."""
+    fence = {"lat": 37.7749, "lon": -122.4194, "radius_m": 100}
+    occ = await _mk_occ(
+        db_session,
+        household,
+        child_user,
+        mode="auto_accept",
+        proof="photo+location",
+        geofence=fence,
+        reward=200,
+    )
+    await db_session.commit()
+
+    kh = await _kid_login(client)
+    r = await client.post(
+        f"/api/v1/occurrences/{occ.id}/submissions",
+        files=[("files", ("sink.jpg", _jpeg((3, 40, 90)), "image/jpeg"))],
+        data={
+            "source": "camera",
+            "geo": json.dumps({"lat": 37.8100, "lon": -122.4100, "accuracy": 10}),
+        },
+        headers=kh,
+    )
+    assert r.status_code == 201, r.text
+    assert "OUTSIDE_GEOFENCE" in r.json()["flags"]
+
+    await db_session.refresh(occ)
+    assert occ.status == OccurrenceStatus.needs_review
+    assert await balance_cents(db_session, child_user.id) == 0

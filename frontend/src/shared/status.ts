@@ -63,6 +63,7 @@ const FLAG_LABEL: Record<string, string> = {
   NO_EXIF: 'no camera metadata',
   SCREENSHOT_SUSPECTED: 'could be a screenshot',
   LOW_ACCURACY: 'weak GPS fix',
+  OUTSIDE_GEOFENCE: 'checked in outside the area',
 };
 
 export const flagLabel = (flag: string): string => FLAG_LABEL[flag] ?? flag;

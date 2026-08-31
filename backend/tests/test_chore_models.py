@@ -54,6 +54,18 @@ def test_valid_rotating_chore_parses():
         ({"end_date": date(2024, 1, 1)}, "end_date"),
         ({"auto_pass_threshold": 0.2, "auto_fail_threshold": 0.9}, "auto_fail_threshold"),
         ({"proof_type": "location", "geofence": None}, "geofence"),
+        # No image to judge — run_vision would send a text-only message and, under
+        # llm_auto, that verdict would move money.
+        ({"proof_type": "acknowledgement", "verification_mode": "llm_auto"}, "photo proof_type"),
+        (
+            {
+                "proof_type": "location",
+                "photo_count": 0,
+                "geofence": {"lat": 37.7, "lon": -122.4, "radius_m": 120},
+                "verification_mode": "llm_assist",
+            },
+            "photo proof_type",
+        ),
     ],
 )
 def test_invalid_chore_rejected(override, msg):
@@ -68,9 +80,21 @@ def test_location_chore_with_geofence_ok():
             proof_type="location",
             photo_count=0,
             geofence={"lat": 37.7, "lon": -122.4, "radius_m": 120, "arrive_before": "08:10"},
+            verification_mode="auto_accept",  # an LLM has no image on a location chore
         )
     )
     assert c.geofence.radius_m == 120
+
+
+def test_photo_location_may_use_the_model():
+    c = ChoreCreate(
+        **_valid_rotating(
+            proof_type="photo+location",
+            geofence={"lat": 37.7, "lon": -122.4, "radius_m": 120},
+            verification_mode="llm_auto",
+        )
+    )
+    assert c.proof_type == "photo+location"
 
 
 def test_state_sets_are_expected():

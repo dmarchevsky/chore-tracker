@@ -26,8 +26,8 @@ from app.models import (
 )
 from app.models.chore import ProofType, VerificationMode
 from app.models.verification import Verdict, Verification
-from app.services import audit, ledger, notifications
-from app.services.geo import evaluate_checkin
+from app.services import anti_cheat, audit, ledger, notifications
+from app.services.geo import GeoCheck, evaluate_checkin
 from app.services.media import ingest_photo
 
 _LLM_MODES = {VerificationMode.llm_auto, VerificationMode.llm_assist}
@@ -56,7 +56,7 @@ async def ingest_submission(
     if src is SubmissionSource.gallery and not chore.allow_gallery_upload:
         raise SubmissionError("gallery upload is not allowed for this chore")
     if src is SubmissionSource.gallery:
-        flags.append("GALLERY_UPLOAD")  # forced to review (spec §6.1)
+        flags.append(anti_cheat.FLAG_GALLERY)  # forced to review (spec §6.1)
 
     wants_photo = proof in (ProofType.photo, ProofType.photo_location)
     wants_geo = proof in (ProofType.location, ProofType.photo_location)
@@ -121,11 +121,32 @@ async def ingest_submission(
         sub.geo_accuracy_m = geo["accuracy"]
         sub.geo_distance_m = round(chk.distance_m, 1)
         sub.geo_within = chk.within
-        if chk.low_accuracy:
-            sub.flags = [*sub.flags, "LOW_ACCURACY"]
+        sub.flags = [*sub.flags, *geo_flags(chk)]
 
     await db.flush()
+
+    # Scan every photo submission, whatever the verification mode. This used to run only
+    # in the LLM worker, so a `manual` or `auto_accept` chore got no duplicate detection at
+    # all — and auto_accept paid out an instantly-recycled photo (spec §6.1 item 2).
+    if wants_photo:
+        found = await anti_cheat.scan_submission(db, sub)
+        if found:
+            sub.flags = sorted(set(sub.flags) | set(found))
+            await db.flush()
     return sub
+
+
+def geo_flags(chk: GeoCheck) -> list[str]:
+    """Flags a check-in earns on its own. Shared with the webhook path (spec §6.2)."""
+    flags = []
+    if chk.low_accuracy:
+        flags.append(anti_cheat.FLAG_LOW_ACCURACY)
+    if not chk.within:
+        # Was only enforced for `location` proof under auto_accept: a photo+location
+        # submission has kind == photo, so an out-of-fence check-in slipped through every
+        # mode. As a flag it routes uniformly (spec §6.1).
+        flags.append(anti_cheat.FLAG_OUTSIDE_FENCE)
+    return flags
 
 
 async def route_submission(
@@ -134,16 +155,23 @@ async def route_submission(
     """Transition the occurrence after a submission (spec §3 state machine)."""
     mode = VerificationMode(chore.verification_mode)
 
+    if mode in _LLM_MODES:
+        # Flagged or not, let the model look: derive_verdict routes any flag to review
+        # regardless of what it says (spec §6.3 rule 2), and a parent reviewing a flag is
+        # much better off seeing the model's read of the photo than the flag alone.
+        occurrence.status = OccurrenceStatus.submitted
+        await notifications.notify_needs_review(db, occurrence)
+        from app.worker.queue import enqueue
+
+        await enqueue(db, occurrence_id=occurrence.id, submission_id=submission.id)
+        return
+
     if submission.flags:  # any anti-cheat / quality flag -> human looks (spec §6.1)
         occurrence.status = OccurrenceStatus.needs_review
         await notifications.notify_needs_review(db, occurrence)
         return
 
     if mode is VerificationMode.auto_accept:
-        if submission.kind is SubmissionKind.location and submission.geo_within is False:
-            occurrence.status = OccurrenceStatus.needs_review
-            await notifications.notify_needs_review(db, occurrence)
-            return
         v = await _record_verification(
             db, occurrence, submission, Verdict.pass_, "auto-accepted", by="system"
         )
@@ -152,13 +180,8 @@ async def route_submission(
         await notifications.notify_verdict(db, occurrence, v)
         return
 
-    # manual -> waits for a human; llm_* -> waits for the verification worker (spec §7.1).
-    occurrence.status = OccurrenceStatus.submitted
+    occurrence.status = OccurrenceStatus.submitted  # manual -> waits for a human
     await notifications.notify_needs_review(db, occurrence)
-    if mode in _LLM_MODES:
-        from app.worker.queue import enqueue
-
-        await enqueue(db, occurrence_id=occurrence.id, submission_id=submission.id)
 
 
 async def apply_decision(
