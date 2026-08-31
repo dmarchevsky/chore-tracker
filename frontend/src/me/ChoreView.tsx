@@ -13,6 +13,8 @@ interface KidVerdict {
   verdict: string;
   child_message: string | null;
   image_quality_issue: string | null;
+  kind: string;
+  created_by: string;
   created_at: string;
 }
 
@@ -67,6 +69,8 @@ export function ChoreView() {
   const filed = disputes.data ?? [];
   const openDispute = filed.find((d) => d.status === 'open');
   const message = latest?.child_message || CANNED[o.status] || o.status;
+  // A parent's own words, not the model's — say so, so the kid knows who to talk to.
+  const fromParent = latest?.kind === 'manual' && !!latest.child_message;
 
   async function afterSubmit() {
     await qc.invalidateQueries({ queryKey: ['occurrence', id] });
@@ -132,7 +136,11 @@ export function ChoreView() {
       </div>
 
       <Card className={actionable ? 'border-sky-700' : ''}>
+        {fromParent && <p className="text-xs font-semibold text-slate-400">From a parent</p>}
         <p className="text-base">{message}</p>
+        {!actionable && o.status !== 'pending' && (
+          <p className="mt-2 text-xs text-slate-500">A parent always has the final say.</p>
+        )}
         {flash && <p className="mt-2 text-sm text-emerald-400">{flash}</p>}
       </Card>
 

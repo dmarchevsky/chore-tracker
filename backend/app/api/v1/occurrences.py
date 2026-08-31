@@ -87,9 +87,9 @@ async def get_occurrence(occurrence_id: uuid.UUID, db: DbDep, user: CurrentUser)
 async def occurrence_verifications(
     occurrence_id: uuid.UUID, db: DbDep, user: CurrentUser
 ) -> list[dict]:
-    """Verdicts newest-first. A child sees only the friendly message — never confidence
-    numbers or anti-cheat flags (spec §11); the raw model I/O is admin-only via
-    `/verifications/{id}`."""
+    """Verdicts newest-first. A child sees only the friendly message and who wrote it —
+    never confidence numbers or anti-cheat flags (spec §11); the raw model I/O is
+    admin-only via `/verifications/{id}`."""
     await _get_scoped(db, user, occurrence_id)
     rows = (
         (
@@ -108,6 +108,9 @@ async def occurrence_verifications(
                 "verdict": str(v.verdict),
                 "child_message": v.child_message,
                 "image_quality_issue": v.image_quality_issue,
+                # So the app can attribute the message to a parent rather than the model.
+                "kind": str(v.kind),
+                "created_by": v.created_by,
                 "created_at": v.created_at.isoformat(),
             }
             for v in rows

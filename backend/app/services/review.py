@@ -211,7 +211,11 @@ async def apply_decision(
     else:  # pragma: no cover - schema enum guards this
         raise SubmissionError(f"unknown action {action!r}")
 
-    v = await _record_verification(db, occurrence, None, verdict, reason, by="user", actor=admin)
+    # The reason is what the kid reads on the chore — a decision they can't see the
+    # reasoning for is just a number moving (spec §6.3 rule 1).
+    v = await _record_verification(
+        db, occurrence, None, verdict, reason, by="user", actor=admin, child_message=reason
+    )
     await audit.record(
         db,
         actor=admin,
@@ -244,6 +248,7 @@ async def _record_verification(
     *,
     by: str,
     actor: User | None = None,
+    child_message: str | None = None,
 ) -> Verification:
     v = Verification(
         occurrence_id=occurrence.id,
@@ -251,6 +256,7 @@ async def _record_verification(
         kind="manual",  # Phase 4 adds kind="llm" for worker verdicts
         verdict=verdict,
         reasoning=reasoning,
+        child_message=child_message,
         created_by=by,
         actor_user_id=actor.id if actor else None,
     )

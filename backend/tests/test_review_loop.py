@@ -255,3 +255,34 @@ async def test_settlement_locked_blocks_decision(
         headers=ah,
     )
     assert r.status_code == 409
+
+
+async def test_rejection_reason_reaches_the_kid_and_nothing_else_does(
+    client, db_session, household, admin_user, child_user, totp_now
+):
+    """A decision the kid can't see the reasoning for is just a number moving
+    (spec §6.3 rule 1) — but confidence and flags stay admin-only (spec §11)."""
+    occ = await _mk_occ(db_session, household, child_user, reward=200, penalty=50)
+    await db_session.commit()
+
+    kh = await _kid_login(client)
+    await _submit_photo(client, occ.id, kh)
+
+    ah = await _admin_login(client, totp_now)
+    await client.post(
+        f"/api/v1/occurrences/{occ.id}/decision",
+        json={"action": "reject", "reason": "the sink is still full"},
+        headers=ah,
+    )
+
+    kh = await _kid_login(client)
+    seen = (await client.get(f"/api/v1/occurrences/{occ.id}/verifications", headers=kh)).json()
+    assert seen[0]["child_message"] == "the sink is still full"
+    assert seen[0]["kind"] == "manual"  # so the app can say "from a parent"
+    assert "confidence" not in seen[0] and "reasoning" not in seen[0]
+
+    ah = await _admin_login(client, totp_now)  # one cookie jar per client
+    admin_view = (
+        await client.get(f"/api/v1/occurrences/{occ.id}/verifications", headers=ah)
+    ).json()
+    assert admin_view[0]["reasoning"] == "the sink is still full"
