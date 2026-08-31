@@ -53,6 +53,16 @@ const EDITABLE = [
   'auto_fail_threshold',
 ] as const;
 
+// Accepted by backend cadence parser (app/services/cadence.py).
+const CADENCE_EXAMPLES = [
+  'daily',
+  'weekdays',
+  'weekends',
+  'weekly(on=[SAT])',
+  'weekly(on=[MON,WED,FRI])',
+  'monthly(day=15)',
+];
+
 type FormState = { mode: 'create' } | { mode: 'edit'; chore: Chore };
 
 export function Chores() {
@@ -265,9 +275,38 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
       <Field label="Cadence">
         <input
           className="inp"
+          list="cadence-options"
+          placeholder="daily"
           value={String(form.cadence)}
           onChange={(e) => set('cadence', e.target.value)}
         />
+        <datalist id="cadence-options">
+          {CADENCE_EXAMPLES.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
+        <div className="mt-1 flex flex-wrap gap-1">
+          {CADENCE_EXAMPLES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className={`rounded border px-2 py-0.5 text-xs ${
+                form.cadence === c
+                  ? 'border-sky-500 text-sky-300'
+                  : 'border-slate-700 text-slate-400'
+              }`}
+              onClick={() => set('cadence', c)}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          <code>daily</code>, <code>weekdays</code> (Mon–Fri), <code>weekends</code> (Sat–Sun),{' '}
+          <code>weekly(on=[SAT])</code> or <code>weekly(on=[MON,WED,FRI])</code>, or{' '}
+          <code>monthly(day=15)</code> (clamped to the last day of shorter months). The time of day
+          comes from the “Due time” field below.
+        </p>
       </Field>
       <Field label="Due time">
         <input
