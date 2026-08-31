@@ -1,19 +1,37 @@
 import { useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useInbox, useDecision } from './api';
-import { useAdminChores } from './api';
+import { useAdminChores, useChildren } from './api';
 import { ReviewDetail } from './ReviewDetail';
 import { Button, Card, Spinner } from '../shared/ui';
+import { StatusBadge } from '../shared/StatusBadge';
 import { money } from '../shared/format';
 
 export function Inbox() {
   const inbox = useInbox();
   const chores = useAdminChores();
+  const kids = useChildren();
   const decide = useDecision();
-  const [selected, setSelected] = useState<string | null>(null);
+  const nav = useNavigate();
+  // Push notifications deep-link straight at an item (/admin/review/:id).
+  const { id: routeId } = useParams();
+  const [picked, setPicked] = useState<string | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const selected = picked ?? routeId ?? null;
+
+  function select(id: string) {
+    setPicked(id);
+    if (routeId && routeId !== id) nav('/admin');
+  }
+
+  function clearSelection() {
+    setPicked(null);
+    if (routeId) nav('/admin');
+  }
 
   if (inbox.isLoading || chores.isLoading) return <Spinner />;
   const byId = new Map((chores.data ?? []).map((c) => [c.id, c]));
+  const kidById = new Map((kids.data ?? []).map((k) => [k.id, k]));
   const rows = inbox.data ?? [];
 
   function toggle(id: string) {
@@ -27,7 +45,10 @@ export function Inbox() {
 
   async function bulkApprove() {
     for (const id of checked) {
-      await decide.mutateAsync({ id, body: { action: 'approve', reason: 'bulk approve' } });
+      await decide.mutateAsync({
+        id,
+        body: { action: 'approve', reason: 'Approved by a parent.' },
+      });
     }
     setChecked(new Set());
   }
@@ -57,13 +78,21 @@ export function Inbox() {
                 onChange={() => toggle(o.id)}
                 onClick={(e) => e.stopPropagation()}
               />
-              <button className="flex-1 text-left" onClick={() => setSelected(o.id)}>
-                <p className="font-semibold">{byId.get(o.chore_id)?.title ?? 'Chore'}</p>
+              <button className="flex-1 text-left" onClick={() => select(o.id)}>
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="font-semibold">{byId.get(o.chore_id)?.title ?? 'Chore'}</p>
+                  <StatusBadge status={o.status} className="shrink-0 text-xs" />
+                </div>
                 <p className="text-xs text-slate-400">
-                  {o.status} · due {new Date(o.due_at).toLocaleString()} · {money(o.reward_cents)}
+                  {o.assignee_id
+                    ? (kidById.get(o.assignee_id)?.display_name ?? 'Unassigned')
+                    : 'Unassigned'}{' '}
+                  · due {new Date(o.due_at).toLocaleString()} · {money(o.reward_cents)}
                 </p>
                 {o.verification_error && (
-                  <p className="text-xs text-amber-400">model error — {o.verification_error}</p>
+                  <p className="text-xs text-amber-400">
+                    the vision model couldn’t be reached — {o.verification_error}
+                  </p>
                 )}
               </button>
             </div>
@@ -72,7 +101,7 @@ export function Inbox() {
       </div>
       <div>
         {selected ? (
-          <ReviewDetail id={selected} onDone={() => setSelected(null)} />
+          <ReviewDetail id={selected} onDone={clearSelection} />
         ) : (
           <p className="text-slate-500">Select an item to review.</p>
         )}

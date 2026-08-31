@@ -1,31 +1,7 @@
-import type { ReactNode } from 'react';
 import type { Chore, Occurrence } from '../api/types';
 import { Card } from '../shared/ui';
+import { StatusBadge } from '../shared/StatusBadge';
 import { money } from '../shared/format';
-
-// One friendly label per status, from a kid's point of view.
-function statusChip(s: string): ReactNode {
-  switch (s) {
-    case 'open':
-    case 'verified_fail':
-      return <span className="text-sky-400">Do it</span>;
-    case 'pending':
-      return <span className="text-slate-500">Later</span>;
-    case 'submitted':
-    case 'needs_review':
-      return <span className="text-amber-400">Waiting</span>;
-    case 'verified_pass':
-    case 'approved':
-      return <span className="text-emerald-400">Done ✅</span>;
-    case 'missed':
-    case 'rejected':
-      return <span className="text-rose-400">Missed</span>;
-    case 'excused':
-      return <span className="text-slate-400">Excused</span>;
-    default:
-      return <span className="text-slate-500">{s}</span>;
-  }
-}
 
 export function OccRow({
   o,
@@ -47,7 +23,7 @@ export function OccRow({
             {subtitle} · {money(o.reward_cents)}
           </p>
         </div>
-        <div className="text-sm font-semibold">{statusChip(o.status)}</div>
+        <StatusBadge status={o.status} role="kid" className="text-sm" />
       </div>
     </Card>
   );

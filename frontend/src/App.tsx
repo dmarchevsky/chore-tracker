@@ -46,6 +46,7 @@ function Shell() {
       ) : (
         <Route path="/admin" element={<AdminShell />}>
           <Route index element={<Inbox />} />
+          <Route path="review/:id" element={<Inbox />} />
           <Route path="chores" element={<Chores />} />
           <Route path="kids" element={<Kids />} />
           <Route path="money" element={<AdminMoney />} />
