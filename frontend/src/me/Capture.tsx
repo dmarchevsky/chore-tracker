@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Chore } from '../api/types';
 import { Button, Card } from '../shared/ui';
+import { useBodyScrollLock } from '../shared/useBodyScrollLock';
 import { prepareGalleryUpload, toDownscaledJpeg } from '../pwa/downscale';
 
 type Perm = 'starting' | 'live' | 'denied' | 'error' | 'gallery' | 'unsupported';
@@ -9,10 +10,19 @@ interface Props {
   chore: Chore;
   promptToken: string | null;
   onSubmit: (files: Blob[], note: string, source: 'camera' | 'gallery') => Promise<void>;
+  onClose: () => void;
   busy: boolean;
 }
 
-export function Capture({ chore, promptToken, onSubmit, busy }: Props) {
+/**
+ * Full-viewport camera sheet. A kid used to scroll to reach the shutter and scroll
+ * again to reach Submit; here the viewfinder takes whatever height is left over and
+ * both buttons live in a footer that is always on screen.
+ *
+ * `100dvh`, not `100vh` — on mobile browsers `vh` counts the retracted URL bar, which
+ * is how a "full-screen" layout ends up taller than the screen and scrolls anyway.
+ */
+export function Capture({ chore, promptToken, onSubmit, onClose, busy }: Props) {
   const slots = chore.photo_prompts.length
     ? chore.photo_prompts
     : Array.from({ length: Math.max(chore.photo_count, 1) }, (_, i) => `Photo ${i + 1}`);
@@ -21,9 +31,12 @@ export function Capture({ chore, promptToken, onSubmit, busy }: Props) {
   const [reason, setReason] = useState('');
   const [shots, setShots] = useState<(Blob | null)[]>(() => slots.map(() => null));
   const [note, setNote] = useState('');
+  const [showNote, setShowNote] = useState(false);
   const [active, setActive] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  useBodyScrollLock(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -115,106 +128,149 @@ export function Capture({ chore, promptToken, onSubmit, busy }: Props) {
   }
 
   const allFilled = shots.every(Boolean);
-
-  if (perm === 'denied' || perm === 'error' || perm === 'unsupported') {
-    return (
-      <Card>
-        <p className="font-semibold">Camera isn’t available</p>
-        <p className="mt-1 text-sm text-slate-400">
-          {perm === 'denied'
-            ? 'Allow camera access in your browser settings, then reload this page.'
-            : perm === 'unsupported'
-              ? `This browser is blocking the camera on ${window.location.origin}. Open the app over its https address, or in Chrome enable chrome://flags/#unsafely-treat-insecure-origin-as-secure for exactly that origin and relaunch.`
-              : `Couldn't start the camera${reason ? ` (${reason})` : ''}. Close any other app using the camera, then reload.`}
-        </p>
-        {chore.allow_gallery_upload && (
-          <label className="mt-3 inline-block cursor-pointer rounded-xl bg-slate-800 px-4 py-3 text-sm font-semibold">
-            Pick a photo instead
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => e.target.files?.[0] && pickFromGallery(e.target.files[0])}
-            />
-          </label>
-        )}
-        <Button className="mt-3 w-full" variant="ghost" onClick={() => location.reload()}>
-          Reload
-        </Button>
-      </Card>
-    );
-  }
+  const unavailable = perm === 'denied' || perm === 'error' || perm === 'unsupported';
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="fixed inset-0 z-50 flex h-[100dvh] flex-col overflow-hidden bg-black">
+      <header className="flex shrink-0 items-center justify-between gap-2 px-4 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <button aria-label="Close camera" className="text-2xl leading-none" onClick={onClose}>
+          ✕
+        </button>
+        <p className="truncate text-sm text-slate-300">
+          {slots[active]} — {active + 1} of {slots.length}
+        </p>
+        {promptToken ? (
+          <span className="shrink-0 rounded-full bg-amber-500/20 px-3 py-1 text-lg font-black tracking-widest text-amber-200">
+            {promptToken}
+          </span>
+        ) : (
+          <span className="w-6" aria-hidden="true" />
+        )}
+      </header>
+
       {promptToken && (
-        <div className="rounded-xl bg-amber-500/20 p-3 text-center">
-          <p className="text-sm text-amber-200">Hold up today’s number in the photo</p>
-          <p className="text-4xl font-black tracking-widest">{promptToken}</p>
+        <p className="shrink-0 px-4 pb-2 text-center text-xs text-amber-200">
+          Hold up today’s number in the photo
+        </p>
+      )}
+
+      {unavailable ? (
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <Card>
+            <p className="font-semibold">Camera isn’t available</p>
+            <p className="mt-1 text-sm text-slate-400">
+              {perm === 'denied'
+                ? 'Allow camera access in your browser settings, then reload this page.'
+                : perm === 'unsupported'
+                  ? `This browser is blocking the camera on ${window.location.origin}. Open the app over its https address, or in Chrome enable chrome://flags/#unsafely-treat-insecure-origin-as-secure for exactly that origin and relaunch.`
+                  : `Couldn't start the camera${reason ? ` (${reason})` : ''}. Close any other app using the camera, then reload.`}
+            </p>
+            {chore.allow_gallery_upload && (
+              <label className="mt-3 inline-block cursor-pointer rounded-xl bg-slate-800 px-4 py-3 text-sm font-semibold">
+                Pick a photo instead
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => e.target.files?.[0] && pickFromGallery(e.target.files[0])}
+                />
+              </label>
+            )}
+            <Button className="mt-3 w-full" variant="ghost" onClick={() => location.reload()}>
+              Reload
+            </Button>
+          </Card>
+        </div>
+      ) : (
+        // min-h-0 lets the viewfinder absorb the leftover space — and give it back
+        // when the note keyboard opens — instead of pushing the footer off-screen.
+        <div className="relative min-h-0 flex-1">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            onLoadedMetadata={(e) => void e.currentTarget.play().catch(() => {})}
+            className="absolute inset-0 h-full w-full object-cover"
+          />
         </div>
       )}
 
-      <div className="overflow-hidden rounded-2xl bg-black">
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          onLoadedMetadata={(e) => void e.currentTarget.play().catch(() => {})}
-          className="aspect-[3/4] w-full object-cover"
-        />
-      </div>
+      {/* No footer on the recovery screen — the shutter is dead there, and the gallery
+          escape hatch lives in the card above. Picking a photo flips `perm` to
+          'gallery', which brings the footer (and Send) back. */}
+      {!unavailable && (
+        <footer className="shrink-0 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
+          {/* One slot gets a strip too once it is filled — otherwise a kid has no
+            preview of the shot they are about to send. */}
+          {(slots.length > 1 || shots.some(Boolean)) && (
+            <div className="mb-3 flex gap-2">
+              {slots.map((label, i) => (
+                <button
+                  key={label}
+                  onClick={() => setActive(i)}
+                  className={`flex-1 rounded-lg border p-1 text-xs ${
+                    i === active ? 'border-sky-500' : 'border-slate-700'
+                  }`}
+                >
+                  {shots[i] ? (
+                    <img
+                      src={URL.createObjectURL(shots[i]!)}
+                      alt={label}
+                      className="h-12 w-full rounded object-cover"
+                    />
+                  ) : (
+                    <span className="flex h-12 items-center justify-center text-slate-500">
+                      {label}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
 
-      <p className="text-center text-sm text-slate-300">
-        {slots[active]} — {active + 1} of {slots.length}
-      </p>
+          {showNote ? (
+            <input
+              className="mb-3 w-full rounded-xl bg-slate-800 p-3 text-sm"
+              placeholder="Add a note (optional)"
+              autoFocus
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          ) : (
+            <button
+              className="mb-3 text-sm text-slate-400 underline"
+              onClick={() => setShowNote(true)}
+            >
+              Add a note
+            </button>
+          )}
 
-      <div className="flex justify-center">
-        <button
-          aria-label="Take photo"
-          onClick={shoot}
-          disabled={perm !== 'live'}
-          className="h-16 w-16 rounded-full border-4 border-white bg-white/20 active:scale-95"
-        />
-      </div>
-
-      <div className="flex gap-2">
-        {slots.map((label, i) => (
-          <button
-            key={label}
-            onClick={() => setActive(i)}
-            className={`flex-1 rounded-lg border p-1 text-xs ${
-              i === active ? 'border-sky-500' : 'border-slate-700'
-            }`}
-          >
-            {shots[i] ? (
-              <img
-                src={URL.createObjectURL(shots[i]!)}
-                alt={label}
-                className="h-16 w-full rounded object-cover"
-              />
-            ) : (
-              <span className="flex h-16 items-center justify-center text-slate-500">{label}</span>
+          <div className="flex items-center gap-3">
+            <button
+              aria-label="Take photo"
+              onClick={shoot}
+              disabled={perm !== 'live'}
+              className="h-16 w-16 shrink-0 rounded-full border-4 border-white bg-white/20 active:scale-95 disabled:opacity-40"
+            />
+            {allFilled && (
+              <Button
+                className="flex-1"
+                disabled={busy}
+                onClick={() =>
+                  onSubmit(
+                    shots.filter(Boolean) as Blob[],
+                    note,
+                    perm === 'gallery' ? 'gallery' : 'camera',
+                  )
+                }
+              >
+                {busy ? 'Sending…' : 'Send'}
+              </Button>
             )}
-          </button>
-        ))}
-      </div>
-
-      <textarea
-        className="rounded-xl bg-slate-800 p-3 text-sm"
-        placeholder="Add a note (optional)"
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-      />
-
-      <Button
-        disabled={!allFilled || busy}
-        onClick={() =>
-          onSubmit(shots.filter(Boolean) as Blob[], note, perm === 'gallery' ? 'gallery' : 'camera')
-        }
-      >
-        {busy ? 'Sending…' : 'Submit'}
-      </Button>
+          </div>
+        </footer>
+      )}
     </div>
   );
 }

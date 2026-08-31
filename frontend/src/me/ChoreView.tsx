@@ -55,6 +55,7 @@ export function ChoreView() {
   const dispute = useDispute(id);
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
+  const [capturing, setCapturing] = useState(false);
   const [showDispute, setShowDispute] = useState(false);
   const [disputeMsg, setDisputeMsg] = useState('');
 
@@ -98,6 +99,9 @@ export function ChoreView() {
       }
     } finally {
       setBusy(false);
+      // Close either way: the outcome — sent, queued offline, or refused — is a flash
+      // message on the chore screen, and the sheet would cover it.
+      setCapturing(false);
     }
   }
 
@@ -168,8 +172,22 @@ export function ChoreView() {
         ) : isLocation ? (
           <LocationCheckin onSubmit={submitCheckin} busy={busy} />
         ) : (
-          <Capture chore={c} promptToken={o.prompt_token} onSubmit={submitPhotos} busy={busy} />
+          <Button disabled={busy} onClick={() => setCapturing(true)}>
+            {Math.max(c.photo_count, c.photo_prompts.length) > 1
+              ? 'Take the photos'
+              : 'Take a photo'}
+          </Button>
         ))}
+
+      {capturing && (
+        <Capture
+          chore={c}
+          promptToken={o.prompt_token}
+          onSubmit={submitPhotos}
+          onClose={() => setCapturing(false)}
+          busy={busy}
+        />
+      )}
 
       {filed.map((d) => (
         <Card key={d.id}>
