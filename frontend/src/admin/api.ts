@@ -75,20 +75,11 @@ export const useAdminChores = () =>
     queryFn: () => api.get<Chore[]>('/chores?include_inactive=true'),
   });
 
-export type ChoreApply = 'forward' | 'future_generated';
-
 export function useUpdateChore() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      id,
-      body,
-      apply = 'forward',
-    }: {
-      id: string;
-      body: Record<string, unknown>;
-      apply?: ChoreApply;
-    }) => api.patch<Chore>(`/chores/${id}?apply=${apply}`, body),
+    mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) =>
+      api.patch<Chore>(`/chores/${id}`, body),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['chores', 'all'] }),
   });
 }

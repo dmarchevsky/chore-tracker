@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useAdminChores, useChildren, useDeactivateChore, useUpdateChore } from './api';
-import type { ChoreApply } from './api';
 import { api } from '../api/client';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Chore } from '../api/types';
@@ -128,12 +127,23 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
   const [form, setForm] = useState<Record<string, unknown>>(
     chore ? { ...(chore as unknown as Record<string, unknown>) } : { ...BLANK },
   );
-  const [apply, setApply] = useState<ChoreApply>('forward');
   const [preview, setPreview] = useState<PreviewItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function set(k: string, v: unknown) {
     setForm((f) => ({ ...f, [k]: v }));
+  }
+
+  function setAssignmentMode(mode: string) {
+    setForm((f) => {
+      const next: Record<string, unknown> = { ...f, assignment_mode: mode };
+      if (mode === 'rotating') {
+        if (!next.rotation_period) next.rotation_period = 'weekly';
+        if (!next.rotation_anchor_date)
+          next.rotation_anchor_date = new Date().toISOString().slice(0, 10);
+      }
+      return next;
+    });
   }
 
   async function doPreview() {
@@ -145,21 +155,28 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
     }
   }
 
+  // Only send the assignee fields that matter for the chosen mode.
+  function assignmentBody(src: Record<string, unknown>): Record<string, unknown> {
+    const mode = src.assignment_mode;
+    const out = { ...src };
+    out.fixed_assignee_id = mode === 'fixed' ? src.fixed_assignee_id || null : null;
+    if (mode !== 'rotating' && mode !== 'all') out.assignee_ids = [];
+    if (mode !== 'rotating') {
+      out.rotation_period = null;
+      out.rotation_anchor_date = null;
+    }
+    return out;
+  }
+
   async function save() {
     setError(null);
     try {
       if (editing) {
         const patch: Record<string, unknown> = {};
         for (const k of EDITABLE) patch[k] = form[k];
-        if (form.assignment_mode !== 'rotating') {
-          delete patch.assignee_ids;
-          delete patch.rotation_period;
-          delete patch.rotation_anchor_date;
-        }
-        if (form.assignment_mode !== 'fixed') delete patch.fixed_assignee_id;
-        await update.mutateAsync({ id: chore!.id, body: patch, apply });
+        await update.mutateAsync({ id: chore!.id, body: assignmentBody(patch) });
       } else {
-        await api.post('/chores', form);
+        await api.post('/chores', assignmentBody(form));
         await qc.invalidateQueries({ queryKey: ['chores', 'all'] });
       }
       onDone();
@@ -204,12 +221,21 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
         <select
           className="inp"
           value={String(form.assignment_mode)}
-          onChange={(e) => set('assignment_mode', e.target.value)}
+          onChange={(e) => setAssignmentMode(e.target.value)}
         >
-          <option value="fixed">fixed</option>
-          <option value="rotating">rotating</option>
+          <option value="fixed">fixed — one kid</option>
+          <option value="rotating">rotating — take turns</option>
+          <option value="all">all — everyone does it</option>
+          <option value="anyone">anyone — unassigned pool</option>
         </select>
       </Field>
+
+      {form.assignment_mode === 'anyone' && (
+        <p className="text-xs text-amber-400">
+          Heads up: unassigned chores don’t show in any kid’s list yet — pick fixed, rotating or all
+          if a kid needs to see it.
+        </p>
+      )}
 
       {form.assignment_mode === 'fixed' && (
         <Field label="Assignee">
@@ -228,48 +254,49 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
         </Field>
       )}
 
+      {(form.assignment_mode === 'rotating' || form.assignment_mode === 'all') && (
+        <Field label={form.assignment_mode === 'all' ? 'Everyone' : 'Rotation between'}>
+          <div className="flex flex-wrap gap-3 text-sm">
+            {kidOpts.map((k) => (
+              <label key={k.id} className="flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={idsSelected.includes(k.id)}
+                  onChange={(e) =>
+                    set(
+                      'assignee_ids',
+                      e.target.checked
+                        ? [...idsSelected, k.id]
+                        : idsSelected.filter((id) => id !== k.id),
+                    )
+                  }
+                />
+                {k.display_name}
+              </label>
+            ))}
+          </div>
+        </Field>
+      )}
+
       {form.assignment_mode === 'rotating' && (
-        <>
-          <Field label="Rotation between">
-            <div className="flex flex-wrap gap-3 text-sm">
-              {kidOpts.map((k) => (
-                <label key={k.id} className="flex items-center gap-1">
-                  <input
-                    type="checkbox"
-                    checked={idsSelected.includes(k.id)}
-                    onChange={(e) =>
-                      set(
-                        'assignee_ids',
-                        e.target.checked
-                          ? [...idsSelected, k.id]
-                          : idsSelected.filter((id) => id !== k.id),
-                      )
-                    }
-                  />
-                  {k.display_name}
-                </label>
-              ))}
-            </div>
-          </Field>
-          <Field label="Rotation period / anchor">
-            <div className="flex gap-2">
-              <select
-                className="inp"
-                value={String(form.rotation_period ?? 'weekly')}
-                onChange={(e) => set('rotation_period', e.target.value)}
-              >
-                <option value="weekly">weekly</option>
-                <option value="biweekly">biweekly</option>
-              </select>
-              <input
-                className="inp"
-                type="date"
-                value={String(form.rotation_anchor_date ?? '').slice(0, 10)}
-                onChange={(e) => set('rotation_anchor_date', e.target.value)}
-              />
-            </div>
-          </Field>
-        </>
+        <Field label="Rotation period / anchor">
+          <div className="flex gap-2">
+            <select
+              className="inp"
+              value={String(form.rotation_period ?? '')}
+              onChange={(e) => set('rotation_period', e.target.value)}
+            >
+              <option value="weekly">weekly</option>
+              <option value="biweekly">biweekly</option>
+            </select>
+            <input
+              className="inp"
+              type="date"
+              value={String(form.rotation_anchor_date ?? '').slice(0, 10)}
+              onChange={(e) => set('rotation_anchor_date', e.target.value)}
+            />
+          </div>
+        </Field>
       )}
 
       <Field label="Cadence">
@@ -404,16 +431,9 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
       </Field>
 
       {editing && (
-        <Field label="Apply changes to">
-          <select
-            className="inp"
-            value={apply}
-            onChange={(e) => setApply(e.target.value as ChoreApply)}
-          >
-            <option value="forward">definition only (keep generated occurrences)</option>
-            <option value="future_generated">regenerate upcoming occurrences</option>
-          </select>
-        </Field>
+        <p className="text-xs text-slate-500">
+          Saving regenerates upcoming occurrences; completed ones are left alone.
+        </p>
       )}
 
       {error && <p className="text-sm text-rose-400">{error}</p>}
@@ -442,7 +462,7 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
             onClick={() => {
               set('active', true);
               void update
-                .mutateAsync({ id: chore!.id, body: { active: true }, apply: 'forward' })
+                .mutateAsync({ id: chore!.id, body: { active: true } })
                 .then(onDone)
                 .catch((e) => setError((e as Error).message));
             }}

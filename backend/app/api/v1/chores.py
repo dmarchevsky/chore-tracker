@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import Annotated, Literal
+from typing import Annotated
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -22,11 +22,9 @@ from app.models import Chore, ChoreOccurrence, Household, OccurrenceStatus, User
 from app.schemas.chore import ChoreBase, ChoreCreate, ChoreOut, ChoreUpdate, OccurrencePreviewItem
 from app.services import audit
 from app.services.cadence import due_datetimes
-from app.services.scheduler import resolve_assignees
+from app.services.scheduler import generate_occurrences, resolve_assignees
 
 router = APIRouter(prefix="/chores", tags=["chores"])
-
-ApplyMode = Literal["forward", "future_generated"]
 
 
 async def _household(db: DbDep) -> Household:
@@ -97,6 +95,7 @@ async def create_chore(payload: ChoreCreate, db: DbDep, admin: AdminUser) -> Cho
     chore = Chore(household_id=household.id, **_dump(payload))
     db.add(chore)
     await db.flush()
+    await generate_occurrences(db)  # its occurrences show up immediately, not next tick
     await audit.record(
         db,
         actor=admin,
@@ -119,11 +118,7 @@ async def get_chore(chore_id: uuid.UUID, db: DbDep, user: CurrentUser) -> Chore:
 
 @router.patch("/{chore_id}", response_model=ChoreOut)
 async def update_chore(
-    chore_id: uuid.UUID,
-    payload: ChoreUpdate,
-    db: DbDep,
-    admin: AdminUser,
-    apply: Annotated[ApplyMode, Query()] = "forward",
+    chore_id: uuid.UUID, payload: ChoreUpdate, db: DbDep, admin: AdminUser
 ) -> Chore:
     chore = await db.get(Chore, chore_id)
     if chore is None:
@@ -154,9 +149,11 @@ async def update_chore(
         setattr(chore, field, normalized[field])
     await db.flush()
 
-    regenerated = 0
-    if apply == "future_generated":
-        regenerated = await _drop_future_occurrences(db, chore)
+    # Always reflect the edit in the schedule immediately: drop this chore's not-yet-started
+    # occurrences and re-materialise the horizon from the new definition (spec §8.1, §8.3).
+    dropped = await _drop_future_occurrences(db, chore)
+    await db.flush()
+    await generate_occurrences(db)
 
     await audit.record(
         db,
@@ -165,7 +162,7 @@ async def update_chore(
         entity_type="chore",
         entity_id=chore.id,
         before=_json(before),
-        after=_json(data) | {"apply": apply, "dropped_future": regenerated},
+        after=_json(data) | {"dropped_future": dropped},
     )
     await db.refresh(chore)
     return chore

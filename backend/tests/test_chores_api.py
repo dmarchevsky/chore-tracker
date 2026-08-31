@@ -125,9 +125,7 @@ async def test_preview_is_biweekly_alice_alice_bea_bea(
     ]
 
 
-async def test_patch_forward_updates_definition(
-    client, admin_user, child_user, second_child, totp_now
-):
+async def test_patch_updates_definition(client, admin_user, child_user, second_child, totp_now):
     h = await _admin_headers(client, admin_user, totp_now)
     chore_id = (
         await client.post(
@@ -135,13 +133,11 @@ async def test_patch_forward_updates_definition(
         )
     ).json()["id"]
 
-    r = await client.patch(
-        f"/api/v1/chores/{chore_id}?apply=forward", json={"reward_cents": 500}, headers=h
-    )
+    r = await client.patch(f"/api/v1/chores/{chore_id}", json={"reward_cents": 500}, headers=h)
     assert r.status_code == 200 and r.json()["reward_cents"] == 500
 
 
-async def test_patch_future_generated_drops_pending_occurrences(
+async def test_patch_regenerates_upcoming_occurrences(
     client, admin_user, child_user, second_child, totp_now, db_session
 ):
     h = await _admin_headers(client, admin_user, totp_now)
@@ -153,27 +149,47 @@ async def test_patch_future_generated_drops_pending_occurrences(
         )
     ).json()["id"]
 
-    await generate_occurrences(db_session)
-    await db_session.commit()
+    now = datetime.now(UTC)
+    future_rewards = (
+        select(ChoreOccurrence.reward_cents)
+        .where(ChoreOccurrence.chore_id == uuid.UUID(chore_id), ChoreOccurrence.due_at > now)
+        .distinct()
+    )
+    # create already materialised the horizon at the original reward
+    assert set((await db_session.execute(future_rewards)).scalars()) == {200}
+
+    r = await client.patch(f"/api/v1/chores/{chore_id}", json={"reward_cents": 999}, headers=h)
+    assert r.status_code == 200
+
+    # no ?apply flag — the edit is reflected in the upcoming occurrences immediately
+    assert set((await db_session.execute(future_rewards)).scalars()) == {999}
+
+
+async def test_patch_reassign_regenerates_with_new_assignee(
+    client, admin_user, child_user, second_child, totp_now, db_session
+):
+    h = await _admin_headers(client, admin_user, totp_now)
+    chore_id = (
+        await client.post(
+            "/api/v1/chores", json=_fixed_body(child_user, cadence="daily"), headers=h
+        )
+    ).json()["id"]
 
     now = datetime.now(UTC)
-    future_pending = (
-        select(func.count())
-        .select_from(ChoreOccurrence)
-        .where(
-            ChoreOccurrence.due_at > now,
-            ChoreOccurrence.status.in_([OccurrenceStatus.pending, OccurrenceStatus.open]),
-        )
+    future_assignees = (
+        select(ChoreOccurrence.assignee_id)
+        .where(ChoreOccurrence.chore_id == uuid.UUID(chore_id), ChoreOccurrence.due_at > now)
+        .distinct()
     )
-    assert (await db_session.execute(future_pending)).scalar_one() > 0
+    assert set((await db_session.execute(future_assignees)).scalars()) == {child_user.id}
 
     r = await client.patch(
-        f"/api/v1/chores/{chore_id}?apply=future_generated",
-        json={"reward_cents": 999},
+        f"/api/v1/chores/{chore_id}",
+        json={"fixed_assignee_id": str(second_child.id)},
         headers=h,
     )
     assert r.status_code == 200
-    assert (await db_session.execute(future_pending)).scalar_one() == 0
+    assert set((await db_session.execute(future_assignees)).scalars()) == {second_child.id}
 
 
 async def test_patch_reassigns_fixed_chore(client, admin_user, child_user, second_child, totp_now):

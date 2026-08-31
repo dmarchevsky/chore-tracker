@@ -87,7 +87,7 @@ describe('admin Chores', () => {
 
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
     const patch = calls.find((c) => c.method === 'PATCH')!;
-    expect(patch.url).toContain('/chores/c1?apply=forward');
+    expect(patch.url).toMatch(/\/chores\/c1$/); // no ?apply= — saving always regenerates
     expect((patch.body as Record<string, unknown>).fixed_assignee_id).toBe('k1');
   });
 
