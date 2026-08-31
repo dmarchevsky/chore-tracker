@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
@@ -235,6 +236,8 @@ def _jsonable(v: object) -> object:
         return v.isoformat()
     if isinstance(v, uuid.UUID):
         return str(v)
+    if isinstance(v, Decimal):  # Numeric columns (thresholds, late_multiplier)
+        return float(v)
     if isinstance(v, list):
         return [_jsonable(x) for x in v]
     return v

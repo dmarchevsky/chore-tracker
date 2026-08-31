@@ -236,6 +236,31 @@ async def test_patch_rejects_threshold_inversion(client, admin_user, child_user,
     assert r.status_code == 422
 
 
+async def test_patch_threshold_audits_decimal_snapshot(
+    client, admin_user, child_user, totp_now, db_session
+):
+    # The `before` audit snapshot pulls Numeric columns off the ORM as Decimal;
+    # _json() must coerce them or the audit_log INSERT blows up with a 500.
+    h = await _admin_headers(client, admin_user, totp_now)
+    chore_id = (
+        await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)
+    ).json()["id"]
+
+    r = await client.patch(
+        f"/api/v1/chores/{chore_id}",
+        json={"auto_pass_threshold": 0.9, "late_multiplier": 0.5},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["auto_pass_threshold"] == 0.9
+
+    row = (
+        await db_session.execute(select(AuditLog).where(AuditLog.action == "chore.update"))
+    ).scalar_one()
+    assert row.before["auto_pass_threshold"] == 0.85  # serialized, not a Decimal
+    assert row.after["late_multiplier"] == 0.5
+
+
 async def test_deactivate_drops_future_occurrences(
     client, admin_user, child_user, totp_now, db_session
 ):
