@@ -45,19 +45,33 @@ RESPONSE_SCHEMA: dict = {
 def build_task_prompt(
     *,
     chore_title: str,
-    photo_label: str | None,
-    checks: list[str],
+    photo_labels: list[str] | None,
+    checks: list[tuple[int, str]],
     prompt_token: str | None = None,
 ) -> str:
-    """The USER message body (spec §7.3). ``checks`` are plain yes/no questions."""
+    """The USER message body (spec §7.3).
+
+    ``checks`` are ``(id, question)`` pairs and the id is what the model is asked to answer
+    under — the verdict filters on those same ids (``required_ids`` in derive_verdict), so
+    renumbering them here would silently mismatch a checklist whose ids aren't 1..N.
+
+    ``photo_labels`` are in image order, matching the order the images are attached, so a
+    multi-shot chore can tell the model which picture is which.
+    """
     lines = [f"Chore: {chore_title}"]
-    if photo_label:
-        lines.append(f"Photo label: {photo_label}")
+    labels = [x for x in (photo_labels or []) if x]
+    if len(labels) == 1:
+        lines.append(f"Photo label: {labels[0]}")
+    elif labels:
+        lines.append("Photos, in order: " + ", ".join(f"{i}. {x}" for i, x in enumerate(labels, 1)))
     numbered = list(checks)
     if prompt_token:
-        numbered.append(f"Is the number {prompt_token} clearly visible somewhere in this photo?")
+        next_id = max((i for i, _ in numbered), default=0) + 1
+        numbered.append(
+            (next_id, f"Is the number {prompt_token} clearly visible somewhere in this photo?")
+        )
     lines += ["", "Answer each check:"]
-    lines += [f"{i}. {q} (yes/no/unclear)" for i, q in enumerate(numbered, start=1)]
+    lines += [f"{i}. {q} (yes/no/unclear)" for i, q in numbered]
     lines += [
         "",
         "For each: answer, confidence 0-1, and one sentence of evidence describing what you see.",

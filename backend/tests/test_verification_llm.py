@@ -154,8 +154,33 @@ def test_any_flag_forces_review():
 def test_build_task_prompt_appends_token_check():
     p = build_task_prompt(
         chore_title="Kitchen",
-        photo_label="sink close-up",
-        checks=["Is the sink empty?"],
+        photo_labels=["sink close-up"],
+        checks=[(1, "Is the sink empty?")],
         prompt_token="47",
     )
     assert "47" in p and "Is the sink empty?" in p and "yes/no/unclear" in p
+    assert "Photo label: sink close-up" in p
+    assert "2. Is the number 47" in p  # the token check gets the next id, not a reused one
+
+
+def test_build_task_prompt_numbers_checks_by_their_real_ids():
+    """derive_verdict filters on the checklist's own ids, so the model has to be asked
+    under those ids — enumerating 1..N silently mismatched a checklist with a gap."""
+    p = build_task_prompt(
+        chore_title="Kitchen",
+        photo_labels=[],
+        checks=[(1, "Is the sink empty?"), (3, "Is the counter clear?")],
+        prompt_token="47",
+    )
+    assert "1. Is the sink empty?" in p
+    assert "3. Is the counter clear?" in p
+    assert "4. Is the number 47" in p
+
+
+def test_build_task_prompt_lists_every_photo_label_in_order():
+    p = build_task_prompt(
+        chore_title="Kitchen",
+        photo_labels=["sink close-up", "wide kitchen"],
+        checks=[(1, "Is the sink empty?")],
+    )
+    assert "Photos, in order: 1. sink close-up, 2. wide kitchen" in p

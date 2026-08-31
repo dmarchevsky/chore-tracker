@@ -58,6 +58,7 @@ export interface Chore {
   prompt_token_enabled: boolean;
   verification_mode: string;
   verification_rule: string | null;
+  verification_checklist: { id: number; text: string; required: boolean }[] | null;
   reward_cents: number;
   penalty_cents: number;
   late_multiplier: number;

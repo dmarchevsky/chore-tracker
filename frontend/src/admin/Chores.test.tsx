@@ -38,6 +38,7 @@ const CHORE = {
   window_open_offset_s: -43200,
   grace_period_s: 900,
   geofence: null,
+  verification_checklist: null,
   start_date: '2025-01-01',
   end_date: null,
   active: true,
@@ -165,6 +166,53 @@ describe('admin Chores', () => {
       lon: -122.4194,
       radius_m: 300,
     });
+  });
+
+  it('sets how many photos, what each shows, and the AI checks', async () => {
+    const calls = setup();
+    await waitFor(() => expect(screen.getByText('Empty the sink')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Empty the sink'));
+    await screen.findByDisplayValue('Empty the sink');
+
+    // One label row per photo, kept in lockstep with the count.
+    expect(screen.getAllByPlaceholderText(/sink close-up|wide kitchen/)).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText('How many photos'), { target: { value: '2' } });
+    expect(screen.getAllByPlaceholderText(/sink close-up|wide kitchen/)).toHaveLength(2);
+
+    fireEvent.change(screen.getByPlaceholderText('sink close-up'), {
+      target: { value: 'sink close-up' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('wide kitchen'), {
+      target: { value: 'wide kitchen' },
+    });
+    fireEvent.click(screen.getByLabelText(/show a random number/i));
+
+    fireEvent.click(screen.getByRole('button', { name: /add a check/i }));
+    fireEvent.change(screen.getByPlaceholderText(/free of dishes/i), {
+      target: { value: 'Is the sink basin free of dishes?' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+
+    const body = calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>;
+    expect(body.photo_count).toBe(2);
+    expect(body.photo_prompts).toEqual(['sink close-up', 'wide kitchen']);
+    expect(body.prompt_token_enabled).toBe(true);
+    expect(body.verification_checklist).toEqual([
+      { id: 1, text: 'Is the sink basin free of dishes?', required: true },
+    ]);
+  });
+
+  it('hides the photo settings for a chore that sends no photos', async () => {
+    const ACK = { ...CHORE, id: 'c3', title: 'Feed the cat', proof_type: 'acknowledgement' };
+    setup([ACK]);
+    await waitFor(() => expect(screen.getByText('Feed the cat')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Feed the cat'));
+    await screen.findByDisplayValue('Feed the cat');
+
+    expect(screen.queryByLabelText('How many photos')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/show a random number/i)).not.toBeInTheDocument();
   });
 
   it('deactivates a chore', async () => {

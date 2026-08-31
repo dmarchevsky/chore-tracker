@@ -68,10 +68,16 @@ async def ingest_submission(
         else SubmissionKind.acknowledgement
     )
 
+    wanted = max(chore.photo_count, 1)
     if wants_photo and not files:
-        raise SubmissionError("this chore needs at least one photo")
-    if wants_photo and len(files) > max(chore.photo_count, 1):
-        raise SubmissionError(f"expected at most {chore.photo_count} photo(s)")
+        raise SubmissionError(
+            "this chore needs a photo" if wanted == 1 else f"this chore needs {wanted} photos"
+        )
+    # Exactly, not at most: photo_count is the number of angles the chore asks for, and a
+    # short submission used to sail through the API and the offline replay queue while the
+    # camera sheet refused to send one (spec §6.1 item 6).
+    if wants_photo and len(files) != wanted:
+        raise SubmissionError(f"this chore needs exactly {wanted} photo(s), got {len(files)}")
     if wants_geo and not geo:
         raise SubmissionError("this chore needs a location check-in")
 

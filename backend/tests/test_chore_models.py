@@ -54,6 +54,8 @@ def test_valid_rotating_chore_parses():
         ({"end_date": date(2024, 1, 1)}, "end_date"),
         ({"auto_pass_threshold": 0.2, "auto_fail_threshold": 0.9}, "auto_fail_threshold"),
         ({"proof_type": "location", "geofence": None}, "geofence"),
+        # The kid's capture screen builds its slots from the labels, so they have to agree.
+        ({"photo_count": 1, "photo_prompts": ["a", "b"]}, "photo_prompts has 2"),
         # No image to judge — run_vision would send a text-only message and, under
         # llm_auto, that verdict would move money.
         ({"proof_type": "acknowledgement", "verification_mode": "llm_auto"}, "photo proof_type"),

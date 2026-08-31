@@ -33,6 +33,8 @@ async def _mk_occ(
     proof="photo",
     allow_gallery=False,
     geofence=None,
+    photos=1,
+    prompts=None,
     st=OccurrenceStatus.open,
 ) -> ChoreOccurrence:
     chore = Chore(
@@ -44,8 +46,8 @@ async def _mk_occ(
         due_time=time(8, 0),
         start_date=date(2025, 1, 1),
         proof_type=proof,
-        photo_count=1,
-        photo_prompts=["sink"],
+        photo_count=photos,
+        photo_prompts=prompts if prompts is not None else ["sink"],
         allow_gallery_upload=allow_gallery,
         geofence=geofence,
         verification_mode=mode,
@@ -391,3 +393,55 @@ async def test_photo_location_outside_the_fence_is_held(
     await db_session.refresh(occ)
     assert occ.status == OccurrenceStatus.needs_review
     assert await balance_cents(db_session, child_user.id) == 0
+
+
+async def test_a_two_photo_chore_needs_both_photos(
+    client, db_session, household, admin_user, child_user, totp_now
+):
+    """photo_count was only an upper bound, so a short submission passed over the API and
+    the offline replay queue while the camera sheet refused to send one (spec §6.1 item 6)."""
+    occ = await _mk_occ(
+        db_session,
+        household,
+        child_user,
+        photos=2,
+        prompts=["sink close-up", "wide kitchen"],
+    )
+    await db_session.commit()
+    kh = await _kid_login(client)
+
+    short = await client.post(
+        f"/api/v1/occurrences/{occ.id}/submissions",
+        files=[("files", ("a.jpg", _jpeg((10, 20, 30)), "image/jpeg"))],
+        data={"source": "camera"},
+        headers=kh,
+    )
+    assert short.status_code == 422
+    assert "exactly 2" in short.text
+    await db_session.refresh(occ)
+    assert occ.status == OccurrenceStatus.open  # still the kid's move
+
+    too_many = await client.post(
+        f"/api/v1/occurrences/{occ.id}/submissions",
+        files=[
+            ("files", ("a.jpg", _jpeg((10, 20, 30)), "image/jpeg")),
+            ("files", ("b.jpg", _jpeg((40, 50, 60)), "image/jpeg")),
+            ("files", ("c.jpg", _jpeg((70, 80, 90)), "image/jpeg")),
+        ],
+        data={"source": "camera"},
+        headers=kh,
+    )
+    assert too_many.status_code == 422
+
+    both = await client.post(
+        f"/api/v1/occurrences/{occ.id}/submissions",
+        files=[
+            ("files", ("a.jpg", _jpeg((10, 20, 30)), "image/jpeg")),
+            ("files", ("b.jpg", _jpeg((40, 50, 60)), "image/jpeg")),
+        ],
+        data={"source": "camera"},
+        headers=kh,
+    )
+    assert both.status_code == 201, both.text
+    # The labels are recorded per slot, in order — that is what reaches the model.
+    assert [m["prompt_label"] for m in both.json()["media"]] == ["sink close-up", "wide kitchen"]

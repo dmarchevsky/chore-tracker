@@ -92,6 +92,13 @@ class ChoreBase(BaseModel):
 
         if self.proof_type in _PHOTO_PROOFS and self.photo_count < 1:
             raise ValueError(f"proof_type {self.proof_type} needs photo_count >= 1")
+        if self.photo_prompts and len(self.photo_prompts) != self.photo_count:
+            # The kid's capture screen derives its slots from the labels, so a mismatch
+            # shows slots whose photos ingest would then reject.
+            raise ValueError(
+                f"photo_prompts has {len(self.photo_prompts)} label(s) "
+                f"but photo_count is {self.photo_count}"
+            )
         if self.verification_mode in _LLM_MODES and self.proof_type not in _PHOTO_PROOFS:
             # There is no image to judge, and run_vision would happily send a text-only
             # message — under llm_auto that verdict moves money (spec §7.2).

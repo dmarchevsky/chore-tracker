@@ -72,6 +72,7 @@ async def _mk_occ(
     penalty=0,
     rule="The sink is empty.",
     token=False,
+    checklist=None,
 ) -> ChoreOccurrence:
     chore = Chore(
         household_id=household.id,
@@ -87,6 +88,7 @@ async def _mk_occ(
         prompt_token_enabled=token,
         verification_mode=mode,
         verification_rule=rule,
+        verification_checklist=checklist,
         reward_cents=reward,
         penalty_cents=penalty,
     )
@@ -282,4 +284,39 @@ async def test_missing_prompt_token_fails_the_check(client, db_session, househol
 
     await verify.drain(db_session)
     await db_session.refresh(occ)
+    assert occ.status == OccurrenceStatus.verified_fail
+
+
+@respx.mock
+async def test_sparse_checklist_ids_still_decide_the_verdict(
+    client, db_session, household, child_user
+):
+    """A parent deleting a middle row leaves ids like [1, 3]. The prompt used to renumber
+    them 1..N, so the model answered under ids derive_verdict never looked at."""
+    route = respx.post(LLM_URL).mock(
+        return_value=_completion(_model_reply([(1, "yes", 0.99), (3, "no", 0.99)]))
+    )
+    occ = await _mk_occ(
+        db_session,
+        household,
+        child_user,
+        reward=200,
+        penalty=100,
+        rule=None,
+        checklist=[
+            {"id": 1, "text": "Is the sink empty?", "required": True},
+            {"id": 3, "text": "Is the counter clear?", "required": True},
+        ],
+    )
+    await db_session.commit()
+    await _kid_submit(client, occ.id)
+    await _make_media_look_real(db_session, occ.id)
+
+    await verify.drain(db_session)
+    await db_session.refresh(occ)
+
+    sent = json.loads(route.calls[0].request.content)["messages"][1]["content"][0]["text"]
+    assert "1. Is the sink empty?" in sent
+    assert "3. Is the counter clear?" in sent
+    # The required "no" on id 3 is what fails it — the check was not silently dropped.
     assert occ.status == OccurrenceStatus.verified_fail

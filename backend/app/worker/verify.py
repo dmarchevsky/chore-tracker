@@ -46,19 +46,18 @@ _OUTCOME_TO_VERDICT = {
 }
 
 
-def _checklist(chore: Chore, occurrence: ChoreOccurrence) -> tuple[list[str], set[int]]:
+def _checklist(chore: Chore, occurrence: ChoreOccurrence) -> tuple[list[tuple[int, str]], set[int]]:
+    """``(id, question)`` pairs plus the ids that must pass. The ids travel all the way to
+    the model and back, so a checklist with gaps (a parent deleted a row) still lines up."""
     items = chore.verification_checklist or []
     if not items and chore.verification_rule:
         items = [{"id": 1, "text": chore.verification_rule, "required": True}]
-    texts = [it["text"] for it in items]
+    checks = [(it["id"], it["text"]) for it in items]
     required = {it["id"] for it in items if it.get("required", True)}
     if chore.prompt_token_enabled and occurrence.prompt_token:
-        token_id = (max((it["id"] for it in items), default=0)) + 1
-        texts.append(
-            f"Is the number {occurrence.prompt_token} clearly visible somewhere in this photo?"
-        )
-        required.add(token_id)
-    return texts, required
+        # build_task_prompt appends the token question under this same id.
+        required.add(max((i for i, _ in checks), default=0) + 1)
+    return checks, required
 
 
 async def process_job(db: AsyncSession, job: VerificationJob) -> None:
@@ -91,8 +90,9 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
     checks, required_ids = _checklist(chore, occ)
     prompt = build_task_prompt(
         chore_title=chore.title,
-        photo_label=media_rows[0].prompt_label if media_rows else None,
+        photo_labels=[m.prompt_label or "" for m in media_rows],
         checks=checks,
+        prompt_token=occ.prompt_token if chore.prompt_token_enabled else None,
     )
 
     cfg = await get_llm_config(db)

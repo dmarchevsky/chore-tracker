@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Chore } from '../api/types';
 import { Button, Card, Spinner } from '../shared/ui';
+import { ChecklistField, type ChecklistItem } from './ChecklistField';
 import { GeofenceField } from './GeofenceField';
 import { DEFAULT_FENCE, type Geofence } from '../shared/coords';
 import { money } from '../shared/format';
@@ -28,6 +29,9 @@ const BLANK: Record<string, unknown> = {
   start_date: new Date().toISOString().slice(0, 10),
   proof_type: 'photo',
   photo_count: 1,
+  photo_prompts: [],
+  allow_gallery_upload: false,
+  prompt_token_enabled: false,
   geofence: null,
   verification_mode: 'manual',
   verification_rule: '',
@@ -50,13 +54,21 @@ const EDITABLE = [
   'due_time',
   'window_open_offset_s',
   'geofence',
+  'photo_count',
+  'photo_prompts',
+  'allow_gallery_upload',
+  'prompt_token_enabled',
   'verification_mode',
   'verification_rule',
+  'verification_checklist',
   'reward_cents',
   'penalty_cents',
   'auto_pass_threshold',
   'auto_fail_threshold',
 ] as const;
+
+// Proof types where the kid sends photos (spec §4.1).
+const PHOTO_PROOFS = new Set(['photo', 'photo+location']);
 
 // Proof types that check where the kid is, and so need a fence (spec §6.2).
 const FENCED = new Set(['location', 'photo+location']);
@@ -161,6 +173,32 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
     setForm((f) => ({ ...f, [k]: v }));
   }
 
+  /** photo_prompts is either empty or exactly photo_count long — the backend rejects
+   *  anything else, and the kid's capture screen builds its slots from the labels. */
+  function setPhotoCount(n: number) {
+    const count = Math.min(Math.max(n || 1, 1), 6);
+    setForm((f) => {
+      const labels = (f.photo_prompts as string[]) ?? [];
+      const next = labels.length
+        ? Array.from({ length: count }, (_, i) => labels[i] ?? '')
+        : labels;
+      return { ...f, photo_count: count, photo_prompts: next };
+    });
+  }
+
+  function setLabel(idx: number, text: string) {
+    setForm((f) => {
+      const count = Number(f.photo_count) || 1;
+      const labels = Array.from(
+        { length: count },
+        (_, i) => ((f.photo_prompts as string[]) ?? [])[i] ?? '',
+      );
+      labels[idx] = text;
+      // All blank means "no labels" — send [] rather than a row of empty strings.
+      return { ...f, photo_prompts: labels.some((x) => x.trim()) ? labels : [] };
+    });
+  }
+
   function setAssignmentMode(mode: string) {
     setForm((f) => {
       const next: Record<string, unknown> = { ...f, assignment_mode: mode };
@@ -200,6 +238,11 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
   function body(src: Record<string, unknown>): Record<string, unknown> {
     const out = assignmentBody(src);
     if (!FENCED.has(String(form.proof_type))) out.geofence = null;
+    if (!PHOTO_PROOFS.has(String(form.proof_type))) {
+      out.photo_prompts = [];
+      out.allow_gallery_upload = false;
+      out.prompt_token_enabled = false;
+    }
     return out;
   }
 
@@ -431,6 +474,66 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
           </select>
         </div>
       </Field>
+      {PHOTO_PROOFS.has(String(form.proof_type)) && (
+        <div className="flex flex-col gap-2 rounded-xl border border-slate-800 p-3">
+          <span className="text-sm font-semibold text-slate-300">What the kid sends</span>
+
+          <Field label="How many photos">
+            <input
+              className="inp"
+              type="number"
+              min="1"
+              max="6"
+              value={Number(form.photo_count) || 1}
+              onChange={(e) => setPhotoCount(Number(e.target.value))}
+            />
+          </Field>
+
+          {Array.from({ length: Number(form.photo_count) || 1 }, (_, i) => (
+            <Field key={i} label={`Photo ${i + 1} — what should it show?`}>
+              <input
+                className="inp"
+                placeholder={i === 0 ? 'sink close-up' : 'wide kitchen'}
+                value={((form.photo_prompts as string[]) ?? [])[i] ?? ''}
+                onChange={(e) => setLabel(i, e.target.value)}
+              />
+            </Field>
+          ))}
+          <p className="text-xs text-slate-500">
+            Labels name each shot for the kid and travel with the photo to the AI and the review
+            pane. Two angles — a close-up and a wide shot — make staging a photo much harder. Leave
+            them blank for unlabelled photos.
+          </p>
+
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.allow_gallery_upload)}
+              onChange={(e) => set('allow_gallery_upload', e.target.checked)}
+            />
+            Allow picking an existing photo
+          </label>
+          <p className="text-xs text-slate-500">
+            Off means the in-app camera only. Anything picked from the gallery is flagged and always
+            comes to you for review.
+          </p>
+
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.prompt_token_enabled)}
+              onChange={(e) => set('prompt_token_enabled', e.target.checked)}
+            />
+            Show a random number to hold in the photo
+          </label>
+          <p className="text-xs text-slate-500">
+            A new 2-digit number each time, shown on the kid’s camera screen and added as a required
+            AI check. It’s the only thing here that defeats a screenshot or a friend’s photo — worth
+            it for the chores that matter, overkill for the rest.
+          </p>
+        </div>
+      )}
+
       {FENCED.has(String(form.proof_type)) && (
         <GeofenceField
           value={(form.geofence as Geofence | null) ?? DEFAULT_FENCE}
@@ -445,6 +548,11 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
           onChange={(e) => set('verification_rule', e.target.value)}
         />
       </Field>
+
+      <ChecklistField
+        value={(form.verification_checklist as ChecklistItem[] | null) ?? null}
+        onChange={(items) => set('verification_checklist', items)}
+      />
 
       <Field label="Reward / penalty ($)">
         <div className="flex gap-2">
