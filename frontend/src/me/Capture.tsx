@@ -3,7 +3,7 @@ import type { Chore } from '../api/types';
 import { Button, Card } from '../shared/ui';
 import { fileToDownscaledJpeg, toDownscaledJpeg } from '../pwa/downscale';
 
-type Perm = 'starting' | 'live' | 'denied' | 'error' | 'gallery';
+type Perm = 'starting' | 'live' | 'denied' | 'error' | 'gallery' | 'insecure';
 
 interface Props {
   chore: Chore;
@@ -26,18 +26,41 @@ export function Capture({ chore, promptToken, onSubmit, busy }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    navigator.mediaDevices
-      ?.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
-      .then((s) => {
-        if (cancelled) return s.getTracks().forEach((t) => t.stop());
-        streamRef.current = s;
-        if (videoRef.current) videoRef.current.srcObject = s;
-        setPerm('live');
-      })
-      .catch((e) => setPerm(e?.name === 'NotAllowedError' ? 'denied' : 'error'));
+    const gum = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
+    // getUserMedia only exists on a secure origin (https or localhost). Over plain
+    // http on a LAN IP, Chrome/Android just makes it undefined — say so instead of
+    // showing a black viewfinder.
+    if (!window.isSecureContext || !gum) {
+      setPerm('insecure');
+      return;
+    }
+
+    function attach(s: MediaStream) {
+      if (cancelled) {
+        s.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      streamRef.current = s;
+      const v = videoRef.current;
+      if (v) {
+        v.srcObject = s;
+        v.muted = true; // some Android builds ignore the muted attribute
+        void v.play().catch(() => {}); // autoplay alone is unreliable on Android
+      }
+      setPerm('live');
+    }
+
+    gum({ video: { facingMode: 'environment' }, audio: false })
+      .catch(() => gum({ video: true, audio: false })) // Samsung multi-camera fallback
+      .then(attach)
+      .catch((e: unknown) =>
+        setPerm((e as { name?: string })?.name === 'NotAllowedError' ? 'denied' : 'error'),
+      );
+
     return () => {
       cancelled = true;
       streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
     };
   }, []);
 
@@ -61,14 +84,16 @@ export function Capture({ chore, promptToken, onSubmit, busy }: Props) {
 
   const allFilled = shots.every(Boolean);
 
-  if (perm === 'denied' || perm === 'error') {
+  if (perm === 'denied' || perm === 'error' || perm === 'insecure') {
     return (
       <Card>
-        <p className="font-semibold">Camera is off</p>
+        <p className="font-semibold">Camera isn’t available</p>
         <p className="mt-1 text-sm text-slate-400">
           {perm === 'denied'
             ? 'Allow camera access in your browser settings, then reload this page.'
-            : "Couldn't start the camera on this device."}
+            : perm === 'insecure'
+              ? 'Open the app at its secure https address — the camera is blocked over plain http.'
+              : "Couldn't start the camera on this device."}
         </p>
         {chore.allow_gallery_upload && (
           <label className="mt-3 inline-block cursor-pointer rounded-xl bg-slate-800 px-4 py-3 text-sm font-semibold">
@@ -103,6 +128,7 @@ export function Capture({ chore, promptToken, onSubmit, busy }: Props) {
           autoPlay
           playsInline
           muted
+          onLoadedMetadata={(e) => void e.currentTarget.play().catch(() => {})}
           className="aspect-[3/4] w-full object-cover"
         />
       </div>
