@@ -91,6 +91,41 @@ describe('admin Chores', () => {
     expect((patch.body as Record<string, unknown>).fixed_assignee_id).toBe('k1');
   });
 
+  it('edits the open time in hours before due and PATCHes the offset', async () => {
+    const calls = setup();
+    await waitFor(() => expect(screen.getByText('Empty the sink')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Empty the sink'));
+    await screen.findByDisplayValue('Empty the sink');
+
+    // -43200s is the stored default: 12 hours before an 08:00 due time.
+    const opens = screen.getByDisplayValue('12') as HTMLInputElement;
+    expect(screen.getByText(/^opens .* the day before/i)).toBeInTheDocument();
+
+    fireEvent.change(opens, { target: { value: '2' } });
+    expect(screen.getByText(/^opens .*, the same day/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(
+      (calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>)
+        .window_open_offset_s,
+    ).toBe(-7200);
+  });
+
+  it('leaves an untouched open time exactly as stored', async () => {
+    const calls = setup();
+    await waitFor(() => expect(screen.getByText('Empty the sink')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Empty the sink'));
+    await screen.findByDisplayValue('Empty the sink');
+
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(
+      (calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>)
+        .window_open_offset_s,
+    ).toBe(-43200);
+  });
+
   it('deactivates a chore', async () => {
     const calls = setup();
     await waitFor(() => expect(screen.getByText('Empty the sink')).toBeInTheDocument());

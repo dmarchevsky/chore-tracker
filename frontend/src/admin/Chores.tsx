@@ -22,6 +22,7 @@ const BLANK: Record<string, unknown> = {
   rotation_anchor_date: new Date().toISOString().slice(0, 10),
   cadence: 'daily',
   due_time: '08:00:00',
+  window_open_offset_s: -12 * 3600,
   start_date: new Date().toISOString().slice(0, 10),
   proof_type: 'photo',
   photo_count: 1,
@@ -44,6 +45,7 @@ const EDITABLE = [
   'rotation_anchor_date',
   'cadence',
   'due_time',
+  'window_open_offset_s',
   'verification_mode',
   'verification_rule',
   'reward_cents',
@@ -61,6 +63,24 @@ const CADENCE_EXAMPLES = [
   'weekly(on=[MON,WED,FRI])',
   'monthly(day=15)',
 ];
+
+// window_open_offset_s is a negative offset from the due time (backend bounds: 0 to
+// -14 days). The form takes hours, but keeps the raw seconds so an offset that isn't a
+// whole number of hours round-trips untouched when nobody edits the field.
+const HOURS_BEFORE = (secs: number) => Math.round((-secs / 3600) * 100) / 100;
+
+/** What the offset means on the clock, which is what a parent actually pictures. */
+function opensAt(dueTime: string, offsetSecs: number): string {
+  const [h, m] = dueTime.split(':').map(Number);
+  const due = new Date(2000, 0, 3, h || 0, m || 0); // an arbitrary date; only the clock matters
+  const open = new Date(due.getTime() + offsetSecs * 1000);
+  const clock = open.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const midnight = (d: Date) => new Date(d).setHours(0, 0, 0, 0);
+  const days = Math.round((midnight(due) - midnight(open)) / 86_400_000);
+  if (days === 0) return `opens ${clock}, the same day`;
+  if (days === 1) return `opens ${clock} the day before`;
+  return `opens ${clock}, ${days} days before`;
+}
 
 type FormState = { mode: 'create' } | { mode: 'edit'; chore: Chore };
 
@@ -343,6 +363,23 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
           onChange={(e) => set('due_time', `${e.target.value}:00`)}
         />
       </Field>
+      <Field label="Opens (hours before it’s due)">
+        <input
+          className="inp"
+          type="number"
+          step="0.25"
+          min="0"
+          max="336"
+          value={HOURS_BEFORE(Number(form.window_open_offset_s))}
+          onChange={(e) =>
+            set('window_open_offset_s', -Math.round(parseFloat(e.target.value || '0') * 3600))
+          }
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          {opensAt(String(form.due_time), Number(form.window_open_offset_s))} — a kid can’t submit
+          before that.
+        </p>
+      </Field>
       <Field label={`Start date${editing ? ' (fixed)' : ''}`}>
         <input
           className="inp"
@@ -480,7 +517,8 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
           <p className="font-semibold text-slate-300">Next occurrences</p>
           {preview.map((p) => (
             <p key={p.due_at}>
-              {new Date(p.due_at).toLocaleString()} →{' '}
+              {new Date(p.window_open_at).toLocaleString()} → {new Date(p.due_at).toLocaleString()}{' '}
+              ·{' '}
               {kidOpts.find((k) => k.id === p.assignee_id)?.display_name ??
                 p.assignee_id ??
                 'anyone'}
