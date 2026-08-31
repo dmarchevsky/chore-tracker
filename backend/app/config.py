@@ -19,6 +19,18 @@ class Settings(BaseSettings):
     # Public origin the PWA + webhooks are reached at (spec §12.2).
     public_base_url: str = Field(default="http://localhost:8088", alias="PUBLIC_BASE_URL")
 
+    # --- Internet exposure (spec §12.2 Cloudflare Tunnel) -----------------
+    # Comma-separated Host allow-list; empty disables the check (LAN/dev).
+    allowed_hosts: str = Field(default="", alias="ALLOWED_HOSTS")
+    # Trust CF-Connecting-IP / X-Forwarded-For for the client IP. Only set true
+    # when the app genuinely sits behind the tunnel + proxy — otherwise a LAN
+    # client spoofs the header to dodge the login rate limit.
+    trust_proxy_headers: bool = Field(default=False, alias="TRUST_PROXY_HEADERS")
+    # Cloudflare Access: when both are set, /api/v1/admin/* also requires a
+    # valid Cf-Access-Jwt-Assertion header (edge auth layered on app auth).
+    cf_access_team_domain: str = Field(default="", alias="CF_ACCESS_TEAM_DOMAIN")
+    cf_access_aud: str = Field(default="", alias="CF_ACCESS_AUD")
+
     # --- Database ---------------------------------------------------------------
     database_url: str = Field(
         default="postgresql+asyncpg://chore:chore@localhost:5432/chore",

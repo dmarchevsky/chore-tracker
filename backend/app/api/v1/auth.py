@@ -14,6 +14,7 @@ from app.auth.sessions import create_session, revoke_session
 from app.auth.totp import new_secret, provisioning_uri, verify_code
 from app.config import get_settings
 from app.models import User, UserRole
+from app.net import client_ip
 from app.schemas.auth import (
     LoginRequest,
     MeResponse,
@@ -26,10 +27,6 @@ from app.services import audit
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
-
-
 def _set_session_cookie(response: Response, session_id: str, *, max_age: int) -> None:
     s = get_settings()
     response.set_cookie(
@@ -37,7 +34,7 @@ def _set_session_cookie(response: Response, session_id: str, *, max_age: int) ->
         session_id,
         max_age=max_age,
         httponly=True,
-        secure=s.cookie_secure,
+        secure=s.cookie_secure or s.is_prod,  # always Secure once internet-facing
         samesite="lax",
         path="/",
     )
@@ -47,7 +44,7 @@ def _set_session_cookie(response: Response, session_id: str, *, max_age: int) ->
 async def login(
     payload: LoginRequest, request: Request, response: Response, db: DbDep
 ) -> MeResponse:
-    ip = _client_ip(request)
+    ip = client_ip(request)
     if not ratelimit.ip_allowed(ip):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "too many attempts, slow down")
     if ratelimit.account_locked_for(payload.username) > 0:
