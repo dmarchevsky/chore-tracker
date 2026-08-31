@@ -42,13 +42,20 @@ function renderPending() {
     if (url.includes('status=verified_fail')) return Promise.resolve(json([]));
     if (url.includes('status=pending'))
       return Promise.resolve(
-        json([occ({ id: 'p1', status: 'pending', chore_id: 'c2', window_open_at: soon() })]),
+        json([
+          // The same chore materialised across the horizon, out of order.
+          occ({ id: 'p2', status: 'pending', chore_id: 'c2', window_open_at: soon(48) }),
+          occ({ id: 'p1', status: 'pending', chore_id: 'c2', window_open_at: soon() }),
+          occ({ id: 'p3', status: 'pending', chore_id: 'c2', window_open_at: soon(24) }),
+          occ({ id: 'p4', status: 'pending', chore_id: 'c3', window_open_at: soon(12) }),
+        ]),
       );
     if (url.includes('/chores'))
       return Promise.resolve(
         json([
           { id: 'c1', title: 'Empty the sink' },
           { id: 'c2', title: 'Walk the dog' },
+          { id: 'c3', title: 'Take out the bins' },
         ]),
       );
     return Promise.resolve(json([]));
@@ -63,8 +70,8 @@ function renderPending() {
   );
 }
 
-function soon() {
-  return new Date(Date.now() + 6 * 3600_000).toISOString();
+function soon(hours = 6) {
+  return new Date(Date.now() + hours * 3600_000).toISOString();
 }
 
 describe('kid Pending', () => {
@@ -78,5 +85,17 @@ describe('kid Pending', () => {
     expect(screen.getByText('Coming up')).toBeInTheDocument();
     const later = screen.getByText('Walk the dog');
     expect(later.closest('a')).toBeNull();
+  });
+
+  it('shows only the next upcoming occurrence of each chore', async () => {
+    renderPending();
+    await screen.findByText('Coming up');
+
+    // Three pending "Walk the dog" rows collapse to the soonest one...
+    expect(screen.getAllByText('Walk the dog')).toHaveLength(1);
+    // Four pending occurrences in, two rows out — one per chore.
+    expect(screen.getAllByText(/opens/)).toHaveLength(2);
+    // ...and a different chore still gets its own row.
+    expect(screen.getByText('Take out the bins')).toBeInTheDocument();
   });
 });

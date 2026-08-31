@@ -8,6 +8,16 @@ import { OccRow } from './occRow';
 // Chores the kid still has to act on right now.
 const DO_NOW = new Set(['open', 'verified_fail']);
 
+/** Keep the first occurrence of each chore — apply to a due-sorted list, so that's the next one. */
+function firstPerChore() {
+  const seen = new Set<string>();
+  return (o: Occurrence) => {
+    if (seen.has(o.chore_id)) return false;
+    seen.add(o.chore_id);
+    return true;
+  };
+}
+
 export function Pending() {
   const open = useOccurrences({ status: 'open' });
   const redo = useOccurrences({ status: 'verified_fail' });
@@ -23,7 +33,9 @@ export function Pending() {
   const doNow = [...(open.data ?? []), ...(redo.data ?? [])]
     .filter((o) => DO_NOW.has(o.status))
     .sort(byDue);
-  const upcoming = (later.data ?? []).sort(byDue);
+  // A daily chore materialises a row per day across the horizon; a kid only
+  // needs to know which one is next.
+  const upcoming = (later.data ?? []).sort(byDue).filter(firstPerChore());
 
   return (
     <div className="flex flex-col gap-3 pt-2">
