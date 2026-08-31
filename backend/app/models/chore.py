@@ -77,7 +77,6 @@ class Chore(TimestampMixin, Base):
     photo_count: Mapped[int] = mapped_column(Integer, default=1)
     photo_prompts: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
     allow_gallery_upload: Mapped[bool] = mapped_column(Boolean, default=False)
-    prompt_token_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     geofence: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
 
     # --- Verification ------------------------------------------------------

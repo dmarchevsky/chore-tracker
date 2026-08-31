@@ -22,7 +22,6 @@ const CHORE = {
   photo_count: 1,
   photo_prompts: [],
   allow_gallery_upload: false,
-  prompt_token_enabled: false,
   verification_mode: 'manual',
   verification_rule: null,
   reward_cents: 200,
@@ -185,7 +184,6 @@ describe('admin Chores', () => {
     fireEvent.change(screen.getByPlaceholderText('wide kitchen'), {
       target: { value: 'wide kitchen' },
     });
-    fireEvent.click(screen.getByLabelText(/show a random number/i));
 
     fireEvent.click(screen.getByRole('button', { name: /add a check/i }));
     fireEvent.change(screen.getByPlaceholderText(/free of dishes/i), {
@@ -198,7 +196,6 @@ describe('admin Chores', () => {
     const body = calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>;
     expect(body.photo_count).toBe(2);
     expect(body.photo_prompts).toEqual(['sink close-up', 'wide kitchen']);
-    expect(body.prompt_token_enabled).toBe(true);
     expect(body.verification_checklist).toEqual([
       { id: 1, text: 'Is the sink basin free of dishes?', required: true },
     ]);
@@ -212,7 +209,7 @@ describe('admin Chores', () => {
     await screen.findByDisplayValue('Feed the cat');
 
     expect(screen.queryByLabelText('How many photos')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/show a random number/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/allow picking an existing photo/i)).not.toBeInTheDocument();
   });
 
   it('deactivates a chore', async () => {

@@ -47,7 +47,6 @@ def build_task_prompt(
     chore_title: str,
     photo_labels: list[str] | None,
     checks: list[tuple[int, str]],
-    prompt_token: str | None = None,
 ) -> str:
     """The USER message body (spec §7.3).
 
@@ -64,14 +63,8 @@ def build_task_prompt(
         lines.append(f"Photo label: {labels[0]}")
     elif labels:
         lines.append("Photos, in order: " + ", ".join(f"{i}. {x}" for i, x in enumerate(labels, 1)))
-    numbered = list(checks)
-    if prompt_token:
-        next_id = max((i for i, _ in numbered), default=0) + 1
-        numbered.append(
-            (next_id, f"Is the number {prompt_token} clearly visible somewhere in this photo?")
-        )
     lines += ["", "Answer each check:"]
-    lines += [f"{i}. {q} (yes/no/unclear)" for i, q in numbered]
+    lines += [f"{i}. {q} (yes/no/unclear)" for i, q in checks]
     lines += [
         "",
         "For each: answer, confidence 0-1, and one sentence of evidence describing what you see.",

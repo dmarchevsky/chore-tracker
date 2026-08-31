@@ -50,7 +50,6 @@ class ChoreBase(BaseModel):
     photo_count: int = Field(default=1, ge=0, le=6)
     photo_prompts: list[str] = Field(default_factory=list)
     allow_gallery_upload: bool = False
-    prompt_token_enabled: bool = False
     geofence: GeofenceSpec | None = None
 
     verification_mode: VerificationMode
@@ -140,7 +139,6 @@ class ChoreUpdate(BaseModel):
     photo_prompts: list[str] | None = None
     allow_gallery_upload: bool | None = None
     geofence: GeofenceSpec | None = None
-    prompt_token_enabled: bool | None = None
     verification_mode: VerificationMode | None = None
     verification_rule: str | None = None
     verification_checklist: list[ChecklistItem] | None = None
@@ -174,7 +172,6 @@ class OccurrenceOut(BaseModel):
     settlement_locked_at: datetime | None
     reward_cents: int
     penalty_cents: int
-    prompt_token: str | None = None
     verification_error: str | None = None
 
 

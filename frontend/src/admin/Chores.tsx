@@ -31,7 +31,6 @@ const BLANK: Record<string, unknown> = {
   photo_count: 1,
   photo_prompts: [],
   allow_gallery_upload: false,
-  prompt_token_enabled: false,
   geofence: null,
   verification_mode: 'manual',
   verification_rule: '',
@@ -57,7 +56,6 @@ const EDITABLE = [
   'photo_count',
   'photo_prompts',
   'allow_gallery_upload',
-  'prompt_token_enabled',
   'verification_mode',
   'verification_rule',
   'verification_checklist',
@@ -241,7 +239,6 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
     if (!PHOTO_PROOFS.has(String(form.proof_type))) {
       out.photo_prompts = [];
       out.allow_gallery_upload = false;
-      out.prompt_token_enabled = false;
     }
     return out;
   }
@@ -516,20 +513,6 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
           <p className="text-xs text-slate-500">
             Off means the in-app camera only. Anything picked from the gallery is flagged and always
             comes to you for review.
-          </p>
-
-          <label className="flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={Boolean(form.prompt_token_enabled)}
-              onChange={(e) => set('prompt_token_enabled', e.target.checked)}
-            />
-            Show a random number to hold in the photo
-          </label>
-          <p className="text-xs text-slate-500">
-            A new 2-digit number each time, shown on the kid’s camera screen and added as a required
-            AI check. It’s the only thing here that defeats a screenshot or a friend’s photo — worth
-            it for the chores that matter, overkill for the rest.
           </p>
         </div>
       )}

@@ -97,7 +97,5 @@ class ChoreOccurrence(TimestampMixin, Base):
     penalty_cents: Mapped[int] = mapped_column(Integer, default=0)
     late_multiplier: Mapped[float] = mapped_column(Numeric(4, 2), default=1.0)
 
-    # Randomised anti-cheat token shown at capture time; the VLM must see it (spec §6.1).
-    prompt_token: Mapped[str | None] = mapped_column(String(8), default=None)
     # Set when the LLM path fails open to NEEDS_REVIEW (spec §6.3 rule 3).
     verification_error: Mapped[str | None] = mapped_column(String(200), default=None)

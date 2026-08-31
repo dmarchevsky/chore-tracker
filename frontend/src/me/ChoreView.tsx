@@ -182,7 +182,6 @@ export function ChoreView() {
       {capturing && (
         <Capture
           chore={c}
-          promptToken={o.prompt_token}
           onSubmit={submitPhotos}
           onClose={() => setCapturing(false)}
           busy={busy}

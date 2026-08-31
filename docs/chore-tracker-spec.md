@@ -192,7 +192,7 @@ Mitigations, in order of value:
 2. `[D]` **Perceptual hash (pHash) dedup.** Compute a pHash on ingest; compare against the last 120 days of submissions for that household. Hamming distance below a threshold → flag `DUPLICATE_SUSPECTED`, force `NEEDS_REVIEW`. Catches reuse, which is the most common cheat.
 3. `[D]` **Server-side capture timestamp is authoritative.** Client EXIF timestamps are advisory only. Record server receive time, and flag when EXIF `DateTimeOriginal` is more than 15 minutes older than receive time (`STALE_CAPTURE`).
 4. **Metadata flags — gallery uploads only.** Missing EXIF entirely (common for screenshots and downloads) → `NO_EXIF`; image dimensions matching a phone screen aspect + no camera make/model → `SCREENSHOT_SUSPECTED`. `[D]` **These run only on `source=gallery`.** The in-app capture required by item 1 grabs a frame to a canvas and encodes it with `toBlob`, which yields a JPEG with *no* EXIF at any ratio the camera track happens to deliver (typically 4:3 or 16:9) — so both heuristics fired on every honest submission, forcing it to `NEEDS_REVIEW` and burying the model's verdict. They can only carry information about a file the kid chose, so that is the only place they run; a picked JPEG is forwarded to the server unmodified (up to 6MB) so there is real metadata to judge. Camera captures stay covered by items 2, 3 and 5.
-5. `[D]` **Randomized prompt token — in v1 scope (Phase 4), per-chore opt-in, default off.** The app shows a random 2-digit number or emoji at capture time; it must be visible in the frame (held on a second phone, or on a small whiteboard kept in the kitchen). The token is added to the VLM checklist as a required check: *"Is the number 47 visible somewhere in this photo? (yes/no/unclear)"*. This is the only mitigation here that actually defeats a screenshot or a friend's photo. Turn it on for the two chores that matter (kitchen, room) and leave it off for dog walks.
+5. `[D]` ~~**Randomized prompt token.**~~ **REMOVED.** Built in Phase 4, then taken out: it required the household to keep a second screen or whiteboard in frame for every photo, which is friction on every honest submission to catch a cheat that had not happened. Nothing replaces it, so a screenshot of an old photo displayed on another screen is defeated only by pHash dedup (item 2) and a parent's eyes — accepted knowingly. The `chores.prompt_token_enabled` and `chore_occurrences.prompt_token` columns are dropped; reinstating it means a new migration, the scheduler stamp, a checklist item in `build_task_prompt`, and the capture-screen pill.
 6. **Multi-angle:** requiring two labeled shots (sink close-up + wide kitchen) makes staging meaningfully harder for near-zero extra effort.
 
 All flags are surfaced in the admin review panel and are inputs to the routing logic — they do **not**
@@ -594,11 +594,10 @@ double-submitted approve does not double-pay.
 ### Phase 4 — LLM verification
 Job queue, verification worker, prompt builder from checklists, JSON-schema parsing with repair retry,
 confidence banding, anti-cheat flags (pHash dedup, EXIF staleness, screenshot heuristics, gallery-upload),
-randomized prompt token as a checklist item, `/health/llm`, `just eval` harness against the Phase 0 labeled set.
+`/health/llm`, `just eval` harness against the Phase 0 labeled set.
 **Accept when:** an auto-verified pass and an auto-verified fail both work end to end; killing the LLM
 container routes new submissions to `NEEDS_REVIEW` with an error note and zero incorrect ledger entries;
-a resubmitted identical photo is flagged; a photo missing the day's prompt token fails the token check
-on a token-enabled chore.
+a resubmitted identical photo is flagged.
 
 ### Phase 5 — Kid PWA
 Kid shell, in-app `getUserMedia` capture with labeled slots, offline queue, location check-in with geofence
@@ -618,7 +617,7 @@ exactly; an external security scan shows no unauthenticated endpoint other than 
 
 ### Phase 7 — Nice-to-haves (backlog)
 Streaks and bonus multipliers; sibling leaderboard `[Q1]`; chore trading between kids with parent approval;
-weekly email/Push digest; "prompt token in photo" anti-cheat; savings goals; recurring auto-payout on Sundays.
+weekly email/Push digest; savings goals; recurring auto-payout on Sundays.
 
 ---
 
@@ -633,7 +632,7 @@ weekly email/Push digest; "prompt token in photo" anti-cheat; savings goals; rec
 | ~~Q5~~ | ~~Remote access?~~ | **RESOLVED: Cloudflare Tunnel** (+ Access on admin paths, Tailscale for operator access). §12.2. |
 | Q6 | Filesystem media storage or MinIO? | Filesystem, content-addressed. |
 | ~~Q13~~ | ~~Device mix?~~ | **RESOLVED: mixed iOS + Android.** Both geofence automation paths required (§6.2); Web Push must be verified on both; iOS requires Home Screen install before push works at all. |
-| ~~Q14~~ | ~~Anti-cheat strictness?~~ | **RESOLVED: strict.** In-app `getUserMedia` only, pHash dedup, EXIF/screenshot flags force review, prompt token available per chore. §6.1. |
+| ~~Q14~~ | ~~Anti-cheat strictness?~~ | **RESOLVED: strict.** In-app `getUserMedia` only, pHash dedup, gallery uploads forced to review; EXIF/screenshot flags apply to gallery uploads only, and the prompt token was removed. §6.1. |
 | Q7 | Ages of the daughters? | Drives reading level of kid-facing copy and how much friction is acceptable. Assumed 10–15. |
 | Q8 | Do kids get read-only visibility into the chore *definitions* (rules, amounts)? | Yes — transparency reduces arguments. |
 | Q9 | Is there an existing Postgres instance on the LAN to reuse, or run a dedicated one? | Dedicated container. |

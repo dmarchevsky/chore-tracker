@@ -1,6 +1,6 @@
 """Verification worker: run the §7.1 pipeline for one queued job.
 
-1. build checklist prompt (+ prompt-token check) — the anti-cheat scan already ran at
+1. build the checklist prompt — the anti-cheat scan already ran at
    ingest, for every verification mode, and its flags are on the submission
 2. call the vision model (with repair retry)
 3. derive verdict + apply confidence banding — any anti-cheat flag forces NEEDS_REVIEW
@@ -46,7 +46,7 @@ _OUTCOME_TO_VERDICT = {
 }
 
 
-def _checklist(chore: Chore, occurrence: ChoreOccurrence) -> tuple[list[tuple[int, str]], set[int]]:
+def _checklist(chore: Chore) -> tuple[list[tuple[int, str]], set[int]]:
     """``(id, question)`` pairs plus the ids that must pass. The ids travel all the way to
     the model and back, so a checklist with gaps (a parent deleted a row) still lines up."""
     items = chore.verification_checklist or []
@@ -54,9 +54,6 @@ def _checklist(chore: Chore, occurrence: ChoreOccurrence) -> tuple[list[tuple[in
         items = [{"id": 1, "text": chore.verification_rule, "required": True}]
     checks = [(it["id"], it["text"]) for it in items]
     required = {it["id"] for it in items if it.get("required", True)}
-    if chore.prompt_token_enabled and occurrence.prompt_token:
-        # build_task_prompt appends the token question under this same id.
-        required.add(max((i for i, _ in checks), default=0) + 1)
     return checks, required
 
 
@@ -87,12 +84,11 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
         .all()
     )
 
-    checks, required_ids = _checklist(chore, occ)
+    checks, required_ids = _checklist(chore)
     prompt = build_task_prompt(
         chore_title=chore.title,
         photo_labels=[m.prompt_label or "" for m in media_rows],
         checks=checks,
-        prompt_token=occ.prompt_token if chore.prompt_token_enabled else None,
     )
 
     cfg = await get_llm_config(db)

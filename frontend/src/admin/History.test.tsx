@@ -24,7 +24,6 @@ function occ(id: string, status: string) {
     settlement_locked_at: null,
     reward_cents: 200,
     penalty_cents: 0,
-    prompt_token: null,
     verification_error: null,
   };
 }

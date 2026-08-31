@@ -71,7 +71,6 @@ async def _mk_occ(
     reward=200,
     penalty=0,
     rule="The sink is empty.",
-    token=False,
     checklist=None,
 ) -> ChoreOccurrence:
     chore = Chore(
@@ -85,7 +84,6 @@ async def _mk_occ(
         proof_type="photo",
         photo_count=1,
         photo_prompts=["sink"],
-        prompt_token_enabled=token,
         verification_mode=mode,
         verification_rule=rule,
         verification_checklist=checklist,
@@ -103,7 +101,6 @@ async def _mk_occ(
         status=OccurrenceStatus.open,
         reward_cents=reward,
         penalty_cents=penalty,
-        prompt_token="47" if token else None,
     )
     db.add(occ)
     await db.flush()
@@ -269,22 +266,6 @@ async def test_duplicate_photo_is_flagged_and_reviewed(client, db_session, house
     ).scalar_one()
     assert v.kind == "llm" and v.verdict == Verdict.needs_review
     assert "DUPLICATE_SUSPECTED" in v.reasoning
-
-
-@respx.mock
-async def test_missing_prompt_token_fails_the_check(client, db_session, household, child_user):
-    # token check gets id = 2 (after the single rule check id=1); model says it's not visible.
-    respx.post(LLM_URL).mock(
-        return_value=_completion(_model_reply([(1, "yes", 0.95), (2, "no", 0.95)]))
-    )
-    occ = await _mk_occ(db_session, household, child_user, reward=200, token=True)
-    await db_session.commit()
-    await _kid_submit(client, occ.id)
-    await _make_media_look_real(db_session, occ.id)
-
-    await verify.drain(db_session)
-    await db_session.refresh(occ)
-    assert occ.status == OccurrenceStatus.verified_fail
 
 
 @respx.mock

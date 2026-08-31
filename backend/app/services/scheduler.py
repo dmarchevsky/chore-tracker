@@ -9,7 +9,6 @@ A machine that was asleep for hours catches up correctly on the next tick (spec 
 from __future__ import annotations
 
 import logging
-import secrets
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -109,10 +108,6 @@ async def generate_occurrences(
                         "reward_cents": chore.reward_cents,
                         "penalty_cents": chore.penalty_cents,
                         "late_multiplier": chore.late_multiplier,
-                        # 2-digit token the kid must hold in frame (spec §6.1).
-                        "prompt_token": f"{secrets.randbelow(90) + 10}"
-                        if chore.prompt_token_enabled
-                        else None,
                     }
                 )
 

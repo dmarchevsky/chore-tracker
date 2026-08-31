@@ -8,7 +8,6 @@ type Perm = 'starting' | 'live' | 'denied' | 'error' | 'gallery' | 'unsupported'
 
 interface Props {
   chore: Chore;
-  promptToken: string | null;
   onSubmit: (files: Blob[], note: string, source: 'camera' | 'gallery') => Promise<void>;
   onClose: () => void;
   busy: boolean;
@@ -22,7 +21,7 @@ interface Props {
  * `100dvh`, not `100vh` — on mobile browsers `vh` counts the retracted URL bar, which
  * is how a "full-screen" layout ends up taller than the screen and scrolls anyway.
  */
-export function Capture({ chore, promptToken, onSubmit, onClose, busy }: Props) {
+export function Capture({ chore, onSubmit, onClose, busy }: Props) {
   const slots = chore.photo_prompts.length
     ? chore.photo_prompts
     : Array.from({ length: Math.max(chore.photo_count, 1) }, (_, i) => `Photo ${i + 1}`);
@@ -139,20 +138,8 @@ export function Capture({ chore, promptToken, onSubmit, onClose, busy }: Props) 
         <p className="truncate text-sm text-slate-300">
           {slots[active]} — {active + 1} of {slots.length}
         </p>
-        {promptToken ? (
-          <span className="shrink-0 rounded-full bg-amber-500/20 px-3 py-1 text-lg font-black tracking-widest text-amber-200">
-            {promptToken}
-          </span>
-        ) : (
-          <span className="w-6" aria-hidden="true" />
-        )}
+        <span className="w-6" aria-hidden="true" />
       </header>
-
-      {promptToken && (
-        <p className="shrink-0 px-4 pb-2 text-center text-xs text-amber-200">
-          Hold up today’s number in the photo
-        </p>
-      )}
 
       {unavailable ? (
         <div className="min-h-0 flex-1 overflow-y-auto p-4">

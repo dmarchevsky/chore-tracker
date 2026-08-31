@@ -41,7 +41,6 @@ export interface Occurrence {
   settlement_locked_at: string | null;
   reward_cents: number;
   penalty_cents: number;
-  prompt_token: string | null;
   verification_error: string | null;
 }
 
@@ -55,7 +54,6 @@ export interface Chore {
   photo_count: number;
   photo_prompts: string[];
   allow_gallery_upload: boolean;
-  prompt_token_enabled: boolean;
   verification_mode: string;
   verification_rule: string | null;
   verification_checklist: { id: number; text: string; required: boolean }[] | null;

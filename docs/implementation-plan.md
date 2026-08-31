@@ -272,8 +272,7 @@ Original work items (for reference):
    any anti-cheat flag → `NEEDS_REVIEW`; any infra error → `NEEDS_REVIEW` + `verification_error`.
 7. `app/worker/verify.py` — the §7.1 step 1–7 pipeline; write `verification` row (full raw
    request + response), transition occurrence, ledger write only on terminal pass/fail, push.
-8. Randomized prompt token (per-chore opt-in, default off): app shows a 2-digit number at
-   capture; added as a required checklist item *"Is the number NN visible in this photo?"*.
+8. ~~Randomized prompt token~~ — shipped in Phase 4, removed later; see spec §6.1 item 5.
 9. `GET /health/llm` — VLM reachability. `just eval` — run the Phase 0 labeled set against the
    current prompt, report precision/recall per chore type.
 10. `verification_mode` respected everywhere: `llm_auto`, `llm_assist` (LLM suggests → all to
@@ -372,7 +371,7 @@ Work items:
 ## Phase 7 — Nice-to-haves (backlog, not scheduled)
 
 Streaks + bonus multipliers; sibling leaderboard (Q1); chore trading with parent approval;
-weekly email/Push digest; "prompt token in photo" hardening; savings goals; recurring
+weekly email/Push digest; savings goals; recurring
 auto-payout on Sundays. Keep as a backlog file `docs/backlog.md`; do not build in this pass.
 
 ---
@@ -405,7 +404,7 @@ UI only `fixed`/`rotating`. Q5/Q13/Q14 already resolved in-spec.
 - **Phase 4:** configure a chore `llm_auto`; submit a clean and a dirty photo, assert
   `VERIFIED_PASS` / `VERIFIED_FAIL` + correct ledger; `docker compose stop llm-vision`, submit,
   assert `NEEDS_REVIEW` + `verification_error` + no ledger row; resubmit the same file, assert
-  `DUPLICATE_SUSPECTED`; enable a prompt token, submit without it, assert token check fails;
+  `DUPLICATE_SUSPECTED`;
   `just eval` prints precision/recall.
 - **Phase 5:** run the manual device checklist on one iPhone + one Android — install to home
   screen, capture, Web Push delivery, camera-permission recovery, airplane-mode submit →

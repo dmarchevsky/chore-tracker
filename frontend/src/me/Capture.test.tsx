@@ -31,9 +31,7 @@ afterEach(() => {
 describe('Capture', () => {
   it('explains how to unblock the camera when getUserMedia is missing', () => {
     setMediaDevices(undefined); // jsdom default — like plain http on a LAN IP
-    render(
-      <Capture chore={chore} promptToken={null} onSubmit={noop} onClose={close} busy={false} />,
-    );
+    render(<Capture chore={chore} onSubmit={noop} onClose={close} busy={false} />);
 
     expect(screen.getByText(/blocking the camera on http:\/\/localhost/i)).toBeInTheDocument();
     expect(screen.getByText(/unsafely-treat-insecure-origin-as-secure/i)).toBeInTheDocument();
@@ -46,9 +44,7 @@ describe('Capture', () => {
     setMediaDevices({ getUserMedia });
     vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
 
-    render(
-      <Capture chore={chore} promptToken={null} onSubmit={noop} onClose={close} busy={false} />,
-    );
+    render(<Capture chore={chore} onSubmit={noop} onClose={close} busy={false} />);
 
     await waitFor(() => expect(screen.getByLabelText('Take photo')).toBeEnabled());
     expect(getUserMedia).toHaveBeenCalled();
@@ -71,9 +67,7 @@ describe('Capture', () => {
       },
     );
 
-    render(
-      <Capture chore={chore} promptToken={null} onSubmit={noop} onClose={close} busy={false} />,
-    );
+    render(<Capture chore={chore} onSubmit={noop} onClose={close} busy={false} />);
     fireEvent.click(await screen.findByLabelText('Take photo'));
 
     await waitFor(() => expect(grabFrame).toHaveBeenCalled());
@@ -84,9 +78,7 @@ describe('Capture', () => {
     const getUserMedia = vi.fn().mockRejectedValue({ name: 'NotReadableError' });
     setMediaDevices({ getUserMedia });
 
-    render(
-      <Capture chore={chore} promptToken={null} onSubmit={noop} onClose={close} busy={false} />,
-    );
+    render(<Capture chore={chore} onSubmit={noop} onClose={close} busy={false} />);
 
     await waitFor(() =>
       expect(
@@ -113,9 +105,7 @@ describe('Capture', () => {
     vi.mocked(toDownscaledJpeg).mockResolvedValue(new Blob(['jpeg'], { type: 'image/jpeg' }));
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 
-    render(
-      <Capture chore={chore} promptToken={null} onSubmit={onSubmit} onClose={close} busy={false} />,
-    );
+    render(<Capture chore={chore} onSubmit={onSubmit} onClose={close} busy={false} />);
 
     // The note used to be a permanent textarea between the shutter and Submit.
     expect(screen.queryByPlaceholderText(/add a note/i)).not.toBeInTheDocument();
@@ -141,7 +131,7 @@ describe('Capture', () => {
     vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
 
     const { container } = render(
-      <Capture chore={chore} promptToken="47" onSubmit={noop} onClose={onClose} busy={false} />,
+      <Capture chore={chore} onSubmit={noop} onClose={onClose} busy={false} />,
     );
 
     // 100dvh, not 100vh: `vh` counts the retracted mobile URL bar.
@@ -150,7 +140,6 @@ describe('Capture', () => {
     expect(container.firstElementChild?.className).toContain('overflow-hidden');
     expect(document.body.style.overflow).toBe('hidden');
 
-    expect(screen.getByText('47')).toBeInTheDocument(); // token pill, not a banner
     fireEvent.click(screen.getByLabelText('Close camera'));
     expect(onClose).toHaveBeenCalled();
   });

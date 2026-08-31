@@ -165,7 +165,6 @@ export function ReviewDetail({ id, onDone }: { id: string; onDone: () => void })
         <p className="text-sm text-slate-400">
           due {new Date(o.due_at).toLocaleString()} · window{' '}
           {new Date(o.window_open_at).toLocaleString()}
-          {o.prompt_token && ` · token ${o.prompt_token}`}
         </p>
         {why && <p className="mt-1 text-sm text-amber-400">{why}</p>}
         {locked && (
