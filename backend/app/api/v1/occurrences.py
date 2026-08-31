@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
@@ -46,9 +46,11 @@ async def list_occurrences(
     status_: Annotated[OccurrenceStatus | None, Query(alias="status")] = None,
     child: uuid.UUID | None = None,
     inbox: bool = False,
+    order: Annotated[Literal["asc", "desc"], Query()] = "asc",
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> list[ChoreOccurrence]:
-    stmt = select(ChoreOccurrence).order_by(ChoreOccurrence.due_at).limit(limit)
+    col = ChoreOccurrence.due_at.desc() if order == "desc" else ChoreOccurrence.due_at.asc()
+    stmt = select(ChoreOccurrence).order_by(col).limit(limit)
     if user.role == UserRole.child:
         stmt = stmt.where(ChoreOccurrence.assignee_id == user.id)
     elif child is not None:

@@ -1,7 +1,8 @@
 """Chore definitions + preview (spec §4.1, §10).
 
-TODO(decision): Q8 — kids get read-only visibility of chore definitions. Deferred to the
-kid PWA (Phase 5); these endpoints are admin-only for now.
+Reads (`GET /chores`, `GET /chores/{id}`) are open to any signed-in user — kids get
+read-only visibility of the chore definitions + amounts (spec §15 Q8), scoped to active
+chores. All writes stay admin-only.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import ValidationError
 from sqlalchemy import select
 
-from app.auth.deps import AdminUser, DbDep
+from app.auth.deps import AdminUser, CurrentUser, DbDep
 from app.models import Chore, ChoreOccurrence, Household, OccurrenceStatus, User, UserRole
 from app.schemas.chore import ChoreBase, ChoreCreate, ChoreOut, ChoreUpdate, OccurrencePreviewItem
 from app.services import audit
@@ -76,9 +77,10 @@ async def _drop_future_occurrences(db: DbDep, chore: Chore) -> int:
 
 
 @router.get("", response_model=list[ChoreOut])
-async def list_chores(db: DbDep, _: AdminUser, include_inactive: bool = False) -> list[Chore]:
+async def list_chores(db: DbDep, user: CurrentUser, include_inactive: bool = False) -> list[Chore]:
     stmt = select(Chore).order_by(Chore.title)
-    if not include_inactive:
+    # Kids see the active chore definitions only (spec §15 Q8); include_inactive is admin-only.
+    if not include_inactive or user.role == UserRole.child:
         stmt = stmt.where(Chore.active.is_(True))
     return list((await db.execute(stmt)).scalars())
 
@@ -107,9 +109,9 @@ async def create_chore(payload: ChoreCreate, db: DbDep, admin: AdminUser) -> Cho
 
 
 @router.get("/{chore_id}", response_model=ChoreOut)
-async def get_chore(chore_id: uuid.UUID, db: DbDep, _: AdminUser) -> Chore:
+async def get_chore(chore_id: uuid.UUID, db: DbDep, user: CurrentUser) -> Chore:
     chore = await db.get(Chore, chore_id)
-    if chore is None:
+    if chore is None or (user.role == UserRole.child and not chore.active):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "chore not found")
     return chore
 

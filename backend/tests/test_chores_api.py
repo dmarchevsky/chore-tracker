@@ -277,6 +277,45 @@ async def test_delete_is_soft(client, admin_user, child_user, second_child, totp
     ] is False
 
 
+async def test_child_reads_active_chores_only(
+    client, admin_user, child_user, second_child, totp_now
+):
+    h = await _admin_headers(client, admin_user, totp_now)
+    keep = (await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)).json()[
+        "id"
+    ]
+    gone = (
+        await client.post(
+            "/api/v1/chores", json=_fixed_body(child_user, title="Retired"), headers=h
+        )
+    ).json()["id"]
+    await client.delete(f"/api/v1/chores/{gone}", headers=h)
+
+    login = await client.post(
+        "/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"}
+    )
+    kh = {"X-CSRF-Token": login.json()["csrf_token"]}
+
+    lst = await client.get("/api/v1/chores")
+    assert lst.status_code == 200
+    assert [c["id"] for c in lst.json()] == [keep]
+    # include_inactive is admin-only — a kid can't see the retired chore
+    assert [c["id"] for c in (await client.get("/api/v1/chores?include_inactive=true")).json()] == [
+        keep
+    ]
+
+    assert (await client.get(f"/api/v1/chores/{keep}")).status_code == 200
+    assert (await client.get(f"/api/v1/chores/{gone}")).status_code == 404
+
+    # writes stay admin-only
+    assert (
+        await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=kh)
+    ).status_code == 403
+    assert (
+        await client.patch(f"/api/v1/chores/{keep}", json={"reward_cents": 999}, headers=kh)
+    ).status_code == 403
+
+
 async def test_occurrences_scoped_and_assignee_swap(
     client, admin_user, child_user, second_child, totp_now, db_session
 ):
@@ -319,6 +358,27 @@ async def test_occurrences_scoped_and_assignee_swap(
         )
     ).scalar_one()
     assert n_audit == 1
+
+
+async def test_occurrences_order_desc(
+    client, admin_user, child_user, second_child, totp_now, db_session
+):
+    h = await _admin_headers(client, admin_user, totp_now)
+    await client.post(
+        "/api/v1/chores",
+        json=_rotating_body(child_user, second_child, cadence="daily"),
+        headers=h,
+    )
+    await generate_occurrences(db_session)
+    await db_session.commit()
+
+    asc = [o["due_at"] for o in (await client.get("/api/v1/occurrences", headers=h)).json()]
+    desc = [
+        o["due_at"] for o in (await client.get("/api/v1/occurrences?order=desc", headers=h)).json()
+    ]
+    assert asc == sorted(asc)
+    assert desc == sorted(desc, reverse=True)
+    assert desc[0] == asc[-1]
 
 
 async def test_assignee_swap_forbidden_for_child(
