@@ -446,7 +446,9 @@ async def test_assignee_swap_forbidden_for_child(
     assert r.status_code == 403
 
 
-async def test_geofence_is_creatable_and_editable(client, admin_user, child_user, totp_now):
+async def test_geofence_is_creatable_and_editable(
+    client, db_session, admin_user, child_user, totp_now
+):
     """geofence was missing from ChoreUpdate, so a fence could only ever be set at
     creation — and the admin form had no control for it at all (spec §6.2)."""
     h = await _admin_headers(client, admin_user, totp_now)
@@ -467,9 +469,18 @@ async def test_geofence_is_creatable_and_editable(client, admin_user, child_user
     chore_id = created.json()["id"]
     assert created.json()["geofence"]["radius_m"] == 120
 
+    # arrive_before is a `time` once Pydantic has parsed it, nested inside the geofence
+    # dict — the audit snapshot has to survive that (it used to 500 on the INSERT).
     moved = await client.patch(
         f"/api/v1/chores/{chore_id}",
-        json={"geofence": {"lat": 40.7128, "lon": -74.0060, "radius_m": 250}},
+        json={
+            "geofence": {
+                "lat": 40.7128,
+                "lon": -74.0060,
+                "radius_m": 250,
+                "arrive_before": "08:10",
+            }
+        },
         headers=h,
     )
     assert moved.status_code == 200, moved.text
@@ -477,8 +488,21 @@ async def test_geofence_is_creatable_and_editable(client, admin_user, child_user
         "lat": 40.7128,
         "lon": -74.006,
         "radius_m": 250,
-        "arrive_before": None,
+        "arrive_before": "08:10:00",
     }
+
+    audited = (
+        (
+            await db_session.execute(
+                select(AuditLog)
+                .where(AuditLog.action == "chore.update")
+                .order_by(AuditLog.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert audited[-1].after["geofence"]["arrive_before"] == "08:10:00"
 
     # A location chore without a fence is not a thing the state machine can evaluate.
     cleared = await client.patch(f"/api/v1/chores/{chore_id}", json={"geofence": None}, headers=h)

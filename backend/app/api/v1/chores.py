@@ -237,6 +237,10 @@ def _jsonable(v: object) -> object:
         return float(v)
     if isinstance(v, list):
         return [_jsonable(x) for x in v]
+    if isinstance(v, dict):
+        # geofence.arrive_before is a time, and a checklist item could hold anything —
+        # a nested value that json.dumps rejects fails the whole audit INSERT with a 500.
+        return {k: _jsonable(x) for k, x in v.items()}
     return v
 
 
