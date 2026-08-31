@@ -176,9 +176,12 @@ async def apply_decision(
     before = occurrence.status
     existing = await _earn_entries(db, occurrence.id)
 
+    # `kind` is a plain String column, so an entry loaded in a later request carries a str,
+    # not the enum member — `is` silently matched nothing and a changed decision left the
+    # original entry standing.
     if action == "approve":
         for e in existing:
-            if e.kind is LedgerKind.penalty and e.reversed_by_entry_id is None:
+            if e.kind == LedgerKind.penalty and e.reversed_by_entry_id is None:
                 await ledger.reverse_entry(db, entry=e, actor=admin, reason=f"approved: {reason}")
         await ledger.credit_earning(
             db,
@@ -191,7 +194,7 @@ async def apply_decision(
         verdict = Verdict.pass_
     elif action == "reject":
         for e in existing:
-            if e.kind is LedgerKind.earning and e.reversed_by_entry_id is None:
+            if e.kind == LedgerKind.earning and e.reversed_by_entry_id is None:
                 await ledger.reverse_entry(db, entry=e, actor=admin, reason=f"rejected: {reason}")
         await ledger.debit_penalty(db, occurrence=occurrence, actor=admin, reason=reason)
         occurrence.status = OccurrenceStatus.rejected

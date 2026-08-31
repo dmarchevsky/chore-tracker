@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../api/client';
+import { api, getPage } from '../api/client';
 import type { Child, Chore, Dispute, LedgerEntry, Occurrence } from '../api/types';
 
 export interface AdminSubmission {
@@ -64,10 +64,46 @@ export function useDecision() {
       api.post(`/occurrences/${id}/decision`, body),
     onSuccess: (_d, { id }) => {
       void qc.invalidateQueries({ queryKey: ['inbox'] });
+      void qc.invalidateQueries({ queryKey: ['history'] });
       void qc.invalidateQueries({ queryKey: ['occurrence', id] });
+      void qc.invalidateQueries({ queryKey: ['verifications', id] });
+      // Re-deciding writes reversing ledger entries, so money moves too (spec §9).
+      void qc.invalidateQueries({ queryKey: ['ledger'] });
+      void qc.invalidateQueries({ queryKey: ['balance'] });
     },
   });
 }
+
+export interface HistoryQuery {
+  child?: string;
+  chore?: string;
+  statuses: string[];
+  from?: string;
+  to?: string;
+  limit: number;
+  offset: number;
+}
+
+export function historyQs(q: HistoryQuery): string {
+  const qs = new URLSearchParams({
+    order: 'desc',
+    limit: String(q.limit),
+    offset: String(q.offset),
+  });
+  if (q.child) qs.set('child', q.child);
+  if (q.chore) qs.set('chore', q.chore);
+  if (q.from) qs.set('from', q.from);
+  if (q.to) qs.set('to', q.to);
+  q.statuses.forEach((s) => qs.append('status', s));
+  return qs.toString();
+}
+
+export const useHistory = (q: HistoryQuery) =>
+  useQuery({
+    queryKey: ['history', q],
+    queryFn: () => getPage<Occurrence[]>(`/occurrences?${historyQs(q)}`),
+    placeholderData: (prev) => prev,
+  });
 
 export interface DisputeWithContext extends Dispute {
   chore_title: string | null;

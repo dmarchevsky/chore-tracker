@@ -7,8 +7,8 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
-from sqlalchemy import select
+from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile, status
+from sqlalchemy import func, select
 
 from app.auth.deps import AdminUser, CurrentUser, DbDep
 from app.models import (
@@ -44,28 +44,48 @@ _MAX_UPLOAD_BYTES = 12 * 1024 * 1024  # Cloudflare free-plan cap is 100MB; we do
 async def list_occurrences(
     db: DbDep,
     user: CurrentUser,
+    response: Response,
     from_: Annotated[datetime | None, Query(alias="from")] = None,
     to: datetime | None = None,
-    status_: Annotated[OccurrenceStatus | None, Query(alias="status")] = None,
+    status_: Annotated[list[OccurrenceStatus] | None, Query(alias="status")] = None,
     child: uuid.UUID | None = None,
+    chore: uuid.UUID | None = None,
     inbox: bool = False,
     order: Annotated[Literal["asc", "desc"], Query()] = "asc",
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[ChoreOccurrence]:
+    """`status` may repeat (`?status=approved&status=rejected`). The match count for the
+    filter — ignoring limit/offset — comes back in `X-Total-Count` so a history view knows
+    whether there is more to load."""
     col = ChoreOccurrence.due_at.desc() if order == "desc" else ChoreOccurrence.due_at.asc()
-    stmt = select(ChoreOccurrence).order_by(col).limit(limit)
+    filters = []
     if user.role == UserRole.child:
-        stmt = stmt.where(ChoreOccurrence.assignee_id == user.id)
+        filters.append(ChoreOccurrence.assignee_id == user.id)
     elif child is not None:
-        stmt = stmt.where(ChoreOccurrence.assignee_id == child)
+        filters.append(ChoreOccurrence.assignee_id == child)
+    if chore is not None:
+        filters.append(ChoreOccurrence.chore_id == chore)
     if inbox:  # admin review queue (spec §4.2)
-        stmt = stmt.where(ChoreOccurrence.status.in_(_INBOX))
+        filters.append(ChoreOccurrence.status.in_(_INBOX))
     if from_ is not None:
-        stmt = stmt.where(ChoreOccurrence.due_at >= from_)
+        filters.append(ChoreOccurrence.due_at >= from_)
     if to is not None:
-        stmt = stmt.where(ChoreOccurrence.due_at <= to)
-    if status_ is not None:
-        stmt = stmt.where(ChoreOccurrence.status == status_)
+        filters.append(ChoreOccurrence.due_at <= to)
+    if status_:
+        filters.append(ChoreOccurrence.status.in_(status_))
+
+    total = await db.scalar(select(func.count()).select_from(ChoreOccurrence).where(*filters))
+    response.headers["X-Total-Count"] = str(total or 0)
+
+    stmt = (
+        select(ChoreOccurrence)
+        .where(*filters)
+        # due_at alone is not unique, so page on (due_at, id) or rows can repeat/vanish.
+        .order_by(col, ChoreOccurrence.id)
+        .limit(limit)
+        .offset(offset)
+    )
     return list((await db.execute(stmt)).scalars())
 
 

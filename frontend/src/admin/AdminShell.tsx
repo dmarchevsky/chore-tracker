@@ -3,6 +3,7 @@ import { useAuth } from '../auth/AuthContext';
 
 const tabs = [
   { to: '/admin', label: 'Inbox', end: true },
+  { to: '/admin/history', label: 'History' },
   { to: '/admin/chores', label: 'Chores' },
   { to: '/admin/kids', label: 'Kids' },
   { to: '/admin/money', label: 'Money' },

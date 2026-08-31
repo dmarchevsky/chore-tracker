@@ -21,7 +21,7 @@ function holdReason(
   v: AdminVerification | undefined,
 ) {
   if (o.verification_error) return `The vision model couldn’t be reached — ${o.verification_error}`;
-  if (sub?.flags.length) return `Held for a look: ${sub.flags.map(flagLabel).join(' · ')}`;
+  if (sub?.flags?.length) return `Held for a look: ${sub.flags.map(flagLabel).join(' · ')}`;
   if (o.status === 'submitted') return 'Waiting on the AI check.';
   if (o.status === 'verified_fail') return 'The AI called this a miss — your call overrides it.';
   if (o.status === 'needs_review' && v?.verdict === 'needs_review')
@@ -142,6 +142,7 @@ export function ReviewDetail({ id, onDone }: { id: string; onDone: () => void })
   const latestSub = subs.data?.[0];
   const why = holdReason(o, latestSub, latestVer);
   const locked = o.settlement_locked_at != null;
+  const decided = ['approved', 'rejected', 'excused'].includes(o.status);
 
   function act(action: 'approve' | 'reject' | 'excuse' | 'redo') {
     if (!reason.trim()) {
@@ -242,6 +243,12 @@ export function ReviewDetail({ id, onDone }: { id: string; onDone: () => void })
           }}
         />
         {reasonError && <p className="mt-1 text-sm text-rose-400">Add a reason first.</p>}
+        {decided && !locked && (
+          <p className="mt-2 text-xs text-slate-500">
+            Already {statusLabel(o.status).toLowerCase()}. Deciding again reverses the old ledger
+            entry and writes a new one — nothing is edited in place.
+          </p>
+        )}
         <input
           className="mt-2 w-full rounded-xl bg-slate-800 p-2 text-sm"
           placeholder="Adjust amount ($, optional)"

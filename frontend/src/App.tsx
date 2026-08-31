@@ -11,6 +11,7 @@ import { Money as KidMoney } from './me/Money';
 import { Rules } from './me/Rules';
 import { AdminShell } from './admin/AdminShell';
 import { Inbox } from './admin/Inbox';
+import { History } from './admin/History';
 import { Chores } from './admin/Chores';
 import { Kids } from './admin/Kids';
 import { Money as AdminMoney } from './admin/Money';
@@ -47,6 +48,7 @@ function Shell() {
         <Route path="/admin" element={<AdminShell />}>
           <Route index element={<Inbox />} />
           <Route path="review/:id" element={<Inbox />} />
+          <Route path="history" element={<History />} />
           <Route path="chores" element={<Chores />} />
           <Route path="kids" element={<Kids />} />
           <Route path="money" element={<AdminMoney />} />

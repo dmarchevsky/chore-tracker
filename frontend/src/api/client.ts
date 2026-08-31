@@ -17,6 +17,14 @@ export function setCsrfToken(token: string) {
 const BASE = '/api/v1';
 const SAFE = new Set(['GET', 'HEAD']);
 
+/** A GET that also needs a response header — used for paged lists (X-Total-Count). */
+export async function getPage<T>(path: string): Promise<{ items: T; total: number }> {
+  const resp = await fetch(BASE + path, { method: 'GET', credentials: 'same-origin' });
+  if (!resp.ok) throw new ApiError(resp.status, resp.statusText);
+  const items = (await resp.json()) as T;
+  return { items, total: Number(resp.headers.get('X-Total-Count') ?? 0) };
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   const init: RequestInit = { method, credentials: 'same-origin', headers };

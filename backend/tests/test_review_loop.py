@@ -286,3 +286,34 @@ async def test_rejection_reason_reaches_the_kid_and_nothing_else_does(
         await client.get(f"/api/v1/occurrences/{occ.id}/verifications", headers=ah)
     ).json()
     assert admin_view[0]["reasoning"] == "the sink is still full"
+
+
+async def test_a_past_decision_can_be_changed_and_the_money_follows(
+    client, db_session, household, admin_user, child_user, totp_now
+):
+    """History lets a parent reopen a decided item; corrections are reversing entries,
+    never an UPDATE (spec §9)."""
+    occ = await _mk_occ(db_session, household, child_user, reward=300, penalty=100)
+    await db_session.commit()
+
+    kh = await _kid_login(client)
+    await _submit_photo(client, occ.id, kh)
+
+    ah = await _admin_login(client, totp_now)
+    await client.post(
+        f"/api/v1/occurrences/{occ.id}/decision",
+        json={"action": "approve", "reason": "looked fine"},
+        headers=ah,
+    )
+    assert await balance_cents(db_session, child_user.id) == 300
+
+    changed = await client.post(
+        f"/api/v1/occurrences/{occ.id}/decision",
+        json={"action": "reject", "reason": "second look — it wasn't done"},
+        headers=ah,
+    )
+    assert changed.status_code == 200 and changed.json()["status"] == "rejected"
+
+    # +300 earning, -300 reversal, -100 penalty. Nothing was edited in place.
+    assert await _ledger_rows(db_session, occ.id) == 3
+    assert await balance_cents(db_session, child_user.id) == -100
