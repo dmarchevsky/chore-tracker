@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useChores, useOccurrences } from '../api/hooks';
 import { Spinner } from '../shared/ui';
@@ -17,7 +18,9 @@ const DONE = new Set([
 const SIXTY_DAYS_MS = 60 * 864e5;
 
 export function Complete() {
-  const from = new Date(Date.now() - SIXTY_DAYS_MS).toISOString();
+  // Compute once per mount — a value that changes every render churns the query key
+  // and the request never settles (perpetual spinner).
+  const from = useMemo(() => new Date(Date.now() - SIXTY_DAYS_MS).toISOString(), []);
   const occ = useOccurrences({ from, order: 'desc', limit: 200 });
   const chores = useChores();
 

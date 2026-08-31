@@ -34,10 +34,12 @@ afterEach(() => {
 });
 
 describe('kid Complete', () => {
-  it('shows finished occurrences with a status chip and excludes to-do ones', async () => {
+  it('shows finished occurrences, excludes to-do ones, and fetches once', async () => {
+    const occCalls: string[] = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
-      if (url.includes('/occurrences'))
+      if (url.includes('/occurrences')) {
+        occCalls.push(url);
         return Promise.resolve(
           json([
             occ('a1', 'approved'),
@@ -45,10 +47,12 @@ describe('kid Complete', () => {
             occ('o1', 'open'), // must be filtered out
           ]),
         );
+      }
       if (url.includes('/chores'))
         return Promise.resolve(json([{ id: 'c1', title: 'Empty the sink' }]));
       return Promise.resolve(json([]));
     });
+
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={qc}>
@@ -59,9 +63,12 @@ describe('kid Complete', () => {
     );
 
     await waitFor(() => expect(screen.getAllByText('Empty the sink')).toHaveLength(2));
+
+    // `from` is memoised → stable query key → one request. A per-render value
+    // churns the key and the spinner never clears.
+    expect(new Set(occCalls).size).toBe(1);
     expect(screen.getByText('Done ✅')).toBeInTheDocument();
     expect(screen.getByText('Missed')).toBeInTheDocument();
-    // the 'open' row is not rendered → no third card / no "Do it" chip
     expect(screen.queryByText('Do it')).not.toBeInTheDocument();
     expect(screen.getAllByRole('link')[0]).toHaveAttribute('href', '/me/chores/a1');
   });
