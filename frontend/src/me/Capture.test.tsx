@@ -5,7 +5,7 @@ import { Capture } from './Capture';
 
 vi.mock('../pwa/downscale', () => ({
   toDownscaledJpeg: vi.fn().mockResolvedValue(new Blob(['jpeg'], { type: 'image/jpeg' })),
-  fileToDownscaledJpeg: vi.fn().mockResolvedValue(new Blob(['jpeg'])),
+  prepareGalleryUpload: vi.fn().mockResolvedValue(new Blob(['jpeg'])),
 }));
 import { toDownscaledJpeg } from '../pwa/downscale';
 

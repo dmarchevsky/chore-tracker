@@ -39,3 +39,20 @@ export async function fileToDownscaledJpeg(file: File): Promise<Blob> {
     bitmap.close();
   }
 }
+
+/** Largest gallery pick we forward untouched; the API caps an upload at 12MB. */
+export const MAX_PASSTHROUGH_BYTES = 6 * 1024 * 1024;
+
+/**
+ * Prepare a gallery pick for upload, keeping its EXIF when we safely can.
+ *
+ * The metadata anti-cheat checks only run on gallery uploads, and they need real EXIF to
+ * say anything — but `createImageBitmap` + canvas strips it. So a JPEG small enough to
+ * send as-is goes through untouched; the server downscales and strips on ingest anyway.
+ * Anything else (HEIC from an iPhone, PNG, an oversized original) is decoded here: the
+ * backend's Pillow has no HEIF plugin, so the browser has to do that conversion.
+ */
+export async function prepareGalleryUpload(file: File): Promise<Blob> {
+  if (file.type === 'image/jpeg' && file.size <= MAX_PASSTHROUGH_BYTES) return file;
+  return await fileToDownscaledJpeg(file);
+}

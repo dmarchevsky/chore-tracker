@@ -44,6 +44,12 @@ def test_static_flags_bundle():
     assert FLAG_NO_EXIF in flags and FLAG_SCREENSHOT in flags
 
 
+def test_static_flags_skip_metadata_checks():
+    """An in-app capture has no EXIF by construction — that is not evidence (spec §6.1)."""
+    flags = static_flags(1170, 2532, None, datetime(2025, 1, 1, tzinfo=UTC), metadata_checks=False)
+    assert FLAG_NO_EXIF not in flags and FLAG_SCREENSHOT not in flags
+
+
 def test_dedup_window_is_120_days():
     assert DEDUP_WINDOW_DAYS == 120
 
@@ -103,9 +109,11 @@ def _textured_jpeg(seed: int, w: int = 800, h: int = 600) -> bytes:
     return buf.getvalue()
 
 
-async def _submit_photo(db, occ, blob, *, created_at=None) -> tuple[Submission, SubmissionMedia]:
+async def _submit_photo(
+    db, occ, blob, *, created_at=None, source="camera"
+) -> tuple[Submission, SubmissionMedia]:
     res = ingest_photo(blob, household_id=str(occ.household_id))
-    sub = Submission(occurrence_id=occ.id, kind="photo")
+    sub = Submission(occurrence_id=occ.id, kind="photo", source=source)
     if created_at:
         sub.created_at = created_at
     db.add(sub)
@@ -157,9 +165,31 @@ async def test_scan_includes_stale_capture(db_session, occ, media_root):
     assert FLAG_STALE in flags
 
 
-async def test_scan_flags_missing_exif(db_session, occ, media_root):
-    sub, media = await _submit_photo(db_session, occ, _textured_jpeg(seed=5))
+async def test_scan_flags_missing_exif_on_gallery_upload(db_session, occ, media_root):
+    sub, media = await _submit_photo(db_session, occ, _textured_jpeg(seed=5), source="gallery")
     media.exif = None
     await db_session.flush()
     flags = await scan_submission(db_session, sub)
     assert FLAG_NO_EXIF in flags
+
+
+async def test_camera_capture_is_not_flagged_for_missing_metadata(db_session, occ, media_root):
+    """The regression: getUserMedia -> canvas -> toBlob strips EXIF, so every honest
+    in-app photo used to trip NO_EXIF + SCREENSHOT_SUSPECTED and never reached a verdict."""
+    sub, media = await _submit_photo(db_session, occ, _textured_jpeg(seed=11, w=800, h=600))
+    media.exif = None
+    await db_session.flush()
+
+    flags = await scan_submission(db_session, sub)
+    assert FLAG_NO_EXIF not in flags
+    assert FLAG_SCREENSHOT not in flags
+
+
+async def test_gallery_upload_with_camera_metadata_is_not_flagged(db_session, occ, media_root):
+    sub, media = await _submit_photo(db_session, occ, _textured_jpeg(seed=13), source="gallery")
+    media.exif = {"Make": "Apple", "Model": "iPhone 13"}
+    await db_session.flush()
+
+    flags = await scan_submission(db_session, sub)
+    assert FLAG_NO_EXIF not in flags
+    assert FLAG_SCREENSHOT not in flags

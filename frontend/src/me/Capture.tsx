@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Chore } from '../api/types';
 import { Button, Card } from '../shared/ui';
-import { fileToDownscaledJpeg, toDownscaledJpeg } from '../pwa/downscale';
+import { prepareGalleryUpload, toDownscaledJpeg } from '../pwa/downscale';
 
 type Perm = 'starting' | 'live' | 'denied' | 'error' | 'gallery' | 'unsupported';
 
@@ -109,7 +109,7 @@ export function Capture({ chore, promptToken, onSubmit, busy }: Props) {
   }
 
   async function pickFromGallery(file: File) {
-    const blob = await fileToDownscaledJpeg(file);
+    const blob = await prepareGalleryUpload(file); // keep EXIF where we can (spec §6.1)
     setShots((prev) => prev.map((b, i) => (i === active ? blob : b)));
     setPerm('gallery');
   }
