@@ -121,3 +121,15 @@ export interface LedgerEntry {
   created_at: string;
   occurrence_id: string | null;
 }
+
+export interface Dispute {
+  id: string;
+  occurrence_id: string;
+  author_user_id: string | null;
+  message: string;
+  status: 'open' | 'resolved';
+  status_at_filing: string | null;
+  resolution_note: string | null;
+  resolved_at: string | null;
+  created_at: string;
+}

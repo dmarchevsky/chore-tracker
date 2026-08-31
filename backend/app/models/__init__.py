@@ -3,6 +3,7 @@
 from app.models.audit import AuditLog
 from app.models.checkin import CheckinToken
 from app.models.chore import AssignmentMode, Chore, ProofType, VerificationMode
+from app.models.dispute import Dispute, DisputeStatus
 from app.models.household import Household
 from app.models.job import JobState, VerificationJob
 from app.models.ledger import EARN_KINDS, LedgerEntry, LedgerKind
@@ -33,6 +34,8 @@ __all__ = [
     "CheckinToken",
     "Chore",
     "ChoreOccurrence",
+    "Dispute",
+    "DisputeStatus",
     "Household",
     "HouseholdSettings",
     "JobState",

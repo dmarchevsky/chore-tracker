@@ -150,6 +150,6 @@ async def test_dispute_notifies_admins(
         json={"message": "the sink WAS empty!"},
         headers=kh,
     )
-    assert r.status_code == 202
+    assert r.status_code == 201  # the dispute row is created and returned
     logs = (await db_session.execute(select(NotificationLog))).scalars().all()
     assert any(log.kind == "admin.dispute" for log in logs)

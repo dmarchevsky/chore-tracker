@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
-import type { Balance, Chore, LedgerEntry, Occurrence } from './types';
+import type { Balance, Chore, Dispute, LedgerEntry, Occurrence } from './types';
 
 export interface OccurrenceQuery {
   inbox?: boolean;
@@ -60,10 +60,22 @@ export function useLedger(childId: string) {
   });
 }
 
+export function useDisputes(occId: string) {
+  return useQuery({
+    enabled: !!occId,
+    queryKey: ['disputes', occId],
+    queryFn: () => api.get<Dispute[]>(`/occurrences/${occId}/disputes`),
+    retry: false,
+  });
+}
+
 export function useDispute(occId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (message: string) => api.post(`/occurrences/${occId}/dispute`, { message }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['occurrence', occId] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['occurrence', occId] });
+      void qc.invalidateQueries({ queryKey: ['disputes', occId] });
+    },
   });
 }

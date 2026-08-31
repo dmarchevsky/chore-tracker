@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { Child, Chore, LedgerEntry, Occurrence } from '../api/types';
+import type { Child, Chore, Dispute, LedgerEntry, Occurrence } from '../api/types';
 
 export interface AdminSubmission {
   id: string;
@@ -66,6 +66,35 @@ export function useDecision() {
       void qc.invalidateQueries({ queryKey: ['inbox'] });
       void qc.invalidateQueries({ queryKey: ['occurrence', id] });
     },
+  });
+}
+
+export interface DisputeWithContext extends Dispute {
+  chore_title: string | null;
+  author_name: string | null;
+  occurrence_status: string | null;
+  occurrence_due_at: string | null;
+}
+
+export const useOpenDisputes = () =>
+  useQuery({
+    queryKey: ['disputes', 'open'],
+    queryFn: () => api.get<DisputeWithContext[]>('/disputes?status=open'),
+  });
+
+export const useOccurrenceDisputes = (id: string) =>
+  useQuery({
+    enabled: !!id,
+    queryKey: ['disputes', id],
+    queryFn: () => api.get<Dispute[]>(`/occurrences/${id}/disputes`),
+  });
+
+export function useResolveDispute() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, note }: { id: string; note: string }) =>
+      api.post(`/disputes/${id}/resolve`, { note }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['disputes'] }),
   });
 }
 

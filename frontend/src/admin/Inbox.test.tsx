@@ -53,6 +53,22 @@ const verification = {
   created_at: due,
 };
 
+const dispute = {
+  id: 'd1',
+  occurrence_id: 'o1',
+  author_user_id: 'k1',
+  message: 'I did walk him, the photo is just dark',
+  status: 'open',
+  status_at_filing: 'rejected',
+  resolution_note: null,
+  resolved_at: null,
+  created_at: due,
+  chore_title: 'Empty the sink',
+  author_name: 'Mo',
+  occurrence_status: 'rejected',
+  occurrence_due_at: due,
+};
+
 function renderInbox() {
   vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
     const url = String(input);
@@ -61,6 +77,7 @@ function renderInbox() {
       return Promise.resolve(json([{ id: 'c1', title: 'Empty the sink' }]));
     if (url.endsWith('/children')) return Promise.resolve(json([{ id: 'k1', display_name: 'Mo' }]));
     if (url.endsWith('/occurrences/o1')) return Promise.resolve(json(occurrence));
+    if (url.includes('/disputes')) return Promise.resolve(json([dispute]));
     if (url.includes('/submissions')) return Promise.resolve(json([submission]));
     if (url.includes('/verifications')) return Promise.resolve(json([verification]));
     return Promise.resolve(json([]));
@@ -82,28 +99,44 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** The chore title appears in the disputes section too; the queue row is the last one. */
+async function queueRow() {
+  await waitFor(() => expect(screen.getAllByText('Empty the sink').length).toBeGreaterThan(0));
+  return screen.getAllByText('Empty the sink').at(-1)!;
+}
+
 describe('admin Inbox', () => {
   it('lists items waiting for review and opens the detail pane', async () => {
-    await waitFor(() => expect(screen.getByText('Empty the sink')).toBeInTheDocument());
-    screen.getByText('Empty the sink').click();
+    (await queueRow()).click();
 
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /^approve$/i })).toBeInTheDocument(),
     );
-    expect(screen.getByPlaceholderText(/your kid will see this/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/^Reason — your kid will see this$/)).toBeInTheDocument();
   });
 
   it('names the status and the kid instead of printing the raw enum', async () => {
-    await waitFor(() => expect(screen.getByText('Empty the sink')).toBeInTheDocument());
+    await queueRow();
 
     expect(screen.getByText('Checking…')).toBeInTheDocument();
     expect(screen.queryByText('submitted')).not.toBeInTheDocument();
-    expect(screen.getByText(/^Mo ·/)).toBeInTheDocument();
+    expect(screen.getAllByText(/^Mo ·/).length).toBeGreaterThan(0);
+  });
+
+  it('surfaces a kid’s “this isn’t right” instead of leaving it in a push notification', async () => {
+    await waitFor(() =>
+      expect(screen.getByText(/Kids say something is wrong \(1\)/)).toBeInTheDocument(),
+    );
+    expect(screen.getAllByText(/the photo is just dark/).length).toBeGreaterThan(0);
+
+    screen.getByText(/the photo is just dark/).click();
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText(/reply — your kid will see this/i)).toBeInTheDocument(),
+    );
   });
 
   it('leads with why the item is held and what the model actually found', async () => {
-    await waitFor(() => expect(screen.getByText('Empty the sink')).toBeInTheDocument());
-    screen.getByText('Empty the sink').click();
+    (await queueRow()).click();
 
     // The flag is explained, not shouted as an enum...
     await waitFor(() =>

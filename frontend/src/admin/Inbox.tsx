@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useInbox, useDecision } from './api';
-import { useAdminChores, useChildren } from './api';
+import { useAdminChores, useChildren, useOpenDisputes } from './api';
 import { ReviewDetail } from './ReviewDetail';
 import { Button, Card, Spinner } from '../shared/ui';
 import { StatusBadge } from '../shared/StatusBadge';
@@ -11,6 +11,7 @@ export function Inbox() {
   const inbox = useInbox();
   const chores = useAdminChores();
   const kids = useChildren();
+  const openDisputes = useOpenDisputes();
   const decide = useDecision();
   const nav = useNavigate();
   // Push notifications deep-link straight at an item (/admin/review/:id).
@@ -64,6 +65,24 @@ export function Inbox() {
             </Button>
           )}
         </div>
+        {(openDisputes.data ?? []).length > 0 && (
+          <div className="flex flex-col gap-2">
+            <h2 className="text-sm font-semibold text-rose-400">
+              Kids say something is wrong ({openDisputes.data!.length})
+            </h2>
+            {openDisputes.data!.map((d) => (
+              <Card key={d.id} className="cursor-pointer border-rose-800">
+                <button className="w-full text-left" onClick={() => select(d.occurrence_id)}>
+                  <p className="font-semibold">{d.chore_title ?? 'Chore'}</p>
+                  <p className="text-sm text-slate-300">“{d.message}”</p>
+                  <p className="text-xs text-slate-400">
+                    {d.author_name ?? 'A kid'} · {new Date(d.created_at).toLocaleString()}
+                  </p>
+                </button>
+              </Card>
+            ))}
+          </div>
+        )}
         {rows.length === 0 && <p className="text-slate-500">Nothing waiting. 🎉</p>}
         {rows.map((o) => (
           <Card

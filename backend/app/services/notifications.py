@@ -171,3 +171,14 @@ async def notify_dispute(db: AsyncSession, occ: ChoreOccurrence, message: str) -
         body=message[:140],
         url=f"/admin/review/{occ.id}",
     )
+
+
+async def notify_dispute_resolved(db: AsyncSession, dispute, note: str) -> None:
+    await notify(
+        db,
+        user_id=dispute.author_user_id,
+        kind="dispute.resolved",
+        title="A parent replied",
+        body=note[:140],
+        url=f"/me/chores/{dispute.occurrence_id}",
+    )

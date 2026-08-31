@@ -14,6 +14,7 @@ from app.auth.deps import AdminUser, CurrentUser, DbDep
 from app.models import (
     Chore,
     ChoreOccurrence,
+    Dispute,
     OccurrenceStatus,
     User,
     UserRole,
@@ -21,6 +22,7 @@ from app.models import (
 from app.models.occurrence import SUBMITTABLE, TERMINAL
 from app.models.verification import Verification
 from app.schemas.chore import AssigneeSwap, OccurrenceOut
+from app.schemas.dispute import DisputeOut
 from app.schemas.submission import (
     DecisionRequest,
     DisputeRequest,
@@ -28,7 +30,8 @@ from app.schemas.submission import (
     SubmissionOut,
     VerificationOut,
 )
-from app.services import audit, notifications, review
+from app.services import audit, review
+from app.services import disputes as dispute_svc
 from app.services.media import sign_media
 
 router = APIRouter(prefix="/occurrences", tags=["occurrences"])
@@ -263,18 +266,24 @@ async def decide(
     return occ
 
 
-@router.post("/{occurrence_id}/dispute", status_code=202)
+@router.get("/{occurrence_id}/disputes", response_model=list[DisputeOut])
+async def occurrence_disputes(
+    occurrence_id: uuid.UUID, db: DbDep, user: CurrentUser
+) -> list[Dispute]:
+    """Newest-first. `_get_scoped` keeps a kid to their own occurrences."""
+    await _get_scoped(db, user, occurrence_id)
+    return await dispute_svc.for_occurrence(db, occurrence_id)
+
+
+@router.post("/{occurrence_id}/dispute", response_model=DisputeOut, status_code=201)
 async def dispute(
     occurrence_id: uuid.UUID, body: DisputeRequest, db: DbDep, user: CurrentUser
-) -> dict:
+) -> Dispute:
     occ = await _get_scoped(db, user, occurrence_id)
-    await audit.record(
-        db,
-        actor=user,
-        action="occurrence.dispute",
-        entity_type="occurrence",
-        entity_id=occ.id,
-        after={"message": body.message, "status_at_dispute": occ.status},
-    )
-    await notifications.notify_dispute(db, occ, body.message)
-    return {"status": "filed"}
+    try:
+        d = await dispute_svc.open_dispute(db, occurrence=occ, author=user, message=body.message)
+    except dispute_svc.DisputeError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    await db.flush()
+    await db.refresh(d)
+    return d

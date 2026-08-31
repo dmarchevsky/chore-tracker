@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../api/client';
-import { useChore, useDispute, useOccurrence } from '../api/hooks';
+import { useChore, useDispute, useDisputes, useOccurrence } from '../api/hooks';
 import { Button, Card, Spinner } from '../shared/ui';
 import { money } from '../shared/format';
 import { Capture } from './Capture';
@@ -49,6 +49,7 @@ export function ChoreView() {
       ),
     retry: false,
   });
+  const disputes = useDisputes(id);
   const dispute = useDispute(id);
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
@@ -63,6 +64,8 @@ export function ChoreView() {
   const c = chore.data;
   const latest = verdicts.data?.[0];
   const actionable = ACTIONABLE.has(o.status);
+  const filed = disputes.data ?? [];
+  const openDispute = filed.find((d) => d.status === 'open');
   const message = latest?.child_message || CANNED[o.status] || o.status;
 
   async function afterSubmit() {
@@ -160,7 +163,18 @@ export function ChoreView() {
           <Capture chore={c} promptToken={o.prompt_token} onSubmit={submitPhotos} busy={busy} />
         ))}
 
-      {!actionable && o.status !== 'verified_pass' && o.status !== 'approved' && (
+      {filed.map((d) => (
+        <Card key={d.id}>
+          <p className="text-sm font-semibold text-slate-300">You said: “{d.message}”</p>
+          {d.status === 'open' ? (
+            <p className="mt-1 text-sm text-amber-400">Waiting for a parent to look. ⏳</p>
+          ) : (
+            <p className="mt-1 text-sm text-emerald-400">A parent replied: “{d.resolution_note}”</p>
+          )}
+        </Card>
+      ))}
+
+      {!openDispute && !actionable && o.status !== 'verified_pass' && o.status !== 'approved' && (
         <button
           className="self-start text-sm text-slate-400 underline"
           onClick={() => setShowDispute((s) => !s)}
@@ -184,6 +198,7 @@ export function ChoreView() {
               dispute.mutate(disputeMsg, {
                 onSuccess: () => {
                   setShowDispute(false);
+                  setDisputeMsg('');
                   setFlash('Sent to a parent.');
                 },
               })

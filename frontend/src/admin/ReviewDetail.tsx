@@ -1,9 +1,16 @@
 import { useState } from 'react';
-import { useAdminOccurrence, useAdminSubmissions, useAdminVerifications, useDecision } from './api';
+import {
+  useAdminOccurrence,
+  useAdminSubmissions,
+  useAdminVerifications,
+  useDecision,
+  useOccurrenceDisputes,
+  useResolveDispute,
+} from './api';
 import type { AdminSubmission, AdminVerification } from './api';
 import { Button, Card, Spinner } from '../shared/ui';
 import { StatusBadge } from '../shared/StatusBadge';
-import { flagLabel, verdictLabel } from '../shared/status';
+import { flagLabel, statusLabel, verdictLabel } from '../shared/status';
 import { money } from '../shared/format';
 import type { Occurrence } from '../api/types';
 
@@ -84,11 +91,45 @@ function VerificationCard({ v, latest }: { v: AdminVerification; latest: boolean
   );
 }
 
+function DisputeCard({ id }: { id: string }) {
+  const resolve = useResolveDispute();
+  const [note, setNote] = useState('');
+  const [noteError, setNoteError] = useState(false);
+
+  return (
+    <Card className="border-rose-800">
+      <textarea
+        className="w-full rounded-xl bg-slate-800 p-3 text-sm"
+        placeholder="Reply — your kid will see this"
+        value={note}
+        onChange={(e) => {
+          setNote(e.target.value);
+          setNoteError(false);
+        }}
+      />
+      {noteError && <p className="mt-1 text-sm text-rose-400">Write a reply first.</p>}
+      <Button
+        className="mt-2 min-h-0 px-3 py-2 text-sm"
+        variant="ghost"
+        disabled={resolve.isPending}
+        onClick={() => {
+          if (!note.trim()) return setNoteError(true);
+          resolve.mutate({ id, note });
+        }}
+      >
+        Reply &amp; close
+      </Button>
+      {resolve.isError && <p className="mt-2 text-sm text-rose-400">Couldn’t send that reply.</p>}
+    </Card>
+  );
+}
+
 export function ReviewDetail({ id, onDone }: { id: string; onDone: () => void }) {
   const occ = useAdminOccurrence(id);
   const subs = useAdminSubmissions(id);
   const vers = useAdminVerifications(id);
   const decide = useDecision();
+  const disputes = useOccurrenceDisputes(id);
   const [reason, setReason] = useState('');
   const [reasonError, setReasonError] = useState(false);
   const [override, setOverride] = useState('');
@@ -166,6 +207,25 @@ export function ReviewDetail({ id, onDone }: { id: string; onDone: () => void })
         </Card>
       ))}
       {(subs.data ?? []).length === 0 && <p className="text-sm text-slate-500">No submissions.</p>}
+
+      {(disputes.data ?? []).map((d) => (
+        <div key={d.id} className="flex flex-col gap-2">
+          <Card className="border-rose-800">
+            <p className="text-sm font-semibold text-rose-400">
+              {d.status === 'open' ? 'Your kid says this isn’t right' : 'Answered'}
+            </p>
+            <p className="mt-1 text-sm">“{d.message}”</p>
+            <p className="text-xs text-slate-500">
+              {new Date(d.created_at).toLocaleString()}
+              {d.status_at_filing && ` · filed when it was ${statusLabel(d.status_at_filing)}`}
+            </p>
+            {d.resolution_note && (
+              <p className="mt-2 text-sm text-slate-300">You replied: “{d.resolution_note}”</p>
+            )}
+          </Card>
+          {d.status === 'open' && <DisputeCard id={d.id} />}
+        </div>
+      ))}
 
       {verifications.map((v, i) => (
         <VerificationCard key={v.id} v={v} latest={i === 0} />
