@@ -36,12 +36,16 @@ Prerequisites: `docker` + `docker compose`, `uv`, and [`just`](https://github.co
 | Task | Command |
 |---|---|
 | Postgres only (for tests) | `just db-up` / `just db-down` |
-| Full app stack | `just up` (builds + starts `db` `api` `worker`) / `just down` |
+| Full app stack | `just up` (builds + starts `db` `api` `worker` — **not** the PWA) / `just down` |
 | Migrations | `just migrate` · `just makemigration "message"` |
 | Seed dev data | `just seed` |
-| **Lint gate** | `just lint` (ruff check + `ruff format --check`) |
+| **Lint gate (backend)** | `just lint` (ruff check + `ruff format --check`) |
 | Autofix | `just fmt` |
-| **Test gate** | `just test` (pytest; needs Postgres reachable on `:5432`) |
+| **Test gate (backend)** | `just test` (pytest; needs Postgres reachable on `:5432`) |
+| PWA deps | `just web-install` (once per worktree — `node_modules` is not shared) |
+| **Lint gate (PWA)** | `just web-lint` (eslint + `prettier --check` + `tsc --noEmit`) |
+| **Test gate (PWA)** | `just web-test` (vitest) |
+| **Rebuild + serve the PWA** | `just web-serve` (rebuilds the `proxy` image, serves on `:5173`) |
 
 ## Git workflow — MUST follow for every change
 
@@ -57,6 +61,8 @@ History on `main` is **linear** (rebase + fast-forward, no merge commits).
    - `just db-up` (once per machine session) so the test DB is up
    - `just fmt` then `just lint` → clean
    - `just test` → green, and the new behavior is actually covered
+   - touched `frontend/`? `just web-install` (each worktree has its own `node_modules`),
+     then `just web-lint` and `just web-test` → both green
    - models changed? `just makemigration "..."`, eyeball the autogenerate diff,
      `just migrate` applies with no error
 5. **Commit once:**
@@ -79,6 +85,18 @@ History on `main` is **linear** (rebase + fast-forward, no merge commits).
    - `docker compose ps` → `db` healthy, `api` + `worker` up
    - `curl -sf localhost:8088/api/v1/health` → `{"status":"ok"}`
    - `docker compose logs worker` → tick loop, no tracebacks
+
+   **`just up` does NOT rebuild the PWA** — it builds `db` `api` `worker` only, and the
+   `proxy` container keeps serving whatever bundle was baked into its image. Any change
+   under `frontend/` is invisible in the browser until you rebuild it. So when the branch
+   touched `frontend/`, also:
+   - `just web-serve` → rebuilds the `proxy` image and recreates the container
+   - `docker compose ps proxy` → up, and `curl -sf localhost:5173/` → 200
+   - confirm the new bundle is actually being served, e.g.
+     `curl -s localhost:5173/ | grep -o '/assets/index-[^"]*\.js'` then grep that asset
+     for a string only the new code contains
+   - in the browser, hard-reload (Ctrl+Shift+R) — it is an installed PWA with a service
+     worker, so a normal reload can still hand you the cached bundle
 10. **Push only after the user confirms.** Report commits ahead of `origin/main`, gates
     passed, stack healthy; ask. On explicit "yes": `git push origin main`. CI
     ([.github/workflows/ci.yml](.github/workflows/ci.yml): ruff + `alembic upgrade head` +
