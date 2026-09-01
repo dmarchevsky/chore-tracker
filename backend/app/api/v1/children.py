@@ -15,7 +15,15 @@ from app.auth.deps import AdminUser, DbDep, require_self_or_admin
 from app.auth.passwords import hash_password
 from app.auth.sessions import revoke_user_sessions
 from app.config import get_settings
-from app.models import CheckinToken, Household, LedgerEntry, User, UserRole
+from app.models import (
+    CheckinToken,
+    Chore,
+    ChoreOccurrence,
+    Household,
+    LedgerEntry,
+    User,
+    UserRole,
+)
 from app.schemas.ledger import BalanceOut, LedgerEntryOut
 from app.schemas.user import CheckinTokenOut, PasswordReset, UserCreate, UserOut, UserUpdate
 from app.services import audit, checkin
@@ -133,15 +141,27 @@ async def get_balance(child_id: uuid.UUID, db: DbDep, _: SelfOrAdmin) -> Balance
 
 async def _ledger_rows(
     db: DbDep, child_id: uuid.UUID, from_: datetime | None, to: datetime | None
-) -> list[LedgerEntry]:
+) -> list[LedgerEntryOut]:
+    """The statement, with the chore each entry was for. Outer-joined: a payout or a
+    hand-entered adjustment has no occurrence, and an occurrence whose chore was hard-deleted
+    still has to show its money (spec §9, append-only)."""
     stmt = (
-        select(LedgerEntry).where(LedgerEntry.child_id == child_id).order_by(LedgerEntry.created_at)
+        select(LedgerEntry, Chore.title, ChoreOccurrence.due_at)
+        .outerjoin(ChoreOccurrence, ChoreOccurrence.id == LedgerEntry.occurrence_id)
+        .outerjoin(Chore, Chore.id == ChoreOccurrence.chore_id)
+        .where(LedgerEntry.child_id == child_id)
+        .order_by(LedgerEntry.created_at)
     )
     if from_ is not None:
         stmt = stmt.where(LedgerEntry.created_at >= from_)
     if to is not None:
         stmt = stmt.where(LedgerEntry.created_at <= to)
-    return list((await db.execute(stmt)).scalars())
+    return [
+        LedgerEntryOut.model_validate(entry).model_copy(
+            update={"chore_title": title, "occurrence_due_at": due_at}
+        )
+        for entry, title, due_at in (await db.execute(stmt)).all()
+    ]
 
 
 @router.get("/{child_id}/ledger", response_model=list[LedgerEntryOut])
@@ -151,7 +171,7 @@ async def get_ledger(
     _: SelfOrAdmin,
     from_: Annotated[datetime | None, Query(alias="from")] = None,
     to: datetime | None = None,
-) -> list[LedgerEntry]:
+) -> list[LedgerEntryOut]:
     await _get_child(db, child_id)
     return await _ledger_rows(db, child_id, from_, to)
 
@@ -168,7 +188,9 @@ async def get_ledger_csv(
     rows = await _ledger_rows(db, child_id, from_, to)
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["created_at", "kind", "amount_cents", "currency", "reason", "occurrence_id"])
+    w.writerow(
+        ["created_at", "kind", "amount_cents", "currency", "reason", "chore", "occurrence_id"]
+    )
     for r in rows:
         w.writerow(
             [
@@ -177,6 +199,7 @@ async def get_ledger_csv(
                 r.amount_cents,
                 r.currency,
                 r.reason,
+                r.chore_title or "",
                 r.occurrence_id or "",
             ]
         )

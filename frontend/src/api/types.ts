@@ -142,6 +142,10 @@ export interface LedgerEntry {
   reason: string;
   created_at: string;
   occurrence_id: string | null;
+  reversed_by_entry_id: string | null;
+  /** The chore this entry was for; null for payouts and hand-entered adjustments. */
+  chore_title: string | null;
+  occurrence_due_at: string | null;
 }
 
 export interface Dispute {

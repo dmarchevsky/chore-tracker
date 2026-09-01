@@ -9,6 +9,7 @@ import pytest
 from PIL import Image
 
 from app.models import Chore, ChoreOccurrence, OccurrenceStatus
+from app.services.settlement import settle_missed
 
 pytestmark = pytest.mark.asyncio
 
@@ -92,6 +93,64 @@ async def test_balance_and_ledger_and_csv(
     csv_resp = await client.get(f"/api/v1/children/{child_user.id}/ledger.csv", headers=h)
     assert csv_resp.headers["content-type"].startswith("text/csv")
     assert "earning" in csv_resp.text and "250" in csv_resp.text
+
+
+async def test_the_statement_names_the_chore_each_entry_was_for(
+    client, db_session, household, admin_user, child_user, totp_now
+):
+    """ "chore missed" alone doesn't say which chore — the statement carries the title and
+    the day it was due (spec §4.3)."""
+    h = await _earn(client, db_session, household, admin_user, child_user, totp_now, 250)
+    await client.post(
+        "/api/v1/payouts",
+        json={"child_id": str(child_user.id), "amount_cents": 250, "method": "cash"},
+        headers=h,
+    )
+
+    led = (await client.get(f"/api/v1/children/{child_user.id}/ledger", headers=h)).json()
+    earning = next(e for e in led if e["kind"] == "earning")
+    assert earning["chore_title"] == "Kitchen"
+    assert earning["occurrence_due_at"].startswith("2025-01-02")
+
+    # A payout has no occurrence behind it, so there is no chore to name.
+    payout = next(e for e in led if e["kind"] == "payout")
+    assert payout["chore_title"] is None and payout["occurrence_due_at"] is None
+
+    csv_resp = await client.get(f"/api/v1/children/{child_user.id}/ledger.csv", headers=h)
+    assert "chore" in csv_resp.text.splitlines()[0]
+    assert "Kitchen" in csv_resp.text
+
+
+async def test_a_penalty_can_be_excused_from_the_statement(
+    client, db_session, household, admin_user, child_user, totp_now
+):
+    """The statement links back to the occurrence, so the fix is the ordinary decision path
+    — a reversing entry, never a deleted row (spec §9)."""
+    occ = await _open_occ(db_session, household, child_user, 200)
+    occ.penalty_cents = 500
+    occ.status = OccurrenceStatus.missed
+    await db_session.commit()
+    await settle_missed(db_session, now=datetime(2025, 1, 3, tzinfo=UTC))
+    await db_session.commit()
+
+    h = await _admin(client, totp_now)
+    led = (await client.get(f"/api/v1/children/{child_user.id}/ledger", headers=h)).json()
+    penalty = next(e for e in led if e["kind"] == "penalty")
+    assert penalty["chore_title"] == "Kitchen"
+    assert penalty["occurrence_id"] == str(occ.id)
+    assert penalty["reversed_by_entry_id"] is None
+
+    r = await client.post(
+        f"/api/v1/occurrences/{penalty['occurrence_id']}/decision",
+        json={"action": "excuse", "reason": "we were away"},
+        headers=h,
+    )
+    assert r.status_code == 200
+
+    after = (await client.get(f"/api/v1/children/{child_user.id}/ledger", headers=h)).json()
+    assert next(e for e in after if e["id"] == penalty["id"])["reversed_by_entry_id"] is not None
+    bal = await client.get(f"/api/v1/children/{child_user.id}/balance", headers=h)
+    assert bal.json()["balance_cents"] == 0
 
 
 async def test_child_sees_own_balance_but_not_siblings(

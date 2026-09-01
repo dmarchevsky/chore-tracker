@@ -22,6 +22,13 @@ class LedgerEntryOut(BaseModel):
     reversed_by_entry_id: uuid.UUID | None
     created_at: datetime
 
+    # Which chore the money was for, resolved from the occurrence (spec §4.3). "chore missed"
+    # on its own tells a parent nothing about *which* chore, and the statement is where they
+    # notice a wrong charge. NULL for entries that aren't tied to an occurrence — payouts,
+    # hand-entered adjustments.
+    chore_title: str | None = None
+    occurrence_due_at: datetime | None = None
+
 
 class BalanceOut(BaseModel):
     child_id: uuid.UUID
