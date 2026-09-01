@@ -1,7 +1,7 @@
 import { useChores } from '../api/hooks';
 import type { Chore } from '../api/types';
 import { Card, Spinner } from '../shared/ui';
-import { money } from '../shared/format';
+import { money, tierOutcome } from '../shared/format';
 import { onceDate } from '../admin/chores/choreFields';
 
 function proofSummary(c: Chore): string {
@@ -47,16 +47,34 @@ export function Rules() {
           <Card key={c.id}>
             <p className="font-semibold">{c.title}</p>
             {c.description && <p className="mt-1 text-sm text-slate-400">{c.description}</p>}
-            <p className="mt-2 text-sm">
-              Worth <span className="font-semibold text-emerald-400">{money(c.reward_cents)}</span>
-              {c.penalty_cents > 0 && (
-                <>
-                  {' '}
-                  · miss it and lose{' '}
-                  <span className="font-semibold text-rose-400">{money(c.penalty_cents)}</span>
-                </>
-              )}
-            </p>
+            {c.outcome_tiers?.length ? (
+              <ul className="mt-2 flex flex-col gap-1 text-sm">
+                {c.outcome_tiers.map((t) => (
+                  <li key={t.id}>
+                    {t.condition} →{' '}
+                    <span
+                      className={`font-semibold ${
+                        (t.amount_cents ?? 0) < 0 ? 'text-rose-400' : 'text-emerald-400'
+                      }`}
+                    >
+                      {tierOutcome(t)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-sm">
+                Worth{' '}
+                <span className="font-semibold text-emerald-400">{money(c.reward_cents)}</span>
+                {c.penalty_cents > 0 && (
+                  <>
+                    {' '}
+                    · miss it and lose{' '}
+                    <span className="font-semibold text-rose-400">{money(c.penalty_cents)}</span>
+                  </>
+                )}
+              </p>
+            )}
             <p className="mt-1 text-xs text-slate-500">{proofSummary(c)}</p>
             {onceDate(c.cadence) && (
               <p className="mt-1 text-xs text-slate-500">

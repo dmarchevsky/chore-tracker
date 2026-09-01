@@ -1,11 +1,14 @@
 import { Field } from '../../../shared/ui';
 import { ChecklistField, type ChecklistItem } from '../../ChecklistField';
-import { PHOTO_PROOFS } from '../choreFields';
+import { LLM_MODES } from '../choreFields';
 import type { ChoreFormApi } from '../useChoreForm';
 
 export function CheckingSection({ f }: { f: ChoreFormApi }) {
   const form = f.form;
-  if (!PHOTO_PROOFS.has(String(form.proof_type))) return null;
+  // Only the vision worker reads the rule, the checklist or the thresholds
+  // (app/worker/verify.py). Under manual or auto_accept they are dead config, so showing
+  // them offers the parent a control that does nothing.
+  if (!LLM_MODES.has(String(form.verification_mode))) return null;
 
   return (
     <>

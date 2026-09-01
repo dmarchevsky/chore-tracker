@@ -5,7 +5,7 @@ import { useAdminChores, useChildren, useOpenDisputes } from './api';
 import { ReviewDetail } from './ReviewDetail';
 import { Button, Card, Spinner } from '../shared/ui';
 import { StatusBadge } from '../shared/StatusBadge';
-import { money } from '../shared/format';
+import { occurrenceWorth } from '../shared/outcome';
 
 export function Inbox() {
   const inbox = useInbox();
@@ -106,7 +106,8 @@ export function Inbox() {
                   {o.assignee_id
                     ? (kidById.get(o.assignee_id)?.display_name ?? 'Unassigned')
                     : 'Unassigned'}{' '}
-                  · due {new Date(o.due_at).toLocaleString()} · {money(o.reward_cents)}
+                  · due {new Date(o.due_at).toLocaleString()}
+                  {occurrenceWorth(o) && ` · ${occurrenceWorth(o)}`}
                 </p>
                 {o.verification_error && (
                   <p className="text-xs text-amber-400">

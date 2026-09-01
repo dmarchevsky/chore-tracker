@@ -1,5 +1,22 @@
 // Composition only: the fieldsets in the order a parent thinks about them. All state and
 // cross-field normalisation lives in useChoreForm; each section is a pure view of it.
+//
+// What shows when (K = chore kind, P = proof type, V = verification mode, T = has tiers):
+//
+//   Identity   title, description            always; kind on create only (it is immutable)
+//   Who        assignment + assignees        always; standing hides rotating/anyone
+//   When       cadence or one-off date,      K=scheduled only
+//              due time, opens, start,
+//              grace + end date (Advanced)
+//   Proof      proof type, photos, fence     K=scheduled; photo fields need P photo-bearing,
+//                                            fence needs P location-bearing
+//   Checking   rule, checklist, thresholds   V is an LLM mode — nothing else reads them
+//   Worth      outcome tiers                 always; text-only when K=standing
+//              reward / penalty              only when there are no tiers
+//   State      on/off, tier, history         K=standing, editing only
+//
+// Deliberately absent: late_multiplier and geofence.arrive_before are specified but not
+// enforced anywhere (spec §15 Q15, Q16), so there is no control for them.
 
 import { useChildren } from '../api';
 import { Button, Card } from '../../shared/ui';

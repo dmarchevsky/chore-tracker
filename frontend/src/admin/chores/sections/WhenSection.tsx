@@ -12,7 +12,11 @@ export function WhenSection({ f }: { f: ChoreFormApi }) {
         <input
           type="checkbox"
           checked={once !== null}
-          onChange={(e) => f.set('cadence', e.target.checked ? ONCE_TODAY() : 'daily')}
+          onChange={(e) => {
+            const on = e.target.checked;
+            f.set('cadence', on ? ONCE_TODAY() : 'daily');
+            f.set('end_date', on ? new Date().toISOString().slice(0, 10) : null);
+          }}
         />
         One-off — a single date
       </label>
@@ -23,7 +27,10 @@ export function WhenSection({ f }: { f: ChoreFormApi }) {
             className="inp"
             type="date"
             value={once}
-            onChange={(e) => f.set('cadence', `once(${e.target.value})`)}
+            onChange={(e) => {
+              f.set('cadence', `once(${e.target.value})`);
+              f.set('end_date', e.target.value || null);
+            }}
           />
           {once < new Date().toISOString().slice(0, 10) && (
             <p className="mt-1 text-xs text-amber-400">
@@ -106,6 +113,40 @@ export function WhenSection({ f }: { f: ChoreFormApi }) {
           onChange={(e) => f.set('start_date', e.target.value)}
         />
       </Field>
+
+      {/* Both of these are live in the backend but had no control at all: grace_period_s
+          drives open_due_windows and detect_missed, end_date bounds generation. */}
+      <details className="rounded-xl border border-slate-800 p-3">
+        <summary className="cursor-pointer text-sm text-slate-400">Advanced</summary>
+        <div className="mt-2 flex flex-col gap-2">
+          <Field label="Grace period (minutes)">
+            <input
+              className="inp"
+              type="number"
+              min="0"
+              max="1440"
+              value={Math.round(Number(form.grace_period_s ?? 0) / 60)}
+              onChange={(e) =>
+                f.set('grace_period_s', Math.round(parseFloat(e.target.value || '0') * 60))
+              }
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              How late still counts. After this it is marked missed.
+            </p>
+          </Field>
+          {once === null && (
+            <Field label="End date (optional)">
+              <input
+                className="inp"
+                type="date"
+                value={String(form.end_date ?? '').slice(0, 10)}
+                onChange={(e) => f.set('end_date', e.target.value || null)}
+              />
+              <p className="mt-1 text-xs text-slate-500">Leave empty to run indefinitely.</p>
+            </Field>
+          )}
+        </div>
+      </details>
     </>
   );
 }

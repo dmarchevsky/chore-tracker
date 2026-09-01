@@ -5,7 +5,7 @@ import { ReviewDetail } from './ReviewDetail';
 import { Button, Card, Spinner } from '../shared/ui';
 import { StatusBadge } from '../shared/StatusBadge';
 import { ADMIN_STATUS } from '../shared/status';
-import { money } from '../shared/format';
+import { occurrenceWorth } from '../shared/outcome';
 
 const DECIDED = [
   'approved',
@@ -148,7 +148,8 @@ export function History() {
                 </div>
                 <p className="text-xs text-slate-400">
                   {o.assignee_id ? (kidById.get(o.assignee_id)?.display_name ?? '—') : 'Unassigned'}{' '}
-                  · {new Date(o.due_at).toLocaleDateString()} · {money(o.reward_cents)}
+                  · {new Date(o.due_at).toLocaleDateString()}
+                  {occurrenceWorth(o) && ` · ${occurrenceWorth(o)}`}
                   {o.settlement_locked_at && ' · paid out'}
                 </p>
               </button>

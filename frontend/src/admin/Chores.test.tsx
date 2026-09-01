@@ -194,6 +194,13 @@ describe('admin Chores', () => {
       target: { value: 'wide kitchen' },
     });
 
+    // the rule and checklist belong to the vision model, so they appear with an LLM mode
+    fireEvent.change(
+      screen.getByLabelText('Proof / verification').parentElement!.querySelectorAll('select')[1],
+      {
+        target: { value: 'llm_auto' },
+      },
+    );
     fireEvent.click(screen.getByRole('button', { name: /add a check/i }));
     fireEvent.change(screen.getByPlaceholderText(/free of dishes/i), {
       target: { value: 'Is the sink basin free of dishes?' },
@@ -450,5 +457,39 @@ describe('admin Chores', () => {
       amount_cents: null,
       text: 'grounded until it is fixed',
     });
+  });
+
+  it('round-trips the grace period and end date the form used to drop', async () => {
+    const calls = setup();
+
+    fireEvent.click(await screen.findByText('Empty the sink'));
+    fireEvent.change(screen.getByLabelText(/^Grace period/), { target: { value: '45' } });
+    fireEvent.change(screen.getByLabelText(/^End date/), { target: { value: '2030-12-31' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    const body = calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>;
+    expect(body.grace_period_s).toBe(2700);
+    expect(body.end_date).toBe('2030-12-31');
+  });
+
+  it('keeps an untouched grace period exactly as stored', async () => {
+    const calls = setup();
+
+    fireEvent.click(await screen.findByText('Empty the sink'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    const body = calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>;
+    expect(body.grace_period_s).toBe(900);
+  });
+
+  it('hides the AI rule and checklist under a non-AI verification mode', async () => {
+    setup();
+
+    fireEvent.click(await screen.findByText('Empty the sink'));
+    // CHORE is proof_type photo but verification_mode manual — nothing reads a rule here
+    expect(screen.queryByLabelText(/verification rule/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add a check/i })).not.toBeInTheDocument();
   });
 });

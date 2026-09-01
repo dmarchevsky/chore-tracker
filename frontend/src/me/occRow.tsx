@@ -1,7 +1,7 @@
 import type { Chore, Occurrence } from '../api/types';
 import { Card } from '../shared/ui';
 import { StatusBadge } from '../shared/StatusBadge';
-import { money } from '../shared/format';
+import { occurrenceWorth } from '../shared/outcome';
 
 export function OccRow({
   o,
@@ -20,7 +20,8 @@ export function OccRow({
         <div>
           <p className="text-base font-semibold">{chore?.title ?? 'Chore'}</p>
           <p className="text-sm text-slate-400">
-            {subtitle} · {money(o.reward_cents)}
+            {subtitle}
+            {occurrenceWorth(o) && ` · ${occurrenceWorth(o)}`}
           </p>
         </div>
         <StatusBadge status={o.status} role="kid" className="text-sm" />

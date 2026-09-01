@@ -97,6 +97,9 @@ class ChoreOccurrence(TimestampMixin, Base):
     # Money terms snapshotted from the Chore at generation (spec §3).
     reward_cents: Mapped[int] = mapped_column(Integer, default=0)
     penalty_cents: Mapped[int] = mapped_column(Integer, default=0)
+    # TODO(decision): was_late is never set to True anywhere, so late_multiplier and
+    # ledger._late_adjusted are inert (spec §15 Q16). Setting it belongs in ingest_submission
+    # (now > due_at); until then the admin form deliberately does not offer the multiplier.
     late_multiplier: Mapped[float] = mapped_column(Numeric(4, 2), default=1.0)
 
     # Snapshot of the chore's tier list at generation time, for the same reason the money

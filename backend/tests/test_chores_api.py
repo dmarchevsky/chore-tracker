@@ -693,3 +693,19 @@ async def test_one_off_after_end_date_is_rejected(client, admin_user, child_user
     )
     assert r.status_code == 422
     assert "can never fire" in str(r.json())
+
+
+async def test_patch_accepts_grace_period_and_end_date(client, admin_user, child_user, totp_now):
+    """Both were live in the backend but had no control in the admin form, and both were
+    missing from its PATCH allowlist — so the form silently reverted them."""
+    h = await _admin_headers(client, admin_user, totp_now)
+    created = await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)
+
+    r = await client.patch(
+        f"/api/v1/chores/{created.json()['id']}",
+        json={"grace_period_s": 2700, "end_date": "2030-12-31"},
+        headers=h,
+    )
+    assert r.status_code == 200
+    assert r.json()["grace_period_s"] == 2700
+    assert r.json()["end_date"] == "2030-12-31"

@@ -23,6 +23,10 @@ class GeofenceSpec(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
     radius_m: int = Field(ge=1, le=5000)
+    # TODO(decision): spec §4.1 lists arrive_before, but services/geo.evaluate_checkin never
+    # reads it — a check-in after this time is not flagged or failed. Stored and echoed only,
+    # and deliberately not shown in the admin form (spec §15 Q15): a control that does
+    # nothing is worse than no control. Implement the check before surfacing it.
     arrive_before: time | None = None
 
 

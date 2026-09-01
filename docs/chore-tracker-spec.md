@@ -726,6 +726,8 @@ weekly email/Push digest; savings goals; recurring auto-payout on Sundays.
 | Q10 | Should missed chores notify the parent immediately or only in the 8:05 digest? | Digest, except for the school check-in which notifies immediately. |
 | Q11 | Weekly payout cadence and method (cash, transfer, gift card)? | Manual payout entry, method free-text. |
 | Q12 | Should `anyone`-mode chores exist in v1, or is every chore explicitly assigned? | Support the field, but only `fixed`/`rotating` in the v1 UI. |
+| Q15 | `geofence.arrive_before` is specified but `evaluate_checkin` never reads it — flag a late check-in, fail it, or drop the field? | Not enforced in v1, and **not shown in the admin form** — a control that does nothing is worse than no control. Implement the check before surfacing it. |
+| Q16 | `late_multiplier` is specified but `was_late` is never set to `True`, so it is inert. Should a late-but-in-grace submission pay less? | Not enforced in v1, not shown in the form. Enabling it means setting `was_late` in `ingest_submission` first. |
 
 ---
 

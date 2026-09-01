@@ -5,6 +5,7 @@ import { Button, Card, Spinner } from '../shared/ui';
 import { money } from '../shared/format';
 import { ChoreForm } from './chores/ChoreForm';
 import type { FormState } from './chores/useChoreForm';
+import { choreWorth } from '../shared/outcome';
 
 export function Chores() {
   const chores = useAdminChores();
@@ -42,8 +43,11 @@ export function Chores() {
                   {!c.active && <span className="ml-2 text-xs text-slate-500">(inactive)</span>}
                 </p>
                 <p className="text-xs text-slate-400">
-                  {c.proof_type} · {c.verification_mode} · {c.assignment_mode} ·{' '}
-                  {money(c.reward_cents)}
+                  {c.chore_kind === 'standing'
+                    ? `standing · ${c.standing_on ? 'ON' : 'off'}`
+                    : `${c.proof_type} · ${c.verification_mode}`}{' '}
+                  · {c.assignment_mode}
+                  {choreWorth(c) && ` · ${choreWorth(c)}`}
                   {c.penalty_cents > 0 && ` / -${money(c.penalty_cents)}`}
                 </p>
               </button>

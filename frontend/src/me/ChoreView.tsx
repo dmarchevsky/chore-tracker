@@ -4,10 +4,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../api/client';
 import { useChore, useDispute, useDisputes, useOccurrence } from '../api/hooks';
 import { Button, Card, Spinner } from '../shared/ui';
-import { money } from '../shared/format';
 import { Capture } from './Capture';
 import { LocationCheckin } from './LocationCheckin';
 import { enqueue } from '../pwa/offlineQueue';
+import { occurrenceWorth } from '../shared/outcome';
 
 interface KidVerdict {
   verdict: string;
@@ -134,7 +134,8 @@ export function ChoreView() {
       <div>
         <h1 className="text-2xl font-bold">{c.title}</h1>
         <p className="text-slate-400">
-          {money(o.reward_cents)} · due {new Date(o.due_at).toLocaleString()}
+          {occurrenceWorth(o) && `${occurrenceWorth(o)} · `}due{' '}
+          {new Date(o.due_at).toLocaleString()}
         </p>
         {c.description && <p className="mt-2 text-sm text-slate-300">{c.description}</p>}
       </div>
