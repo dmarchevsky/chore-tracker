@@ -39,6 +39,8 @@ export interface Occurrence {
   status: OccurrenceStatus;
   was_late: boolean;
   settlement_locked_at: string | null;
+  settled_at: string | null;
+  appeal_closes_at: string | null;
   reward_cents: number;
   penalty_cents: number;
   outcome_tiers: OutcomeTier[] | null;

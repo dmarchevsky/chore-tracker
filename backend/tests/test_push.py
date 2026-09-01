@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import io
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
 from PIL import Image
@@ -136,8 +136,9 @@ async def test_dispute_notifies_admins(
         household_id=household.id,
         chore_id=chore.id,
         assignee_id=child_user.id,
-        window_open_at=datetime(2025, 1, 2, tzinfo=UTC),
-        due_at=datetime(2025, 1, 2, 16, tzinfo=UTC),
+        # Due earlier today: appeals close a few days after due_at (spec §4.2).
+        window_open_at=datetime.now(UTC) - timedelta(hours=6),
+        due_at=datetime.now(UTC) - timedelta(hours=2),
         status=OccurrenceStatus.verified_fail,
         reward_cents=200,
     )

@@ -19,6 +19,11 @@ class DisputeError(ValueError):
 async def open_dispute(
     db: AsyncSession, *, occurrence: ChoreOccurrence, author: User, message: str
 ) -> Dispute:
+    """File an appeal. Bounded by ``appeal_window_s`` after ``due_at``: a settled week has to
+    be able to close, and a parent still has excuse/approve for anything older (spec §9)."""
+    if datetime.now(UTC) > occurrence.appeal_closes_at:
+        raise DisputeError("too late to appeal this one — ask a parent")
+
     existing = await db.execute(
         select(Dispute).where(
             Dispute.occurrence_id == occurrence.id, Dispute.status == DisputeStatus.open

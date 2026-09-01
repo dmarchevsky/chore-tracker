@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
 from app.auth.passwords import hash_password
+from app.config import get_settings
 from app.models import Chore, ChoreOccurrence, Dispute, DisputeStatus, OccurrenceStatus, User
 from app.models.user import UserRole
 
@@ -17,6 +18,7 @@ pytestmark = pytest.mark.asyncio
 
 @pytest_asyncio.fixture
 async def occ(db_session, household, child_user) -> ChoreOccurrence:
+    """Due earlier today — inside the appeal window, which is measured from ``due_at``."""
     chore = Chore(
         household_id=household.id,
         title="Walk the dog",
@@ -35,8 +37,8 @@ async def occ(db_session, household, child_user) -> ChoreOccurrence:
         household_id=household.id,
         chore_id=chore.id,
         assignee_id=child_user.id,
-        window_open_at=datetime(2025, 1, 2, tzinfo=UTC),
-        due_at=datetime(2025, 1, 2, 16, tzinfo=UTC),
+        window_open_at=datetime.now(UTC) - timedelta(hours=6),
+        due_at=datetime.now(UTC) - timedelta(hours=2),
         status=OccurrenceStatus.rejected,
         reward_cents=200,
     )
@@ -143,3 +145,17 @@ async def test_resolving_twice_is_a_conflict(client, db_session, occ, admin_user
 
     row = await db_session.get(Dispute, d["id"])
     assert row.status == DisputeStatus.resolved
+
+
+async def test_an_appeal_filed_too_late_is_refused(client, db_session, occ, child_user):
+    """The window closes so a settled week can stay settled; a parent still has excuse."""
+    occ.due_at = datetime.now(UTC) - timedelta(seconds=get_settings().appeal_window_s + 60)
+    await db_session.commit()
+
+    kh = await _kid_login(client)
+    r = await client.post(
+        f"/api/v1/occurrences/{occ.id}/dispute", json={"message": "much too late"}, headers=kh
+    )
+    assert r.status_code == 409
+    assert "too late" in r.json()["detail"]
+    assert (await db_session.execute(select(Dispute))).scalars().first() is None

@@ -328,6 +328,8 @@ class OccurrenceOut(BaseModel):
     status: OccurrenceStatus
     was_late: bool
     settlement_locked_at: datetime | None
+    settled_at: datetime | None = None
+    appeal_closes_at: datetime | None = None
     reward_cents: int
     penalty_cents: int
     outcome_tiers: list[OutcomeTier] | None = None

@@ -8,6 +8,7 @@ import { Capture } from './Capture';
 import { LocationCheckin } from './LocationCheckin';
 import { enqueue } from '../pwa/offlineQueue';
 import { occurrenceWorth } from '../shared/outcome';
+import { money } from '../shared/format';
 
 interface KidVerdict {
   verdict: string;
@@ -70,6 +71,16 @@ export function ChoreView() {
   const filed = disputes.data ?? [];
   const openDispute = filed.find((d) => d.status === 'open');
   const message = latest?.child_message || CANNED[o.status] || o.status;
+  // Appeals close a few days after the due date (the server refuses later ones), so stop
+  // offering a button that can only fail. A parent can still put it right by hand.
+  const canAppeal = !o.appeal_closes_at || new Date(o.appeal_closes_at) > new Date();
+  // A miss is flagged straight away but only charged after the settle delay — say which.
+  const missCost =
+    o.status === 'missed' && o.penalty_cents
+      ? o.settled_at
+        ? `That cost you ${money(o.penalty_cents)}.`
+        : `It'll cost you ${money(o.penalty_cents)} unless a parent says otherwise.`
+      : null;
   // A parent's own words, not the model's — say so, so the kid knows who to talk to.
   const fromParent = latest?.kind === 'manual' && !!latest.child_message;
 
@@ -143,6 +154,7 @@ export function ChoreView() {
       <Card className={actionable ? 'border-sky-700' : ''}>
         {fromParent && <p className="text-xs font-semibold text-slate-400">From a parent</p>}
         <p className="text-base">{message}</p>
+        {missCost && <p className="mt-1 text-sm text-rose-400">{missCost}</p>}
         {!actionable && o.status !== 'pending' && (
           <p className="mt-2 text-xs text-slate-500">A parent always has the final say.</p>
         )}
@@ -200,14 +212,18 @@ export function ChoreView() {
         </Card>
       ))}
 
-      {!openDispute && !actionable && o.status !== 'verified_pass' && o.status !== 'approved' && (
-        <button
-          className="self-start text-sm text-slate-400 underline"
-          onClick={() => setShowDispute((s) => !s)}
-        >
-          This isn’t right
-        </button>
-      )}
+      {!openDispute &&
+        !actionable &&
+        canAppeal &&
+        o.status !== 'verified_pass' &&
+        o.status !== 'approved' && (
+          <button
+            className="self-start text-sm text-slate-400 underline"
+            onClick={() => setShowDispute((s) => !s)}
+          >
+            This isn’t right
+          </button>
+        )}
       {showDispute && (
         <Card>
           <textarea

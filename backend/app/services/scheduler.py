@@ -19,8 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Chore, ChoreOccurrence, Household, OccurrenceStatus
 from app.models.chore import AssignmentMode, ChoreKind
+from app.services import notifications
 from app.services.cadence import due_datetimes
 from app.services.rotation import rotation_pick
+from app.services.settlement import settle_missed
 
 log = logging.getLogger("chorekeeper.scheduler")
 
@@ -33,6 +35,7 @@ class ReconcileReport:
     generated: int = 0
     opened: int = 0
     missed: int = 0
+    settled: int = 0
 
 
 def _now(now: datetime | None) -> datetime:
@@ -152,7 +155,8 @@ async def detect_missed(db: AsyncSession, *, now: datetime | None = None) -> int
     """PENDING/OPEN → MISSED where ``now > due_at + grace`` (spec §8.3).
 
     Set by the scheduler, never by a user action — a query over state, so a long outage
-    is caught up on the next tick.
+    is caught up on the next tick. The kid is told now, when there is still time to appeal;
+    the money follows later, in ``settlement.settle_missed``.
     """
     now = _now(now)
     ts = literal(now)
@@ -165,10 +169,16 @@ async def detect_missed(db: AsyncSession, *, now: datetime | None = None) -> int
             ts > ChoreOccurrence.due_at + _grace_interval(),
         )
         .values(status=OccurrenceStatus.missed)
+        .returning(ChoreOccurrence.id)
         .execution_options(synchronize_session=False)
     )
+    ids = list(result.scalars().all())
     await db.flush()
-    return result.rowcount or 0
+    for occ in (
+        await db.execute(select(ChoreOccurrence).where(ChoreOccurrence.id.in_(ids)))
+    ).scalars():
+        await notifications.notify_missed(db, occ)
+    return len(ids)
 
 
 async def reconcile(
@@ -177,17 +187,20 @@ async def reconcile(
     horizon_days: int = DEFAULT_HORIZON_DAYS,
     now: datetime | None = None,
 ) -> ReconcileReport:
-    """One full pass: generate, open windows, detect missed. Logs a summary (spec §8.3)."""
+    """One full pass: generate, open windows, detect missed, settle the ones now due
+    (spec §8.3). Logs a summary."""
     now = _now(now)
     report = ReconcileReport(
         generated=await generate_occurrences(db, horizon_days=horizon_days, now=now),
         opened=await open_due_windows(db, now=now),
         missed=await detect_missed(db, now=now),
+        settled=await settle_missed(db, now=now),
     )
     log.info(
-        "reconcile: generated=%d opened=%d missed=%d",
+        "reconcile: generated=%d opened=%d missed=%d settled=%d",
         report.generated,
         report.opened,
         report.missed,
+        report.settled,
     )
     return report

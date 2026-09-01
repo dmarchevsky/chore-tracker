@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import (
@@ -28,6 +28,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.config import get_settings
 from app.db import Base
 from app.models.base import TimestampMixin, uuid_pk
 
@@ -93,6 +94,11 @@ class ChoreOccurrence(TimestampMixin, Base):
     settlement_locked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None
     )
+    # When the scheduler settled a MISSED occurrence — i.e. posted the penalty, or decided
+    # there was none to post. The ledger's (occurrence_id, kind) index already makes the
+    # debit exactly-once; this is what keeps the settlement scan off rows it is done with,
+    # and what tells the kid the money has actually moved.
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
     # Money terms snapshotted from the Chore at generation (spec §3).
     reward_cents: Mapped[int] = mapped_column(Integer, default=0)
@@ -113,3 +119,12 @@ class ChoreOccurrence(TimestampMixin, Base):
 
     # Set when the LLM path fails open to NEEDS_REVIEW (spec §6.3 rule 3).
     verification_error: Mapped[str | None] = mapped_column(String(200), default=None)
+
+    @property
+    def appeal_closes_at(self) -> datetime:
+        """After this, a kid can no longer contest the occurrence themselves (spec §4.2).
+
+        Not a column: the window is a household-wide setting, so a row must never freeze an
+        old value of it. A parent still has excuse/approve for anything older.
+        """
+        return self.due_at + timedelta(seconds=get_settings().appeal_window_s)

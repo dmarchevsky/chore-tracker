@@ -1,8 +1,9 @@
 """Worker loop: scheduler reconciliation + verification queue drain.
 
 No timers: every tick is a fresh query over DB state (spec §8.3). A full scheduler pass
-(generate + open + missed) runs on startup and hourly; the cheap OPEN/MISSED transitions
-and the verification-queue drain run every minute. Stuck jobs are requeued on startup.
+(generate + open + missed + settle) runs on startup and hourly; the cheap OPEN/MISSED
+transitions, the settlement of misses whose delay has elapsed, and the verification-queue
+drain run every minute. Stuck jobs are requeued on startup.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import logging
 from app.db import SessionLocal
 from app.services import retention
 from app.services.scheduler import detect_missed, open_due_windows, reconcile
+from app.services.settlement import settle_missed
 from app.worker import verify
 from app.worker.queue import requeue_stuck
 
@@ -30,8 +32,9 @@ async def scheduler_tick(*, full: bool) -> None:
             else:
                 opened = await open_due_windows(db)
                 missed = await detect_missed(db)
-                if opened or missed:
-                    log.info("tick: opened=%d missed=%d", opened, missed)
+                settled = await settle_missed(db)
+                if opened or missed or settled:
+                    log.info("tick: opened=%d missed=%d settled=%d", opened, missed, settled)
             await db.commit()
         except Exception:
             await db.rollback()

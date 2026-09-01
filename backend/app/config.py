@@ -51,6 +51,15 @@ class Settings(BaseSettings):
     llm_timeout_s: int = Field(default=120, alias="LLM_TIMEOUT_S")
     llm_max_retries: int = Field(default=1, alias="LLM_MAX_RETRIES")
 
+    # --- Missed-chore settlement (spec §3, §9) -----------------------------
+    # A miss is flagged the moment the grace period lapses, but the money moves later: a
+    # home server that was down for a few hours catches up in one pass and would otherwise
+    # debit a pile of false penalties (spec §16). The delay is the window in which a parent
+    # can excuse them, or the kid can appeal, before anything is charged.
+    miss_settle_delay_s: int = Field(default=6 * 3600, alias="MISS_SETTLE_DELAY_S")
+    # How long after due_at a kid may still contest an occurrence.
+    appeal_window_s: int = Field(default=72 * 3600, alias="APPEAL_WINDOW_S")
+
     # --- Verification banding ----------------------------------------------
     auto_pass_threshold: float = Field(default=0.85, alias="AUTO_PASS_THRESHOLD")
     auto_fail_threshold: float = Field(default=0.35, alias="AUTO_FAIL_THRESHOLD")

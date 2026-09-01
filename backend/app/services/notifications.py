@@ -164,6 +164,29 @@ async def notify_redo(db: AsyncSession, occ: ChoreOccurrence, note: str) -> None
     )
 
 
+async def notify_missed(db: AsyncSession, occ: ChoreOccurrence) -> None:
+    """Tell the kid a window closed on them (spec §6.2).
+
+    Sent when the miss is detected, not when it is settled: the point is to reach them while
+    there is still time to say it's wrong. The parent hears about misses in the daily digest
+    instead of one push per miss (spec §15 Q10). An `anyone` occurrence has no assignee to
+    tell.
+    """
+    if occ.assignee_id is None:
+        return
+    chore = await db.get(Chore, occ.chore_id)
+    cost = f" That costs you {occ.penalty_cents / 100:.2f}." if occ.penalty_cents else ""
+    await notify(
+        db,
+        user_id=occ.assignee_id,
+        kind="missed",
+        title="You missed one",
+        body=f"{chore.title if chore else 'A chore'} closed without a check-in.{cost}"
+        " Tell a parent if that's wrong.",
+        url=f"/me/chores/{occ.id}",
+    )
+
+
 async def notify_dispute(db: AsyncSession, occ: ChoreOccurrence, message: str) -> None:
     await notify_admins(
         db,

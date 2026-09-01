@@ -22,16 +22,18 @@ const occurrence = {
   settlement_locked_at: null,
   reward_cents: 200,
   penalty_cents: 0,
+  settled_at: null,
+  appeal_closes_at: null,
   verification_error: null,
 };
 
-function renderChore(verdict: Record<string, unknown>) {
+function renderChore(verdict: Record<string, unknown>, over: Record<string, unknown> = {}) {
   vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
     const url = String(input);
     if (url.includes('/verifications')) return Promise.resolve(json([verdict]));
     if (url.includes('/disputes')) return Promise.resolve(json([]));
     if (url.includes('/submissions')) return Promise.resolve(json([]));
-    if (url.includes('/occurrences/o1')) return Promise.resolve(json(occurrence));
+    if (url.includes('/occurrences/o1')) return Promise.resolve(json({ ...occurrence, ...over }));
     if (url.includes('/chores/c1'))
       return Promise.resolve(
         json({
@@ -94,5 +96,48 @@ describe('kid ChoreView', () => {
 
     await waitFor(() => expect(screen.getByText(/have a look and try again/i)).toBeInTheDocument());
     expect(screen.queryByText('From a parent')).not.toBeInTheDocument();
+  });
+
+  const soon = () => new Date(Date.now() + 3600_000).toISOString();
+  const past = () => new Date(Date.now() - 3600_000).toISOString();
+
+  it('says a miss will cost money before it is settled, and after', async () => {
+    renderChore(
+      {},
+      {
+        status: 'missed',
+        penalty_cents: 500,
+        appeal_closes_at: soon(),
+      },
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText(/unless a parent says otherwise/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/\$5\.00/)).toBeInTheDocument();
+
+    cleanup();
+    vi.restoreAllMocks();
+    renderChore(
+      {},
+      {
+        status: 'missed',
+        penalty_cents: 500,
+        settled_at: past(),
+        appeal_closes_at: soon(),
+      },
+    );
+    await waitFor(() => expect(screen.getByText(/That cost you \$5\.00/)).toBeInTheDocument());
+  });
+
+  it('offers the appeal inside the window and drops it once closed', async () => {
+    renderChore({}, { status: 'missed', penalty_cents: 500, appeal_closes_at: soon() });
+    await waitFor(() => expect(screen.getByText(/isn’t right/)).toBeInTheDocument());
+
+    cleanup();
+    vi.restoreAllMocks();
+    renderChore({}, { status: 'missed', penalty_cents: 500, appeal_closes_at: past() });
+    await waitFor(() => expect(screen.getByText(/This one was missed/)).toBeInTheDocument());
+    expect(screen.queryByText(/isn’t right/)).not.toBeInTheDocument();
   });
 });
