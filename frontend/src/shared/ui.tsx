@@ -31,3 +31,14 @@ export function Card({ children, className = '' }: { children: ReactNode; classN
     </div>
   );
 }
+
+/** Label + control wrapper. The <span> is the accessible name for the control inside, which
+ *  is what makes getByLabelText work across the admin forms. */
+export function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="flex flex-col gap-1 text-sm">
+      <span className="text-slate-400">{label}</span>
+      {children}
+    </label>
+  );
+}
