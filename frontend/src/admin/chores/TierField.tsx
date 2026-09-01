@@ -63,11 +63,13 @@ export function TierField({
 
       {items.map((it, i) => {
         const penalty = (it.amount_cents ?? 0) < 0;
+        // Ring the fields the backend would reject, so "finish outcome 2" points somewhere.
+        const ring = (bad: boolean) => (bad ? ' ring-1 ring-rose-500' : '');
         return (
           <div key={i} className="flex flex-wrap items-center gap-2">
             <span className="w-4 text-xs text-slate-500">{it.id}</span>
             <input
-              className="inp min-w-[8rem] flex-1"
+              className={`inp min-w-[8rem] flex-1${ring(!it.condition.trim())}`}
               placeholder="all A grades"
               aria-label={`Condition ${it.id}`}
               value={it.condition}
@@ -104,7 +106,7 @@ export function TierField({
                   <option value="penalty">penalty</option>
                 </select>
                 <input
-                  className="inp w-24"
+                  className={`inp w-24${ring(!it.amount_cents)}`}
                   type="number"
                   min="0"
                   step="0.01"
@@ -121,7 +123,7 @@ export function TierField({
               </>
             ) : (
               <input
-                className="inp min-w-[8rem] flex-1"
+                className={`inp min-w-[8rem] flex-1${ring(!it.text?.trim())}`}
                 placeholder="grounded until it’s fixed"
                 aria-label={`Outcome text ${it.id}`}
                 value={it.text ?? ''}

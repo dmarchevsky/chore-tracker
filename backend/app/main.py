@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import re
+
 from fastapi import FastAPI
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request
@@ -12,6 +18,30 @@ from app import obs
 from app.api.v1 import api_router
 from app.auth.cf_access import CfAccessMiddleware
 from app.config import get_settings
+
+log = logging.getLogger("chorekeeper.api")
+
+# Anything whose name looks like a credential never reaches the log. /auth/login carries a
+# password and a TOTP code, and a malformed login body would otherwise be written in clear.
+_SECRET_KEY = re.compile(r"password|token|secret|api_key|totp", re.I)
+_MAX_LOGGED_BODY = 2000
+
+
+async def _redacted_body(request: Request) -> str | None:
+    """The request body with credentials masked, or None when it should not be logged."""
+    if not request.headers.get("content-type", "").startswith("application/json"):
+        return None  # multipart photo uploads: never log the bytes
+    try:
+        raw = await request.body()  # already cached by FastAPI before the handler runs
+        if not raw:
+            return None
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            parsed = {k: ("***" if _SECRET_KEY.search(k) else v) for k, v in parsed.items()}
+        return json.dumps(parsed, default=str)[:_MAX_LOGGED_BODY]
+    except Exception:
+        return "<unparsable>"
+
 
 _SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -60,6 +90,27 @@ def create_app() -> FastAPI:
             allowed_hosts=[*hosts, "localhost", "127.0.0.1", "testserver"],
         )
     app.include_router(api_router)
+
+    @app.exception_handler(RequestValidationError)
+    async def _log_invalid_request(request: Request, exc: RequestValidationError) -> Response:
+        """Record *why* a 422 happened. Without this the client sees a field error and the
+        server keeps no record at all, which is how a save failure becomes unexplainable.
+
+        Not the audit logger — that stream is the money/override trail (spec §5) and must not
+        fill with validation noise. The response is delegated so its shape is unchanged.
+        """
+        log.warning(
+            "request validation failed",
+            extra={
+                "event": "request.invalid",
+                "path": request.url.path,
+                "method": request.method,
+                "errors": exc.errors(),
+                "body": await _redacted_body(request),
+            },
+        )
+        return await request_validation_exception_handler(request, exc)
+
     return app
 
 

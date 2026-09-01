@@ -49,6 +49,30 @@ const CHORE = {
   auto_fail_threshold: 0.35,
 };
 
+const STANDING = {
+  ...CHORE,
+  id: 'c1',
+  title: 'Missing assignments',
+  chore_kind: 'standing',
+  cadence: 'standing',
+  due_time: '00:00:00',
+  proof_type: 'none',
+  verification_mode: 'manual',
+  reward_cents: 0,
+  penalty_cents: 0,
+  end_date: null,
+  geofence: null,
+  outcome_tiers: [
+    {
+      id: 1,
+      condition: 'more than one missing assignment',
+      outcome_kind: 'text',
+      amount_cents: null,
+      text: "grounded until it's fixed",
+    },
+  ],
+};
+
 function setup(chores: unknown[] = [CHORE]) {
   const calls: { url: string; method: string; body: unknown }[] = [];
   vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
@@ -490,5 +514,48 @@ describe('admin Chores', () => {
     // CHORE is proof_type photo but verification_mode manual — nothing reads a rule here
     expect(screen.queryByLabelText(/verification rule/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /add a check/i })).not.toBeInTheDocument();
+  });
+
+  it('saves a standing chore unchanged without an error', async () => {
+    // The report that started this: open an existing standing chore, click Save, get
+    // "[object Object]". An untouched save must simply PATCH.
+    const calls = setup([STANDING]);
+
+    fireEvent.click(await screen.findByText('Missing assignments'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    const body = calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>;
+    expect(body.cadence).toBe('standing');
+    expect(body.outcome_tiers).toEqual(STANDING.outcome_tiers);
+    expect(screen.queryByText(/object Object/)).not.toBeInTheDocument();
+  });
+
+  it('refuses a half-filled outcome before the request leaves the browser', async () => {
+    const calls = setup([STANDING]);
+
+    fireEvent.click(await screen.findByText('Missing assignments'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add an outcome' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText(/Finish outcome 2/)).toBeInTheDocument();
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false);
+  });
+
+  it('names every unfinished outcome, and saves once they are filled in', async () => {
+    const calls = setup([STANDING]);
+
+    fireEvent.click(await screen.findByText('Missing assignments'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add an outcome' }));
+    fireEvent.change(screen.getByLabelText('Condition 2'), { target: { value: 'skipped class' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    // condition filled but the outcome text is still blank
+    expect(await screen.findByText(/Finish outcome 2/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Outcome text 2'), { target: { value: 'no screens' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
   });
 });

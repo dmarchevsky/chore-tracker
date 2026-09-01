@@ -5,12 +5,13 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
-import type { Chore } from '../../api/types';
+import type { Chore, OutcomeTier } from '../../api/types';
 import { useDeactivateChore, useUpdateChore } from '../api';
 import {
   BLANK,
   EDITABLE,
   FENCED,
+  incompleteTiers,
   isTiered,
   LLM_MODES,
   PHOTO_PROOFS,
@@ -109,8 +110,18 @@ export function useChoreForm(state: FormState, onDone: () => void) {
     });
   }
 
+  /** A half-filled outcome row is rejected by the backend as a field error the parent can do
+   *  nothing with, so stop it here and name the row. */
+  function blockedByIncompleteTiers(): boolean {
+    const bad = incompleteTiers(form.outcome_tiers as OutcomeTier[] | null);
+    if (!bad.length) return false;
+    setError(`Finish outcome ${bad.join(', ')} — every outcome needs a condition and a result.`);
+    return true;
+  }
+
   async function doPreview() {
     setError(null);
+    if (blockedByIncompleteTiers()) return;
     try {
       setPreview(await api.post<PreviewItem[]>('/chores/preview?count=8', form));
     } catch (e) {
@@ -159,6 +170,7 @@ export function useChoreForm(state: FormState, onDone: () => void) {
 
   async function save() {
     setError(null);
+    if (blockedByIncompleteTiers()) return;
     try {
       if (editing) {
         const patch: Record<string, unknown> = {};

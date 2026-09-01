@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from datetime import UTC, date, datetime, time
 
 import pytest
@@ -145,3 +146,57 @@ async def test_verification_insert_emits_a_model_call_line(
     assert rec.verdict == "pass"
     assert rec.model == "qwen2.5-vl"
     assert rec.confidence == pytest.approx(0.91)
+
+
+async def test_a_malformed_body_is_logged_with_its_errors(caplog, client, admin_user, totp_now):
+    """A 422 used to leave no server-side trace at all, which is how a failing save became
+    unexplainable — the client showed a field error and nothing recorded why."""
+    r = await client.post(
+        "/api/v1/auth/login",
+        json={"username": "parent", "password": "parent-pass", "totp_code": totp_now()},
+    )
+    h = {"X-CSRF-Token": r.json()["csrf_token"]}
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="chorekeeper.api"):
+        bad = await client.patch(f"/api/v1/chores/{uuid.uuid4()}", json={"title": ""}, headers=h)
+    assert bad.status_code == 422
+
+    (rec,) = _events(caplog, "request.invalid")
+    assert rec.method == "PATCH"
+    assert rec.path.startswith("/api/v1/chores/")
+    assert rec.errors and rec.errors[0]["loc"][-1] == "title"
+
+
+async def test_the_422_body_shape_is_unchanged(client, admin_user, totp_now):
+    """The handler logs and delegates; the wire shape the frontend parses must not move."""
+    r = await client.post(
+        "/api/v1/auth/login",
+        json={"username": "parent", "password": "parent-pass", "totp_code": totp_now()},
+    )
+    bad = await client.patch(
+        f"/api/v1/chores/{uuid.uuid4()}",
+        json={"title": ""},
+        headers={"X-CSRF-Token": r.json()["csrf_token"]},
+    )
+    detail = bad.json()["detail"]
+    assert isinstance(detail, list)
+    assert {"loc", "msg", "type"} <= set(detail[0])
+
+
+async def test_a_password_never_reaches_the_log(caplog, client):
+    """Logging raw bodies would write plaintext credentials into the log stream."""
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="chorekeeper.api"):
+        bad = await client.post("/api/v1/auth/login", json={"username": "parent"})
+    assert bad.status_code == 422
+
+    (rec,) = _events(caplog, "request.invalid")
+    assert "hunter2" not in caplog.text
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="chorekeeper.api"):
+        await client.post("/api/v1/auth/login", json={"username": 1, "password": "hunter2"})
+    (rec,) = _events(caplog, "request.invalid")
+    assert '"password":"***"' in rec.body.replace(" ", "")
+    assert "hunter2" not in caplog.text

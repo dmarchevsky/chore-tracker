@@ -7,6 +7,7 @@ chores. All writes stay admin-only.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -40,6 +41,8 @@ from app.schemas.chore import (
 from app.services import audit, standing
 from app.services.cadence import due_datetimes
 from app.services.scheduler import generate_occurrences, resolve_assignees
+
+log = logging.getLogger("chorekeeper.api")
 
 router = APIRouter(prefix="/chores", tags=["chores"])
 
@@ -153,6 +156,17 @@ async def update_chore(
     try:
         validated = ChoreCreate.model_validate(effective)
     except ValidationError as exc:
+        # The merged-definition failures land here, not in the RequestValidationError
+        # handler, so they need their own record or the next one is invisible again.
+        log.warning(
+            "chore update failed re-validation",
+            extra={
+                "event": "chore.update.invalid",
+                "chore_id": str(chore.id),
+                "errors": exc.errors(),
+                "patch": _json(data),
+            },
+        )
         raise HTTPException(422, f"invalid chore update: {exc.errors()}") from exc
 
     if data.keys() & {"assignment_mode", "fixed_assignee_id", "assignee_ids"}:
@@ -208,6 +222,14 @@ async def duplicate_chore(
         # on the parent's first save of the copy.
         validated = ChoreCreate.model_validate(data)
     except ValidationError as exc:
+        log.warning(
+            "chore duplicate failed validation",
+            extra={
+                "event": "chore.duplicate.invalid",
+                "chore_id": str(src.id),
+                "errors": exc.errors(),
+            },
+        )
         raise HTTPException(422, f"invalid chore duplicate: {exc.errors()}") from exc
 
     chore = Chore(household_id=src.household_id, **_dump(validated))

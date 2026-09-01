@@ -396,3 +396,106 @@ async def test_a_standing_chore_can_be_duplicated(client, admin_user, child_user
     assert copy["outcome_tiers"] == body["outcome_tiers"]
     # a fresh copy starts off, not carrying the original's live state
     assert copy["standing_on"] is False
+
+
+# --------------------------------------------------------------- unchanged saves
+
+# Exactly the frontend's PATCH allowlist (frontend/src/admin/chores/choreFields.ts EDITABLE)
+# plus late_multiplier, which body() injects for a tiered chore. Kept here so a drift between
+# the two lists shows up as a failing test rather than a 422 in a parent's face.
+_EDITABLE = [
+    "title",
+    "description",
+    "assignment_mode",
+    "fixed_assignee_id",
+    "assignee_ids",
+    "rotation_period",
+    "rotation_anchor_date",
+    "cadence",
+    "due_time",
+    "window_open_offset_s",
+    "grace_period_s",
+    "end_date",
+    "geofence",
+    "photo_count",
+    "photo_prompts",
+    "allow_gallery_upload",
+    "verification_mode",
+    "verification_checklist",
+    "outcome_tiers",
+    "reward_cents",
+    "penalty_cents",
+    "auto_pass_threshold",
+    "auto_fail_threshold",
+    "late_multiplier",
+]
+
+
+def _resave(body: dict) -> dict:
+    return {k: body[k] for k in _EDITABLE}
+
+
+async def test_a_standing_chore_survives_an_unchanged_full_patch(
+    client, admin_user, child_user, totp_now
+):
+    h = await _admin_headers(client, totp_now)
+    body = await _mk(client, h, child_user)
+
+    r = await client.patch(f"/api/v1/chores/{body['id']}", json=_resave(body), headers=h)
+    assert r.status_code == 200, r.json()
+    for k in _EDITABLE:
+        assert r.json()[k] == body[k], k
+
+
+async def test_a_standing_chore_survives_a_full_patch_after_being_flipped(
+    client, admin_user, child_user, totp_now
+):
+    """The exact sequence behind the "[object Object]" report: open it, flip it on, flip it
+    off, then save the form untouched."""
+    h = await _admin_headers(client, totp_now)
+    body = await _mk(client, h, child_user)
+
+    await client.post(
+        f"/api/v1/chores/{body['id']}/state", json={"on": True, "tier_id": 1}, headers=h
+    )
+    await client.post(f"/api/v1/chores/{body['id']}/state", json={"on": False}, headers=h)
+
+    r = await client.patch(f"/api/v1/chores/{body['id']}", json=_resave(body), headers=h)
+    assert r.status_code == 200, r.json()
+
+
+async def test_a_patch_cannot_smuggle_the_standing_state(client, admin_user, child_user, totp_now):
+    """standing_on/tier/since are set only by the flip endpoint; ChoreUpdate forbids extras."""
+    h = await _admin_headers(client, totp_now)
+    body = await _mk(client, h, child_user)
+    await client.post(
+        f"/api/v1/chores/{body['id']}/state", json={"on": True, "tier_id": 1}, headers=h
+    )
+
+    r = await client.patch(
+        f"/api/v1/chores/{body['id']}", json=_resave(body) | {"standing_on": False}, headers=h
+    )
+    assert r.status_code == 422
+
+    still = (await client.get(f"/api/v1/chores/{body['id']}", headers=h)).json()
+    assert still["standing_on"] is True
+
+
+async def test_a_blank_tier_condition_is_rejected_as_a_field_error(
+    client, admin_user, child_user, totp_now
+):
+    """Pins the response shape the frontend's detailText() renders — a list of field errors
+    whose loc names the offending row."""
+    h = await _admin_headers(client, totp_now)
+    body = await _mk(client, h, child_user)
+
+    r = await client.patch(
+        f"/api/v1/chores/{body['id']}",
+        json=_resave(body)
+        | {"outcome_tiers": [{"id": 1, "condition": "", "outcome_kind": "text", "text": "x"}]},
+        headers=h,
+    )
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert isinstance(detail, list)
+    assert detail[0]["loc"][-1] == "condition"

@@ -1,5 +1,6 @@
 // Constants and pure helpers for the chore form. Split out of Chores.tsx so the sections,
 // the state hook and the list can share them without importing each other.
+import type { OutcomeTier } from '../../api/types';
 
 export interface PreviewItem {
   due_at: string;
@@ -121,3 +122,16 @@ export const isTiered = (form: Record<string, unknown>): boolean =>
 /** A standing chore has no schedule, no proof and no money — it is a state a parent flips. */
 export const isStanding = (form: Record<string, unknown>): boolean =>
   form.chore_kind === 'standing';
+
+/** 1-based ids of outcome rows the backend will reject.
+ *
+ * "Add an outcome" seeds a blank row, and the backend rejects a blank condition with a field
+ * error the parent has no way to act on — so catch it here, where we can point at the row.
+ */
+export function incompleteTiers(tiers: OutcomeTier[] | null | undefined): number[] {
+  return (tiers ?? [])
+    .filter(
+      (t) => !t.condition.trim() || (t.outcome_kind === 'text' ? !t.text?.trim() : !t.amount_cents),
+    )
+    .map((t) => t.id);
+}
