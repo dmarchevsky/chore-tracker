@@ -5,10 +5,11 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import date, datetime, time
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.models.chore import AssignmentMode, ProofType, VerificationMode
+from app.models.chore import AssignmentMode, ChoreKind, ProofType, VerificationMode
 from app.models.occurrence import OccurrenceStatus
 from app.services.cadence import CadenceError, cadence_dates, once_date
 from app.services.rotation import RotationPeriod
@@ -70,6 +71,7 @@ class OutcomeTier(BaseModel):
 
 
 class ChoreBase(BaseModel):
+    chore_kind: ChoreKind = ChoreKind.scheduled
     title: str = Field(min_length=1, max_length=160)
     description: str = ""
 
@@ -106,8 +108,30 @@ class ChoreBase(BaseModel):
 
     active: bool = True
 
+    @model_validator(mode="before")
+    @classmethod
+    def _standing_defaults(cls, data: Any) -> Any:
+        """Fill the schedule/proof columns a standing chore has no use for.
+
+        They are all NOT NULL, and a parent never sees them for a standing chore. Filling
+        only *absent* keys means PATCH re-validation (which passes the stored values back
+        in) can never drift them.
+        """
+        if not isinstance(data, dict) or data.get("chore_kind") != ChoreKind.standing:
+            return data
+        return {
+            "cadence": "standing",
+            "due_time": time(0, 0),
+            "start_date": date.today(),
+            "proof_type": ProofType.none,
+            "verification_mode": VerificationMode.manual,
+            **data,
+        }
+
     @model_validator(mode="after")
     def _check(self) -> ChoreBase:
+        if self.chore_kind is ChoreKind.standing:
+            return self._check_standing()
         try:
             cadence_dates(self.cadence, self.start_date, self.start_date)
         except CadenceError as exc:
@@ -194,6 +218,37 @@ class ChoreBase(BaseModel):
                 )
         return self
 
+    def _check_standing(self) -> ChoreBase:
+        """A standing chore is a state, not a schedule (spec §4.7): no occurrences, no
+        submissions, no ledger entries, text outcomes only."""
+        if self.cadence != "standing":
+            raise ValueError("a standing chore has no schedule — its cadence is 'standing'")
+        if self.end_date is not None:
+            raise ValueError("a standing chore has no end_date — turn it off instead")
+        if self.assignment_mode not in {AssignmentMode.fixed, AssignmentMode.all}:
+            # Nothing to rotate through or claim: there are no occurrences.
+            raise ValueError("a standing chore must be assigned fixed or to all")
+        if self.assignment_mode == AssignmentMode.fixed and not self.fixed_assignee_id:
+            raise ValueError("fixed assignment_mode requires fixed_assignee_id")
+        if self.assignment_mode == AssignmentMode.all and not self.assignee_ids:
+            raise ValueError("all assignment_mode needs assignee_ids")
+        if self.proof_type is not ProofType.none:
+            raise ValueError("a standing chore takes no proof — its proof_type is none")
+        if self.verification_mode is not VerificationMode.manual:
+            raise ValueError("a standing chore is flipped by a person — verification_mode=manual")
+        if self.reward_cents or self.penalty_cents or self.late_multiplier != 1.0:
+            raise ValueError("a standing chore writes no ledger entries — leave the money at 0")
+        if not self.outcome_tiers:
+            raise ValueError(
+                "a standing chore needs at least one condition -> outcome to say what is "
+                "in force while it is on"
+            )
+        if any(t.outcome_kind is not OutcomeKind.text for t in self.outcome_tiers):
+            raise ValueError("a standing chore's outcomes are text only — it moves no money")
+        if [t.id for t in self.outcome_tiers] != list(range(1, len(self.outcome_tiers) + 1)):
+            raise ValueError("outcome_tiers ids must be 1..N in order")
+        return self
+
 
 class ChoreCreate(ChoreBase):
     pass
@@ -250,6 +305,11 @@ class ChoreUpdate(BaseModel):
 class ChoreOut(ChoreBase):
     model_config = ConfigDict(from_attributes=True)
 
+    # Set only by POST /chores/{id}/state — ChoreUpdate's extra="forbid" rejects them.
+    standing_on: bool = False
+    standing_tier_id: int | None = None
+    standing_since: datetime | None = None
+
     id: uuid.UUID
     household_id: uuid.UUID
     created_at: datetime
@@ -285,3 +345,26 @@ class AssigneeSwap(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     assignee_id: uuid.UUID | None = None
+
+
+class ChoreStateRequest(BaseModel):
+    """Body for ``POST /chores/{id}/state`` (spec §4.7)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    on: bool
+    tier_id: int | None = Field(default=None, ge=1)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class ChoreStateEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    chore_id: uuid.UUID
+    actor_user_id: uuid.UUID | None
+    state: bool
+    tier_id: int | None
+    tier: OutcomeTier | None
+    note: str | None
+    created_at: datetime

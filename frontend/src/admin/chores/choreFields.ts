@@ -8,6 +8,7 @@ export interface PreviewItem {
 }
 
 export const BLANK: Record<string, unknown> = {
+  chore_kind: 'scheduled',
   title: '',
   description: '',
   assignment_mode: 'fixed',
@@ -114,3 +115,7 @@ export const ONCE_TODAY = () => `once(${new Date().toISOString().slice(0, 10)})`
  *  and the backend pins both to 0 (app/schemas/chore.py). */
 export const isTiered = (form: Record<string, unknown>): boolean =>
   Boolean((form.outcome_tiers as unknown[] | null)?.length);
+
+/** A standing chore has no schedule, no proof and no money — it is a state a parent flips. */
+export const isStanding = (form: Record<string, unknown>): boolean =>
+  form.chore_kind === 'standing';

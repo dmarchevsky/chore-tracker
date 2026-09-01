@@ -75,6 +75,28 @@ export function useChoreForm(state: FormState, onDone: () => void) {
     });
   }
 
+  /** A standing chore's schedule/proof/money fields are meaningless and the backend rejects
+   *  them, so switching kind resets them to what the standing branch expects. */
+  function setChoreKind(kind: string) {
+    setForm((f) =>
+      kind === 'standing'
+        ? {
+            ...f,
+            chore_kind: kind,
+            cadence: 'standing',
+            due_time: '00:00:00',
+            proof_type: 'none',
+            verification_mode: 'manual',
+            geofence: null,
+            end_date: null,
+            reward_cents: 0,
+            penalty_cents: 0,
+            assignment_mode: f.assignment_mode === 'all' ? 'all' : 'fixed',
+          }
+        : { ...f, chore_kind: kind, cadence: 'daily', due_time: '08:00:00', proof_type: 'photo' },
+    );
+  }
+
   function setAssignmentMode(mode: string) {
     setForm((f) => {
       const next: Record<string, unknown> = { ...f, assignment_mode: mode };
@@ -180,6 +202,7 @@ export function useChoreForm(state: FormState, onDone: () => void) {
     setPhotoCount,
     setLabel,
     setProofType,
+    setChoreKind,
     setAssignmentMode,
     preview,
     error,

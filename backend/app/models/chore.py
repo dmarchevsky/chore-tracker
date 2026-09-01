@@ -9,16 +9,33 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import date, time
+from datetime import date, datetime, time
 from typing import Any
 
-from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String, Text, Time
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    Time,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
 from app.models.base import TimestampMixin, uuid_pk
+
+
+class ChoreKind(enum.StrEnum):
+    """A chore is either a recurring rule or a state a parent flips (spec §4.7)."""
+
+    scheduled = "scheduled"
+    standing = "standing"
 
 
 class AssignmentMode(enum.StrEnum):
@@ -51,6 +68,9 @@ class Chore(TimestampMixin, Base):
         PgUUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), index=True
     )
 
+    chore_kind: Mapped[ChoreKind] = mapped_column(
+        String(16), default=ChoreKind.scheduled, index=True
+    )
     title: Mapped[str] = mapped_column(String(160))
     description: Mapped[str] = mapped_column(Text, default="")
 
@@ -98,5 +118,12 @@ class Chore(TimestampMixin, Base):
     reward_cents: Mapped[int] = mapped_column(Integer, default=0)
     penalty_cents: Mapped[int] = mapped_column(Integer, default=0)
     late_multiplier: Mapped[float] = mapped_column(Numeric(4, 2), default=1.0)
+
+    # --- Standing state (chore_kind=standing only, spec §4.7) ------------
+    # A standing chore has no occurrences; this *is* its state. The flip history lives in
+    # chore_state_events, which is the kid-visible record — the audit log is the admin trail.
+    standing_on: Mapped[bool] = mapped_column(Boolean, default=False)
+    standing_tier_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    standing_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)

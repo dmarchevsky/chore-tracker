@@ -16,6 +16,10 @@ function json(body: unknown, status = 200) {
 
 const CHORE = {
   id: 'c1',
+  chore_kind: 'scheduled',
+  standing_on: false,
+  standing_tier_id: null,
+  standing_since: null,
   title: 'Empty the sink',
   description: '',
   proof_type: 'photo',
@@ -388,6 +392,57 @@ describe('admin Chores', () => {
 
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
     const body = calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>;
+    expect((body.outcome_tiers as Record<string, unknown>[])[0]).toEqual({
+      id: 1,
+      condition: 'more than one missing assignment',
+      outcome_kind: 'text',
+      amount_cents: null,
+      text: 'grounded until it is fixed',
+    });
+  });
+
+  it('drops the schedule and proof sections for a standing chore', async () => {
+    setup();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New chore' }));
+    expect(screen.getByLabelText(/^Cadence/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Kind'), { target: { value: 'standing' } });
+
+    // no schedule, no proof, no flat money — a standing chore has none of them
+    expect(screen.queryByLabelText(/^Cadence/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Due time')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Proof / verification')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Reward / penalty ($)')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
+  });
+
+  it('posts a standing chore with a text-only outcome', async () => {
+    const calls = setup();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New chore' }));
+    fireEvent.change(screen.getByLabelText('Kind'), { target: { value: 'standing' } });
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Missing work' } });
+    fireEvent.change(screen.getByLabelText('Assignee'), { target: { value: 'k1' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add an outcome' }));
+    // the money/text switch is gone — a standing chore moves no money
+    expect(screen.queryByLabelText('Outcome type 1')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Condition 1'), {
+      target: { value: 'more than one missing assignment' },
+    });
+    fireEvent.change(screen.getByLabelText('Outcome text 1'), {
+      target: { value: 'grounded until it is fixed' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+
+    const body = calls.find((c) => c.method === 'POST')!.body as Record<string, unknown>;
+    expect(body.chore_kind).toBe('standing');
+    expect(body.cadence).toBe('standing');
+    expect(body.proof_type).toBe('none');
+    expect(body.reward_cents).toBe(0);
     expect((body.outcome_tiers as Record<string, unknown>[])[0]).toEqual({
       id: 1,
       condition: 'more than one missing assignment',

@@ -18,16 +18,26 @@ from pydantic import ValidationError
 from sqlalchemy import select
 
 from app.auth.deps import AdminUser, CurrentUser, DbDep
-from app.models import Chore, ChoreOccurrence, Household, OccurrenceStatus, User, UserRole
+from app.models import (
+    Chore,
+    ChoreOccurrence,
+    ChoreStateEvent,
+    Household,
+    OccurrenceStatus,
+    User,
+    UserRole,
+)
 from app.schemas.chore import (
     ChoreBase,
     ChoreCreate,
     ChoreDuplicate,
     ChoreOut,
+    ChoreStateEventOut,
+    ChoreStateRequest,
     ChoreUpdate,
     OccurrencePreviewItem,
 )
-from app.services import audit
+from app.services import audit, standing
 from app.services.cadence import due_datetimes
 from app.services.scheduler import generate_occurrences, resolve_assignees
 
@@ -216,11 +226,53 @@ async def duplicate_chore(
     return chore
 
 
+@router.post("/{chore_id}/state", response_model=ChoreOut)
+async def set_chore_state(
+    chore_id: uuid.UUID, payload: ChoreStateRequest, db: DbDep, admin: AdminUser
+) -> Chore:
+    """Flip a standing chore on or off (spec §4.7)."""
+    chore = await db.get(Chore, chore_id)
+    if chore is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "chore not found")
+    try:
+        await standing.set_state(
+            db,
+            chore=chore,
+            actor=admin,
+            on=payload.on,
+            tier_id=payload.tier_id,
+            note=payload.note,
+        )
+    except standing.StandingError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    await db.flush()
+    await db.refresh(chore)
+    return chore
+
+
+@router.get("/{chore_id}/state/history", response_model=list[ChoreStateEventOut])
+async def chore_state_history(
+    chore_id: uuid.UUID,
+    db: DbDep,
+    user: CurrentUser,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> list[ChoreStateEvent]:
+    """Newest-first flip history. Open to kids: "how long have I been grounded" is exactly
+    the thing they should be able to check for themselves (spec §15 Q8)."""
+    chore = await db.get(Chore, chore_id)
+    if chore is None or (user.role == UserRole.child and not chore.active):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "chore not found")
+    return await standing.history(db, chore_id, limit=limit)
+
+
 @router.delete("/{chore_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def deactivate_chore(chore_id: uuid.UUID, db: DbDep, admin: AdminUser) -> None:
     chore = await db.get(Chore, chore_id)
     if chore is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "chore not found")
+    if chore.standing_on:
+        # Otherwise a retired chore leaves a live consequence on the kid's home screen.
+        await standing.set_state(db, chore=chore, actor=admin, on=False, note="chore deactivated")
     chore.active = False  # soft delete — history hangs off occurrences (spec §4.1)
     await db.flush()
     dropped = await _drop_future_occurrences(db, chore)  # stop generating work for it

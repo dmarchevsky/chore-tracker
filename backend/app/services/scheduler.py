@@ -18,7 +18,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Chore, ChoreOccurrence, Household, OccurrenceStatus
-from app.models.chore import AssignmentMode
+from app.models.chore import AssignmentMode, ChoreKind
 from app.services.cadence import due_datetimes
 from app.services.rotation import rotation_pick
 
@@ -86,7 +86,15 @@ async def generate_occurrences(
     today = now.astimezone(tz).date()
     horizon_end = today + timedelta(days=horizon_days)
 
-    chores = (await db.execute(select(Chore).where(Chore.active.is_(True)))).scalars().all()
+    chores = (
+        (
+            await db.execute(
+                select(Chore).where(Chore.active.is_(True), Chore.chore_kind == ChoreKind.scheduled)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     rows: list[dict] = []
     for chore in chores:
@@ -129,6 +137,7 @@ async def open_due_windows(db: AsyncSession, *, now: datetime | None = None) -> 
         .where(
             ChoreOccurrence.status == OccurrenceStatus.pending,
             ChoreOccurrence.chore_id == Chore.id,
+            Chore.chore_kind == ChoreKind.scheduled,
             ChoreOccurrence.window_open_at <= ts,
             ts <= ChoreOccurrence.due_at + _grace_interval(),
         )
@@ -152,6 +161,7 @@ async def detect_missed(db: AsyncSession, *, now: datetime | None = None) -> int
         .where(
             ChoreOccurrence.status.in_(_PRE_MISSED),
             ChoreOccurrence.chore_id == Chore.id,
+            Chore.chore_kind == ChoreKind.scheduled,
             ts > ChoreOccurrence.due_at + _grace_interval(),
         )
         .values(status=OccurrenceStatus.missed)

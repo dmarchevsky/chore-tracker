@@ -14,6 +14,7 @@ Supported grammar (case-insensitive, whitespace-insensitive):
     weekly(on=[MON,WED,FRI])
     monthly(day=15)              1..31; clamped to the last day of shorter months
     once(2026-09-14)             fires on that one date and never again
+    standing                     never fires — the cadence of a standing chore
     custom_rule                  not implemented in v1 (see TODO(decision))
 """
 
@@ -132,6 +133,12 @@ def cadence_dates(cadence: str, start: date, end: date) -> list[date]:
         except ValueError as exc:
             raise CadenceError(f"once(...) needs a real date, got {m.group(1)!r}") from exc
         return [d] if start <= d <= end else []
+
+    if norm == "standing":
+        # A standing chore is a state a parent flips, not a schedule (spec §4.7). This is a
+        # *correct* value rather than a dummy one: it provably generates nothing even if some
+        # future code path forgets to filter on chore_kind. Defence in depth, same price.
+        return []
 
     if norm == "custom_rule":
         # TODO(decision): spec §4.1 lists custom_rule but gives no grammar. Until one is

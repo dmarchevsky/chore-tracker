@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, getPage } from '../api/client';
-import type { Child, Chore, Dispute, LedgerEntry, Occurrence } from '../api/types';
+import type { Child, Chore, ChoreStateEvent, Dispute, LedgerEntry, Occurrence } from '../api/types';
 
 export interface AdminSubmission {
   id: string;
@@ -158,6 +158,31 @@ export function useDuplicateChore() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['chores', 'all'] }),
   });
 }
+
+export function useSetChoreState() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string;
+      body: { on: boolean; tier_id?: number | null; note?: string | null };
+    }) => api.post<Chore>(`/chores/${id}/state`, body),
+    onSuccess: (_d, { id }) => {
+      void qc.invalidateQueries({ queryKey: ['chores', 'all'] });
+      void qc.invalidateQueries({ queryKey: ['chores'] });
+      void qc.invalidateQueries({ queryKey: ['chore-state', id] });
+    },
+  });
+}
+
+export const useChoreStateHistory = (id: string | null) =>
+  useQuery({
+    queryKey: ['chore-state', id],
+    enabled: id != null,
+    queryFn: () => api.get<ChoreStateEvent[]>(`/chores/${id}/state/history`),
+  });
 
 export function useDeactivateChore() {
   const qc = useQueryClient();

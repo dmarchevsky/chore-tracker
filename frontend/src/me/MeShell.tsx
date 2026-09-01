@@ -6,6 +6,7 @@ import { money } from '../shared/format';
 import { startAutoFlush } from '../pwa/offlineQueue';
 import { isIos, isStandalone } from '../pwa/install';
 import { pushState, subscribeToPush, type PushState } from '../pwa/push';
+import { StandingBanner } from './StandingBanner';
 
 const tabs = [
   { to: '/me', label: 'Pending', end: true },
@@ -49,6 +50,9 @@ export function MeShell() {
       )}
 
       <main className="flex-1 px-4 pb-24">
+        <div className="mb-3">
+          <StandingBanner />
+        </div>
         <Outlet />
       </main>
 

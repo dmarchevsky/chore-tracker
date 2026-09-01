@@ -3,11 +3,17 @@
 import type { OutcomeTier } from '../../api/types';
 import { Button } from '../../shared/ui';
 
-const BLANK_TIER: Omit<OutcomeTier, 'id'> = {
+const MONEY_TIER: Omit<OutcomeTier, 'id'> = {
   condition: '',
   outcome_kind: 'money',
   amount_cents: 100,
   text: null,
+};
+const TEXT_TIER: Omit<OutcomeTier, 'id'> = {
+  condition: '',
+  outcome_kind: 'text',
+  amount_cents: null,
+  text: '',
 };
 
 /** Ids must be 1..N in order — the backend enforces it so "tier 3" means the same thing
@@ -18,9 +24,12 @@ const renumber = (items: OutcomeTier[]): OutcomeTier[] =>
 export function TierField({
   value,
   onChange,
+  textOnly = false,
 }: {
   value: OutcomeTier[] | null;
   onChange: (v: OutcomeTier[] | null) => void;
+  /** A standing chore writes no ledger entries, so its outcomes are sentences only. */
+  textOnly?: boolean;
 }) {
   const items = value ?? [];
 
@@ -65,17 +74,19 @@ export function TierField({
               onChange={(e) => edit(i, { condition: e.target.value })}
             />
             <span className="text-xs text-slate-500">→</span>
-            <select
-              className="inp w-24"
-              aria-label={`Outcome type ${it.id}`}
-              value={it.outcome_kind}
-              onChange={(e) => setKind(i, e.target.value as OutcomeTier['outcome_kind'])}
-            >
-              <option value="money">money</option>
-              <option value="text">text</option>
-            </select>
+            {!textOnly && (
+              <select
+                className="inp w-24"
+                aria-label={`Outcome type ${it.id}`}
+                value={it.outcome_kind}
+                onChange={(e) => setKind(i, e.target.value as OutcomeTier['outcome_kind'])}
+              >
+                <option value="money">money</option>
+                <option value="text">text</option>
+              </select>
+            )}
 
-            {it.outcome_kind === 'money' ? (
+            {!textOnly && it.outcome_kind === 'money' ? (
               <>
                 {/* The parent picks reward or penalty; the minus sign is ours to apply. */}
                 <select
@@ -133,7 +144,9 @@ export function TierField({
       <Button
         variant="ghost"
         className="min-h-0 self-start px-3 py-1 text-xs"
-        onClick={() => onChange(renumber([...items, { ...BLANK_TIER, id: 0 }]))}
+        onClick={() =>
+          onChange(renumber([...items, { ...(textOnly ? TEXT_TIER : MONEY_TIER), id: 0 }]))
+        }
       >
         Add an outcome
       </Button>

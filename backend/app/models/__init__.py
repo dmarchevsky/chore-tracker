@@ -2,7 +2,8 @@
 
 from app.models.audit import AuditLog
 from app.models.checkin import CheckinToken
-from app.models.chore import AssignmentMode, Chore, ProofType, VerificationMode
+from app.models.chore import AssignmentMode, Chore, ChoreKind, ProofType, VerificationMode
+from app.models.chore_state import ChoreStateEvent
 from app.models.dispute import Dispute, DisputeStatus
 from app.models.household import Household
 from app.models.job import JobState, VerificationJob
@@ -33,7 +34,9 @@ __all__ = [
     "AuditLog",
     "CheckinToken",
     "Chore",
+    "ChoreKind",
     "ChoreOccurrence",
+    "ChoreStateEvent",
     "Dispute",
     "DisputeStatus",
     "Household",

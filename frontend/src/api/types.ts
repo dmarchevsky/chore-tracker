@@ -59,8 +59,15 @@ export interface OutcomeTier {
   text: string | null;
 }
 
+export type ChoreKind = 'scheduled' | 'standing';
+
 export interface Chore {
   id: string;
+  chore_kind: ChoreKind;
+  /** standing chores only — the state a parent flips, and what is in force while on. */
+  standing_on: boolean;
+  standing_tier_id: number | null;
+  standing_since: string | null;
   title: string;
   description: string;
   proof_type: 'photo' | 'location' | 'photo+location' | 'acknowledgement' | 'none';
@@ -145,5 +152,16 @@ export interface Dispute {
   status_at_filing: string | null;
   resolution_note: string | null;
   resolved_at: string | null;
+  created_at: string;
+}
+
+export interface ChoreStateEvent {
+  id: string;
+  chore_id: string;
+  actor_user_id: string | null;
+  state: boolean;
+  tier_id: number | null;
+  tier: OutcomeTier | null;
+  note: string | null;
   created_at: string;
 }

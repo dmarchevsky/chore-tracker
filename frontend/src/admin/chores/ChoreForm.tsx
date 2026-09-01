@@ -10,11 +10,14 @@ import { WhenSection } from './sections/WhenSection';
 import { ProofSection } from './sections/ProofSection';
 import { CheckingSection } from './sections/CheckingSection';
 import { WorthSection } from './sections/WorthSection';
+import { StandingSection } from './sections/StandingSection';
+import { isStanding } from './choreFields';
 
 export function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) {
   const kids = useChildren();
   const f = useChoreForm(state, onDone);
   const kidOpts = kids.data ?? [];
+  const standing = isStanding(f.form);
 
   return (
     <Card className="flex flex-col gap-2">
@@ -22,10 +25,15 @@ export function ChoreForm({ state, onDone }: { state: FormState; onDone: () => v
 
       <IdentitySection f={f} />
       <WhoSection f={f} kids={kidOpts} />
-      <WhenSection f={f} />
-      <ProofSection f={f} />
-      <CheckingSection f={f} />
+      {!standing && (
+        <>
+          <WhenSection f={f} />
+          <ProofSection f={f} />
+          <CheckingSection f={f} />
+        </>
+      )}
       <WorthSection f={f} />
+      <StandingSection f={f} />
 
       {f.editing && (
         <p className="text-xs text-slate-500">
@@ -36,9 +44,11 @@ export function ChoreForm({ state, onDone }: { state: FormState; onDone: () => v
       {f.error && <p className="text-sm text-rose-400">{f.error}</p>}
 
       <div className="flex flex-wrap gap-2">
-        <Button className="min-h-0 px-3 py-2 text-sm" variant="ghost" onClick={f.doPreview}>
-          Preview
-        </Button>
+        {!standing && (
+          <Button className="min-h-0 px-3 py-2 text-sm" variant="ghost" onClick={f.doPreview}>
+            Preview
+          </Button>
+        )}
         <Button
           className="min-h-0 px-3 py-2 text-sm"
           onClick={f.save}

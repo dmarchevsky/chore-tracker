@@ -1,5 +1,5 @@
 import { Field } from '../../../shared/ui';
-import { isTiered, LLM_MODES } from '../choreFields';
+import { isStanding, isTiered, LLM_MODES } from '../choreFields';
 import { TierField } from '../TierField';
 import type { OutcomeTier } from '../../../api/types';
 import type { ChoreFormApi } from '../useChoreForm';
@@ -7,13 +7,14 @@ import type { ChoreFormApi } from '../useChoreForm';
 export function WorthSection({ f }: { f: ChoreFormApi }) {
   const form = f.form;
 
-  const tiered = isTiered(form);
+  const tiered = isTiered(form) || isStanding(form);
 
   return (
     <>
       <TierField
         value={(form.outcome_tiers as OutcomeTier[] | null) ?? null}
         onChange={(v) => f.set('outcome_tiers', v)}
+        textOnly={isStanding(form)}
       />
 
       {!tiered && (

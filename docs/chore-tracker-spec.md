@@ -110,7 +110,7 @@ Admin MUST be able to define a chore with:
 | `title`, `description` | Description is also shown to the kid. |
 | `assignment_mode` | `fixed` (one kid), `rotating` (alternate on a period), `anyone` (first to complete claims it), `all` (each kid gets own occurrence). |
 | `rotation_period` | For `rotating`: `weekly` / `biweekly` / `daily`. Plus `rotation_anchor_date` and ordered `assignee_ids` — this is what makes "every other week" deterministic. |
-| `cadence` | `daily`, `weekdays`, `weekends`, `weekly(on=[SAT])`, `monthly(day=N)`, `once(YYYY-MM-DD)`, `custom_rule`. `[D]` A one-off carries its date **inside the token**, not in `start_date`: occurrence generation only ever passes the cadence its clamped `[max(start_date, today), horizon]` window (§8.1), so a date-less `once` would fire on every tick forever for a chore with no `end_date`. Keeping it in the token also leaves a one-off reschedulable — `cadence` is patchable, `start_date` is not. |
+| `cadence` | `daily`, `weekdays`, `weekends`, `weekly(on=[SAT])`, `monthly(day=N)`, `once(YYYY-MM-DD)`, `standing`, `custom_rule`. `[D]` A one-off carries its date **inside the token**, not in `start_date`: occurrence generation only ever passes the cadence its clamped `[max(start_date, today), horizon]` window (§8.1), so a date-less `once` would fire on every tick forever for a chore with no `end_date`. Keeping it in the token also leaves a one-off reschedulable — `cadence` is patchable, `start_date` is not. |
 | `window_opens` | Relative to due time, e.g. `-12h` — kid can't submit tomorrow's kitchen photo at 3pm today. |
 | `due_time` | Local wall-clock time, e.g. `08:00`. Timezone is household-level. |
 | `grace_period` | e.g. `15m`. Late-but-within-grace = pass with `was_late` flag (optionally reduced payout). |
@@ -122,6 +122,7 @@ Admin MUST be able to define a chore with:
 | `verification_checklist` | Optional array of atomic boolean checks. The model answers each; the verdict is derived. Much more reliable than one fuzzy prompt (see §7.3). |
 | `auto_pass_threshold` / `auto_fail_threshold` | Confidence bands. Between them → `NEEDS_REVIEW`. Defaults 0.85 / 0.35. |
 | `geofence` | For location proof: lat, lon, radius_m, plus `arrive_before` time. |
+| `chore_kind` | `scheduled` (a recurring rule) or `standing` (a state a parent flips, §4.7). Immutable after save — duplicate to change it. |
 | `outcome_tiers` | Optional ordered condition→outcome list for a chore a person grades (§4.6). Replaces `reward_amount`/`penalty_amount` for that chore; never mixed with them. |
 | `reward_amount` | $ credited on pass. Unsigned magnitude. |
 | `penalty_amount` | $ debited on miss/fail. Default 0 — penalties are opt-in per chore. `[D]` An **unsigned magnitude**, not a signed amount: the API rejects a negative and `debit_penalty` applies the sign. (A tier's `amount_cents` is the opposite — signed — because one tier list carries both rewards and penalties; see §4.6.) |
@@ -203,6 +204,39 @@ free text assessed by a person — there is no condition language to evaluate.
   already handed in.
 - Any proof type is allowed: manual grading and photo evidence are orthogonal, and a photo of
   a report card is exactly the evidence such a chore wants.
+
+
+### 4.7 Standing chores
+
+Some household rules are **states, not events**: "more than one missing assignment → grounded
+until it's fixed". A parent switches it on and it stays on until switched back. There is no
+due time, no proof, no window and nothing to submit.
+
+`chore_kind: standing` is that chore. It carries `outcome_tiers` (text only) saying what is in
+force, plus `standing_on` / `standing_tier_id` / `standing_since`.
+
+- `[D]` **No occurrences, no submissions, no ledger entries.** Occurrence generation filters on
+  `chore_kind = scheduled`. As defence in depth the cadence grammar also accepts an inert
+  `standing` token that returns no dates, so a standing chore generates nothing even if some
+  future code path forgets the filter. Its `cadence` is therefore a *correct* value, not a
+  dummy one.
+- `[D]` **Text outcomes only.** A standing chore moves no money: `reward_amount`,
+  `penalty_amount` and `late_multiplier` MUST be 0/0/1.0, and every tier must be
+  `outcome_kind: text`. The consequence is a sentence a parent wrote.
+- `[D]` **Every flip is recorded** in `chore_state_events` with actor, timestamp, a snapshot of
+  the tier put in force, and an optional note — *and* in the audit log. Two records because
+  they have two audiences: the audit log is the admin forensic trail and is never shown to a
+  child, while the event table is what tells a kid what is in force and since when. Flipping to
+  the state it is already in is a no-op, so a double tap doesn't litter that history.
+- `[D]` **`chore_kind` is immutable.** Switching a saved chore between kinds would strand its
+  occurrences; clone it instead (§4.1).
+- `[D]` **Deactivating turns it off first.** A retired chore must not leave a live consequence
+  on the kid's home screen.
+- The schedule and proof columns are NOT NULL, so the API fills them (`cadence: standing`,
+  `due_time: 00:00`, `proof_type: none`, `verification_mode: manual`) when a standing chore
+  omits them. Absent keys only, so a PATCH round-trip can never drift them.
+- The child sees current state through the existing `GET /chores` (§15 Q8) — no new kid
+  endpoint — rendered as a banner on their home screen.
 
 ## 5. Non-functional requirements
 
@@ -472,12 +506,16 @@ POST   /chores                            admin
 GET    /chores/{id}
 PATCH  /chores/{id}                       ?apply=forward|future_generated
 DELETE /chores/{id}                       soft delete
+POST   /chores/{id}/duplicate             admin — clone a definition (§4.1); the copy starts inactive
+POST   /chores/{id}/state                 admin — flip a standing chore on/off (§4.7)
+GET    /chores/{id}/state/history         flip history, newest first; readable by the kid
 POST   /chores/preview                    admin — returns next N occurrences for an unsaved definition
 
 GET    /occurrences?from&to&status&child  admin | self(scoped)
 GET    /occurrences/{id}
 POST   /occurrences/{id}/submissions      multipart: files[], note, geo{lat,lon,accuracy}, client_meta
-POST   /occurrences/{id}/decision         admin {action: approve|reject|excuse|redo, amount_override_cents?, reason}
+POST   /occurrences/{id}/decision         admin {action: approve|reject|excuse|redo|tier, tier_id?, amount_override_cents?, reason}
+                                          tier picks one outcome tier (§4.6); approve/reject are refused for a tiered chore
 PATCH  /occurrences/{id}/assignee         admin — swap
 POST   /occurrences/{id}/dispute          child {message}
 
