@@ -23,6 +23,7 @@ Unset config → no-op (LAN dev, tests).
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import jwt
@@ -30,6 +31,8 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+
+log = logging.getLogger("chorekeeper.api")
 
 _HEADER = "cf-access-jwt-assertion"
 
@@ -66,6 +69,28 @@ class CfAccessMiddleware(BaseHTTPMiddleware):
             issuer=self._issuer,
         )
 
+    def _log_rejection(self, request: Request, token: str, exc: Exception) -> None:
+        """Say what the token actually claimed, not just that it was wrong.
+
+        PyJWT reports "Invalid issuer"/"Invalid audience" without naming either side, which
+        leaves an operator comparing a config value against a token they cannot read. These
+        are our own org's identifiers, so logging them (server-side only, never in the
+        response) costs nothing and turns a guessing game into one line.
+        """
+        claims = _unverified(token)
+        log.warning(
+            "rejected a Cloudflare Access assertion",
+            extra={
+                "event": "cf_access.rejected",
+                "path": request.url.path,
+                "error": str(exc),
+                "token_iss": claims.get("iss"),
+                "token_aud": claims.get("aud"),
+                "expected_iss": self._issuer,
+                "expected_aud": self._aud,
+            },
+        )
+
     async def dispatch(self, request: Request, call_next) -> Response:
         if not _guarded(request.url.path):
             return await call_next(request)
@@ -77,11 +102,20 @@ class CfAccessMiddleware(BaseHTTPMiddleware):
         try:
             claims = await run_in_threadpool(self._verify, token)
         except jwt.PyJWTError as exc:
+            self._log_rejection(request, token, exc)
             return JSONResponse(
                 {"detail": f"invalid Cloudflare Access token: {exc}"}, status_code=403
             )
         request.state.cf_access = claims
         return await call_next(request)
+
+
+def _unverified(token: str) -> dict[str, Any]:
+    """The token's claims WITHOUT verifying anything. Diagnostics only — never trusted."""
+    try:
+        return jwt.decode(token, options={"verify_signature": False})
+    except Exception:
+        return {}
 
 
 def access_email(request: Request) -> str | None:

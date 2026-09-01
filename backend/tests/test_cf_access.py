@@ -155,3 +155,21 @@ def test_middleware_absent_when_unconfigured(monkeypatch):
     app = create_app()
     get_settings.cache_clear()
     assert not any(m.cls is CfAccessMiddleware for m in app.user_middleware)
+
+
+async def test_a_rejection_logs_what_the_token_actually_claimed(client, caplog):
+    """PyJWT says "Invalid issuer" without naming either side; the log must name both."""
+    import logging
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="chorekeeper.api"):
+        async with client as c:
+            r = await c.get(
+                "/api/v1/occurrences",
+                headers={"Cf-Access-Jwt-Assertion": _token(iss="https://someone-else.example")},
+            )
+    assert r.status_code == 403
+    (rec,) = [r for r in caplog.records if getattr(r, "event", "") == "cf_access.rejected"]
+    assert rec.token_iss == "https://someone-else.example"
+    assert rec.expected_iss == f"https://{TEAM}"
+    assert ADMIN_AUD in rec.expected_aud
