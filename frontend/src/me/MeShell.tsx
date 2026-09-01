@@ -4,8 +4,7 @@ import { useAuth } from '../auth/AuthContext';
 import { useBalance } from '../api/hooks';
 import { money } from '../shared/format';
 import { startAutoFlush } from '../pwa/offlineQueue';
-import { isIos, isStandalone } from '../pwa/install';
-import { pushState, subscribeToPush, type PushState } from '../pwa/push';
+import { pushState, type PushState } from '../pwa/push';
 import { StandingBanner } from './StandingBanner';
 
 const tabs = [
@@ -34,20 +33,13 @@ export function MeShell() {
             {balance.data ? money(balance.data.balance_cents) : '—'}
           </p>
         </div>
+        <NavLink to="/me/settings" aria-label="Settings" className="relative p-2 text-slate-400">
+          ⚙️
+          {(push === 'needs-install' || push === 'ready') && (
+            <span aria-hidden className="absolute right-1 top-1 h-2 w-2 rounded-full bg-sky-400" />
+          )}
+        </NavLink>
       </header>
-
-      {push === 'needs-install' && (
-        <Banner>
-          {isIos()
-            ? 'Tap Share → “Add to Home Screen” to get chore reminders.'
-            : 'Install this app (browser menu → Install) to get reminders.'}
-        </Banner>
-      )}
-      {push === 'ready' && isStandalone() && (
-        <Banner action={() => subscribeToPush().then(setPush)} actionLabel="Turn on">
-          Turn on notifications so you know when a chore is due.
-        </Banner>
-      )}
 
       <main className="flex-1 px-4 pb-24">
         <div className="mb-3">
@@ -72,27 +64,6 @@ export function MeShell() {
           </NavLink>
         ))}
       </nav>
-    </div>
-  );
-}
-
-function Banner({
-  children,
-  action,
-  actionLabel,
-}: {
-  children: React.ReactNode;
-  action?: () => void;
-  actionLabel?: string;
-}) {
-  return (
-    <div className="mx-4 mb-2 flex items-center justify-between gap-3 rounded-xl bg-slate-800 px-3 py-2 text-sm">
-      <span>{children}</span>
-      {action && (
-        <button className="shrink-0 font-semibold text-sky-400" onClick={action}>
-          {actionLabel}
-        </button>
-      )}
     </div>
   );
 }

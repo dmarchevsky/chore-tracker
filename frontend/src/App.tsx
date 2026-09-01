@@ -9,6 +9,7 @@ import { Complete } from './me/Complete';
 import { ChoreView } from './me/ChoreView';
 import { Money as KidMoney } from './me/Money';
 import { Rules } from './me/Rules';
+import { Settings as KidSettings } from './me/Settings';
 import { AdminShell } from './admin/AdminShell';
 import { Inbox } from './admin/Inbox';
 import { History } from './admin/History';
@@ -42,6 +43,7 @@ function Shell() {
           <Route path="complete" element={<Complete />} />
           <Route path="money" element={<KidMoney />} />
           <Route path="rules" element={<Rules />} />
+          <Route path="settings" element={<KidSettings />} />
           <Route path="chores/:id" element={<ChoreView />} />
         </Route>
       ) : (
