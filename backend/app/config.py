@@ -26,8 +26,9 @@ class Settings(BaseSettings):
     # when the app genuinely sits behind the tunnel + proxy — otherwise a LAN
     # client spoofs the header to dodge the login rate limit.
     trust_proxy_headers: bool = Field(default=False, alias="TRUST_PROXY_HEADERS")
-    # Cloudflare Access: when both are set, /api/v1/admin/* also requires a
-    # valid Cf-Access-Jwt-Assertion header (edge auth layered on app auth).
+    # Cloudflare Access: when both are set, the whole /api/v1 surface requires a valid
+    # Cf-Access-Jwt-Assertion, and its Google `email` claim is the login identity
+    # (spec §12.1). Comma-separated AUD list — one tag per Access application.
     cf_access_team_domain: str = Field(default="", alias="CF_ACCESS_TEAM_DOMAIN")
     cf_access_aud: str = Field(default="", alias="CF_ACCESS_AUD")
 

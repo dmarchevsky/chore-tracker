@@ -8,15 +8,29 @@ afterEach(() => {
 });
 
 describe('App shell', () => {
-  it('shows the login form when not authenticated', async () => {
+  it('offers a retry, not a password form, when Access has not signed anyone in', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ detail: 'not authenticated' }), { status: 401 }),
     );
     render(<App />);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument(),
     );
-    expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
+    // Sign-in is Google via Cloudflare Access; no credential fields exist by default.
+    expect(screen.queryByLabelText(/username/i)).not.toBeInTheDocument();
+  });
+
+  it('names the Google account when Access let through a non-member', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          detail: 'stranger@example.com is signed in to Google but is not an active member',
+        }),
+        { status: 403, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    render(<App />);
+    expect(await screen.findByText(/stranger@example.com/)).toBeInTheDocument();
   });
 
   it('routes a signed-in child to the kid shell', async () => {

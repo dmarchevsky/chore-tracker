@@ -8,6 +8,7 @@ from datetime import UTC, date, datetime, time, timedelta
 import pytest
 from PIL import Image
 from sqlalchemy import select
+from tests.helpers import sign_in
 
 from app.models import (
     Chore,
@@ -26,17 +27,12 @@ SUB = {
 
 
 async def _kid_login(client) -> dict:
-    r = await client.post(
-        "/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"}
-    )
+    r = await sign_in(client, "alice@example.com")
     return {"X-CSRF-Token": r.json()["csrf_token"]}
 
 
-async def _admin_login(client, totp_now) -> dict:
-    r = await client.post(
-        "/api/v1/auth/login",
-        json={"username": "parent", "password": "parent-pass", "totp_code": totp_now()},
-    )
+async def _admin_login(client) -> dict:
+    r = await sign_in(client, "parent@example.com")
     return {"X-CSRF-Token": r.json()["csrf_token"]}
 
 
@@ -65,7 +61,7 @@ async def test_vapid_key_endpoint(client, child_user):
 
 
 async def test_verdict_logs_a_notification_even_without_vapid(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     chore = Chore(
         household_id=household.id,
@@ -101,7 +97,7 @@ async def test_verdict_logs_a_notification_even_without_vapid(
         data={"source": "camera"},
         headers=kh,
     )
-    ah = await _admin_login(client, totp_now)
+    ah = await _admin_login(client)
     await client.post(
         f"/api/v1/occurrences/{occ.id}/decision",
         json={"action": "approve", "reason": "great"},
@@ -115,9 +111,7 @@ async def test_verdict_logs_a_notification_even_without_vapid(
     assert all(log.status in ("skipped", "no_subs") for log in logs)  # no VAPID in tests
 
 
-async def test_dispute_notifies_admins(
-    client, db_session, household, admin_user, child_user, totp_now
-):
+async def test_dispute_notifies_admins(client, db_session, household, admin_user, child_user):
     chore = Chore(
         household_id=household.id,
         title="Kitchen",

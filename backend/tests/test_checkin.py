@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime, time
 
 import pytest
 from sqlalchemy import func, select
+from tests.helpers import sign_in
 
 from app.models import Chore, ChoreOccurrence, LedgerEntry, OccurrenceStatus, Submission
 
@@ -17,11 +18,8 @@ FAR_AWAY = {"lat": 37.8100, "lon": -122.4100, "accuracy": 15}
 FUZZY = {"lat": 37.7749, "lon": -122.4194, "accuracy": 250}
 
 
-async def _admin(client, totp_now) -> dict:
-    r = await client.post(
-        "/api/v1/auth/login",
-        json={"username": "parent", "password": "parent-pass", "totp_code": totp_now()},
-    )
+async def _admin(client) -> dict:
+    r = await sign_in(client, "parent@example.com")
     return {"X-CSRF-Token": r.json()["csrf_token"]}
 
 
@@ -56,8 +54,8 @@ async def _location_occ(db, household, child, *, mode="auto_accept", reward=100)
     return occ
 
 
-async def _token(client, admin_user, child_user, totp_now) -> str:
-    h = await _admin(client, totp_now)
+async def _token(client, admin_user, child_user) -> str:
+    h = await _admin(client)
     r = await client.get(f"/api/v1/children/{child_user.id}/checkin-token", headers=h)
     assert r.status_code == 200
     assert r.json()["webhook_url"].endswith(r.json()["token"])
@@ -70,18 +68,18 @@ async def test_unknown_token_is_404(client):
     assert r.status_code == 404
 
 
-async def test_checkin_with_no_open_occurrence(client, admin_user, child_user, totp_now):
-    tok = await _token(client, admin_user, child_user, totp_now)
+async def test_checkin_with_no_open_occurrence(client, admin_user, child_user):
+    tok = await _token(client, admin_user, child_user)
     r = await client.post(f"/api/v1/checkin/{tok}", json=AT_SCHOOL)
     assert r.status_code == 200 and r.json()["matched"] is False
 
 
 async def test_checkin_inside_fence_passes_and_credits(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     occ = await _location_occ(db_session, household, child_user)
     await db_session.commit()
-    tok = await _token(client, admin_user, child_user, totp_now)
+    tok = await _token(client, admin_user, child_user)
 
     r = await client.post(f"/api/v1/checkin/{tok}", json=AT_SCHOOL)
     body = r.json()
@@ -98,11 +96,11 @@ async def test_checkin_inside_fence_passes_and_credits(
 
 
 async def test_checkin_outside_fence_needs_review(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     occ = await _location_occ(db_session, household, child_user)
     await db_session.commit()
-    tok = await _token(client, admin_user, child_user, totp_now)
+    tok = await _token(client, admin_user, child_user)
 
     r = await client.post(f"/api/v1/checkin/{tok}", json=FAR_AWAY)
     assert r.json()["within"] is False
@@ -111,11 +109,11 @@ async def test_checkin_outside_fence_needs_review(
 
 
 async def test_low_accuracy_flag_routes_to_review(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     occ = await _location_occ(db_session, household, child_user)
     await db_session.commit()
-    tok = await _token(client, admin_user, child_user, totp_now)
+    tok = await _token(client, admin_user, child_user)
 
     await client.post(f"/api/v1/checkin/{tok}", json=FUZZY)
     sub = (
@@ -127,7 +125,7 @@ async def test_low_accuracy_flag_routes_to_review(
 
 
 async def test_token_only_touches_location_occurrences(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     photo_chore = Chore(
         household_id=household.id,
@@ -155,22 +153,22 @@ async def test_token_only_touches_location_occurrences(
         )
     )
     await db_session.commit()
-    tok = await _token(client, admin_user, child_user, totp_now)
+    tok = await _token(client, admin_user, child_user)
 
     r = await client.post(f"/api/v1/checkin/{tok}", json=AT_SCHOOL)
     assert r.json()["matched"] is False  # the photo occurrence is invisible to the webhook
 
 
-async def test_rate_limited_to_20_per_hour(client, admin_user, child_user, totp_now):
-    tok = await _token(client, admin_user, child_user, totp_now)
+async def test_rate_limited_to_20_per_hour(client, admin_user, child_user):
+    tok = await _token(client, admin_user, child_user)
     for _ in range(20):
         await client.post(f"/api/v1/checkin/{tok}", json=AT_SCHOOL)
     r = await client.post(f"/api/v1/checkin/{tok}", json=AT_SCHOOL)
     assert r.status_code == 429
 
 
-async def test_rotate_invalidates_old_token(client, admin_user, child_user, totp_now):
-    h = await _admin(client, totp_now)
+async def test_rotate_invalidates_old_token(client, admin_user, child_user):
+    h = await _admin(client)
     old = (await client.get(f"/api/v1/children/{child_user.id}/checkin-token", headers=h)).json()[
         "token"
     ]

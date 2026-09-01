@@ -5,31 +5,29 @@ from __future__ import annotations
 import httpx
 import pytest
 import respx
+from tests.helpers import sign_in
 
 from app.services.llm_config import get_llm_config
 
 pytestmark = pytest.mark.asyncio
 
 
-async def _admin(client, totp_now) -> dict:
-    r = await client.post(
-        "/api/v1/auth/login",
-        json={"username": "parent", "password": "parent-pass", "totp_code": totp_now()},
-    )
+async def _admin(client) -> dict:
+    r = await sign_in(client, "parent@example.com")
     assert r.status_code == 200
     return {"X-CSRF-Token": r.json()["csrf_token"]}
 
 
-async def test_get_shows_env_defaults(client, admin_user, household, totp_now):
-    h = await _admin(client, totp_now)
+async def test_get_shows_env_defaults(client, admin_user, household):
+    h = await _admin(client)
     body = (await client.get("/api/v1/admin/settings", headers=h)).json()
     assert body["llm"]["base_url"] == "http://llm-vision:8081/v1"
     assert body["llm"]["api_key_set"] is False
     assert body["source"]["llm_base_url"] == "env"
 
 
-async def test_put_overrides_then_null_clears(client, admin_user, household, totp_now, db_session):
-    h = await _admin(client, totp_now)
+async def test_put_overrides_then_null_clears(client, admin_user, household, db_session):
+    h = await _admin(client)
 
     put = await client.patch(
         "/api/v1/admin/settings",
@@ -52,8 +50,8 @@ async def test_put_overrides_then_null_clears(client, admin_user, household, tot
     assert cleared.json()["llm"]["model"] == ""  # back to the env default
 
 
-async def test_thresholds_are_overridable(client, admin_user, household, totp_now):
-    h = await _admin(client, totp_now)
+async def test_thresholds_are_overridable(client, admin_user, household):
+    h = await _admin(client)
     r = await client.patch(
         "/api/v1/admin/settings",
         json={"auto_pass_threshold": 0.7, "auto_fail_threshold": 0.2},
@@ -65,8 +63,8 @@ async def test_thresholds_are_overridable(client, admin_user, household, totp_no
 
 
 @respx.mock
-async def test_models_proxy_parses_openai_list(client, admin_user, household, totp_now):
-    h = await _admin(client, totp_now)
+async def test_models_proxy_parses_openai_list(client, admin_user, household):
+    h = await _admin(client)
     respx.get("http://probe.test/v1/models").mock(
         return_value=httpx.Response(200, json={"data": [{"id": "gemma3"}, {"id": "qwen3-vl"}]})
     )
@@ -77,5 +75,5 @@ async def test_models_proxy_parses_openai_list(client, admin_user, household, to
 
 
 async def test_settings_are_admin_only(client, child_user):
-    await client.post("/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"})
+    await sign_in(client, "alice@example.com")
     assert (await client.get("/api/v1/admin/settings")).status_code == 403

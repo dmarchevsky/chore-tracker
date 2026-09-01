@@ -13,6 +13,9 @@ vi.mock('../pwa/install', () => ({
   isIos: vi.fn(() => false),
   isStandalone: vi.fn(() => true),
 }));
+vi.mock('../auth/AuthContext', () => ({
+  useAuth: () => ({ me: { email: 'alice@example.com' }, logout: vi.fn() }),
+}));
 
 const show = () =>
   render(

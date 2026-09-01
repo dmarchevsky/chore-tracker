@@ -1,13 +1,5 @@
 import { useEffect, useState } from 'react';
-import { QRCodeSVG } from 'qrcode.react';
-import {
-  useLlmModels,
-  useSettings,
-  useTotpConfirm,
-  useTotpEnroll,
-  useTotpReset,
-  useUpdateSettings,
-} from './api';
+import { useLlmModels, useSetBreakGlassPassword, useSettings, useUpdateSettings } from './api';
 import type { SettingsPatch } from './api';
 import { useAuth } from '../auth/AuthContext';
 import { Button, Card, Spinner } from '../shared/ui';
@@ -150,7 +142,7 @@ export function Settings() {
         </div>
       </Card>
 
-      <TwoFactor />
+      <SignIn />
 
       <div className="flex items-center gap-3">
         <Button className="min-h-0 px-4 py-2 text-sm" onClick={submit} disabled={save.isPending}>
@@ -166,48 +158,18 @@ export function Settings() {
   );
 }
 
-function TwoFactor() {
-  const { me, refresh } = useAuth();
-  const enroll = useTotpEnroll();
-  const confirm = useTotpConfirm();
-  const reset = useTotpReset();
-  const [uri, setUri] = useState<string | null>(null);
-  const [secret, setSecret] = useState('');
-  const [code, setCode] = useState('');
+function SignIn() {
+  const { me } = useAuth();
+  const setPassword = useSetBreakGlassPassword();
   const [msg, setMsg] = useState<string | null>(null);
 
-  async function begin() {
-    setMsg(null);
-    try {
-      const r = await enroll.mutateAsync();
-      setUri(r.provisioning_uri);
-      setSecret(r.secret);
-    } catch (e) {
-      setMsg((e as Error).message);
-    }
-  }
-
-  async function finish() {
-    setMsg(null);
-    try {
-      await confirm.mutateAsync(code.trim());
-      await refresh();
-      setUri(null);
-      setCode('');
-      setMsg('Two-factor is on.');
-    } catch (e) {
-      setMsg((e as Error).message);
-    }
-  }
-
-  async function doReset() {
-    setMsg(null);
-    const pw = window.prompt('Confirm your password to reset the authenticator');
+  async function changeBreakGlass() {
+    const pw = window.prompt('New break-glass password (at least 12 characters)');
     if (!pw) return;
+    setMsg(null);
     try {
-      await reset.mutateAsync(pw);
-      await refresh();
-      setMsg('Authenticator cleared — set up a new one below.');
+      await setPassword.mutateAsync(pw);
+      setMsg('Break-glass password updated.');
     } catch (e) {
       setMsg((e as Error).message);
     }
@@ -215,69 +177,26 @@ function TwoFactor() {
 
   return (
     <Card className="flex flex-col gap-3">
-      <h2 className="font-bold">Two-factor (Google Authenticator)</h2>
-
-      {me?.totp_enrolled && !uri && (
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-emerald-400">Enabled for {me.username}.</span>
-          <Button
-            className="min-h-0 px-3 py-2 text-sm"
-            variant="ghost"
-            onClick={doReset}
-            disabled={reset.isPending}
-          >
-            Move to a new phone / reset
-          </Button>
-        </div>
-      )}
-
-      {!me?.totp_enrolled && !uri && (
-        <Button
-          className="min-h-0 self-start px-3 py-2 text-sm"
-          onClick={begin}
-          disabled={enroll.isPending}
-        >
-          Set up Google Authenticator
-        </Button>
-      )}
-
-      {uri && (
-        <div className="flex flex-col gap-2 text-sm">
-          <p className="text-slate-400">
-            In Google Authenticator: <b>+</b> → <b>Scan a QR code</b>.
-          </p>
-          <div className="w-fit rounded-lg bg-white p-2">
-            <QRCodeSVG value={uri} size={160} />
-          </div>
-          <p className="break-all text-xs text-slate-500">
-            or enter this key manually: <code>{secret}</code>
-          </p>
-          <div className="flex gap-2">
-            <input
-              className="inp"
-              inputMode="numeric"
-              placeholder="6-digit code"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-            />
-            <Button
-              className="min-h-0 px-3 py-2 text-sm"
-              onClick={finish}
-              disabled={code.trim().length < 6 || confirm.isPending}
-            >
-              Confirm
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {msg && (
-        <span
-          className={`text-sm ${msg.includes('on.') || msg.includes('cleared') ? 'text-emerald-400' : 'text-rose-400'}`}
-        >
-          {msg}
-        </span>
-      )}
+      <h2 className="font-bold">Sign-in</h2>
+      <p className="text-sm text-slate-400">
+        Everyone signs in with Google through Cloudflare Access — there are no app passwords and no
+        authenticator codes. You are signed in as <b>{me?.email ?? me?.username}</b>. To let a kid
+        in, add their Google address both to the Cloudflare Access policy and under Kids.
+      </p>
+      <p className="text-sm text-slate-400">
+        The break-glass password is the way back in if Cloudflare or Google is unavailable. It works
+        only from inside the house, on the server{"'"}s own port — the front door refuses that path
+        over the internet.
+      </p>
+      <Button
+        className="min-h-0 self-start px-3 py-2 text-sm"
+        variant="ghost"
+        onClick={changeBreakGlass}
+        disabled={setPassword.isPending}
+      >
+        Change break-glass password
+      </Button>
+      {msg && <p className="text-sm text-slate-300">{msg}</p>}
     </Card>
   );
 }

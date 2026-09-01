@@ -8,6 +8,7 @@ import uuid
 from datetime import UTC, date, datetime, time
 
 import pytest
+from tests.helpers import sign_in
 
 from app import obs
 from app.models import Chore, ChoreOccurrence, OccurrenceStatus
@@ -148,13 +149,10 @@ async def test_verification_insert_emits_a_model_call_line(
     assert rec.confidence == pytest.approx(0.91)
 
 
-async def test_a_malformed_body_is_logged_with_its_errors(caplog, client, admin_user, totp_now):
+async def test_a_malformed_body_is_logged_with_its_errors(caplog, client, admin_user):
     """A 422 used to leave no server-side trace at all, which is how a failing save became
     unexplainable — the client showed a field error and nothing recorded why."""
-    r = await client.post(
-        "/api/v1/auth/login",
-        json={"username": "parent", "password": "parent-pass", "totp_code": totp_now()},
-    )
+    r = await sign_in(client, "parent@example.com")
     h = {"X-CSRF-Token": r.json()["csrf_token"]}
 
     caplog.clear()
@@ -168,12 +166,9 @@ async def test_a_malformed_body_is_logged_with_its_errors(caplog, client, admin_
     assert rec.errors and rec.errors[0]["loc"][-1] == "title"
 
 
-async def test_the_422_body_shape_is_unchanged(client, admin_user, totp_now):
+async def test_the_422_body_shape_is_unchanged(client, admin_user):
     """The handler logs and delegates; the wire shape the frontend parses must not move."""
-    r = await client.post(
-        "/api/v1/auth/login",
-        json={"username": "parent", "password": "parent-pass", "totp_code": totp_now()},
-    )
+    r = await sign_in(client, "parent@example.com")
     bad = await client.patch(
         f"/api/v1/chores/{uuid.uuid4()}",
         json={"title": ""},

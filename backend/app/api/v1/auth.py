@@ -1,28 +1,19 @@
-"""Authentication: local accounts + TOTP for admins (spec §12.1)."""
+"""Authentication: Google identity via Cloudflare Access, plus break-glass (spec §12.1)."""
 
 from __future__ import annotations
 
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlalchemy import select
 
 from app.auth import SESSION_COOKIE, ratelimit
-from app.auth.deps import DbDep, current_user
+from app.auth.cf_access import access_email
+from app.auth.deps import DbDep
 from app.auth.passwords import hash_password, needs_rehash, verify_password
-from app.auth.sessions import create_session, revoke_session
-from app.auth.totp import new_secret, provisioning_uri, verify_code
+from app.auth.sessions import create_session, load_session, revoke_session
 from app.config import get_settings
 from app.models import User, UserRole
 from app.net import client_ip
-from app.schemas.auth import (
-    LoginRequest,
-    MeResponse,
-    TotpConfirmRequest,
-    TotpEnrollResponse,
-    TotpResetRequest,
-)
-from app.services import audit
+from app.schemas.auth import BreakGlassLoginRequest, LogoutResponse, MeResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -40,10 +31,59 @@ def _set_session_cookie(response: Response, session_id: str, *, max_age: int) ->
     )
 
 
+async def _start_session(user: User, request: Request, response: Response, db: DbDep) -> MeResponse:
+    session = await create_session(
+        db, user, user_agent=request.headers.get("user-agent"), ip=client_ip(request)
+    )
+    max_age = int((session.expires_at - session.created_at).total_seconds())
+    _set_session_cookie(response, str(session.id), max_age=max_age)
+    return _me(user, session.csrf_token)
+
+
+@router.get("/me", response_model=MeResponse)
+async def me(request: Request, response: Response, db: DbDep) -> MeResponse:
+    """The SPA's bootstrap probe — and, behind Access, the login itself.
+
+    Cloudflare has already made the visitor prove they own a Google address by the time
+    this runs, so there is nothing left to ask them: map the address to a household member
+    and mint the session. That is why there is no sign-in form for anyone but break-glass.
+    """
+    email = access_email(request)
+    sid = request.cookies.get(SESSION_COOKIE)
+    loaded = await load_session(db, sid) if sid else None
+    if loaded is not None:
+        session_row, user = loaded
+        if email is None or user.email == email:
+            return _me(user, session_row.csrf_token)
+        # Access is authoritative about who is at the keyboard. A cookie naming someone
+        # else is stale — a shared family tablet where the last kid never signed out —
+        # and honouring it would hand one child another's screen.
+        await revoke_session(db, sid)
+
+    if email is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "not authenticated")
+
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    if user is None or not user.is_active:
+        # Name the address. The parent's next move is to add exactly this string under
+        # Kids, and guessing which of a family's Google accounts the phone picked is the
+        # kind of dead end that gets an app abandoned.
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"{email} is signed in to Google but is not an active member of this household",
+        )
+    return await _start_session(user, request, response, db)
+
+
 @router.post("/login", response_model=MeResponse)
-async def login(
-    payload: LoginRequest, request: Request, response: Response, db: DbDep
+async def break_glass_login(
+    payload: BreakGlassLoginRequest, request: Request, response: Response, db: DbDep
 ) -> MeResponse:
+    """Local admin password — the way back in when Cloudflare or Google is unavailable.
+
+    Only reachable on the host's loopback port: the Caddy front door answers 404 for this
+    path, so it is never exposed through the tunnel (see docs/remote-access.md).
+    """
     ip = client_ip(request)
     if not ratelimit.ip_allowed(ip):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "too many attempts, slow down")
@@ -54,109 +94,38 @@ async def login(
         await db.execute(select(User).where(User.username == payload.username))
     ).scalar_one_or_none()
 
-    invalid = HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials")
-    password_ok = user is not None and verify_password(user.password_hash, payload.password)
-    if user is None or not user.is_active or not password_ok:
+    # Children have no password at all, so role is checked before the hash: a child row
+    # can never satisfy this endpoint regardless of what is in the column.
+    usable = user is not None and user.is_active and user.role == UserRole.admin
+    password_ok = (
+        usable
+        and bool(user.password_hash)
+        and verify_password(user.password_hash, payload.password)
+    )
+    if not password_ok:
         ratelimit.record_failure(payload.username)
-        raise invalid
-
-    if user.role == UserRole.admin and user.totp_enrolled:
-        # TOTP mandatory once enrolled. A not-yet-enrolled admin may log in with a
-        # password alone to reach the enrollment endpoint (documented bootstrap).
-        if not user.totp_secret or not verify_code(user.totp_secret, payload.totp_code or ""):
-            ratelimit.record_failure(payload.username)
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or missing TOTP code")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials")
 
     if needs_rehash(user.password_hash):
         user.password_hash = hash_password(payload.password)
 
     ratelimit.record_success(payload.username)
-    session = await create_session(db, user, user_agent=request.headers.get("user-agent"), ip=ip)
-    max_age = int((session.expires_at - session.created_at).total_seconds())
-    _set_session_cookie(response, str(session.id), max_age=max_age)
-    return _me(user, session.csrf_token)
+    return await _start_session(user, request, response, db)
 
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(request: Request, response: Response, db: DbDep) -> Response:
+@router.post("/logout", response_model=LogoutResponse)
+async def logout(request: Request, response: Response, db: DbDep) -> LogoutResponse:
     sid = request.cookies.get(SESSION_COOKIE)
     if sid:
         await revoke_session(db, sid)
     response.delete_cookie(SESSION_COOKIE, path="/")
-    response.status_code = status.HTTP_204_NO_CONTENT
-    return response
-
-
-@router.get("/me", response_model=MeResponse)
-async def me(request: Request, db: DbDep) -> MeResponse:
-    from app.auth.sessions import load_session
-
-    sid = request.cookies.get(SESSION_COOKIE)
-    loaded = await load_session(db, sid) if sid else None
-    if loaded is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "not authenticated")
-    session_row, user = loaded
-    return _me(user, session_row.csrf_token)
-
-
-@router.post("/totp/enroll", response_model=TotpEnrollResponse)
-async def totp_enroll(user: Annotated[User, Depends(current_user)]) -> TotpEnrollResponse:
-    if user.role != UserRole.admin:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "admin only")
-    if user.totp_enrolled:
-        raise HTTPException(status.HTTP_409_CONFLICT, "TOTP already enrolled")
-    secret = new_secret()
-    user.totp_secret = secret
-    return TotpEnrollResponse(
-        secret=secret, provisioning_uri=provisioning_uri(secret, user.username)
+    # Dropping our own cookie is not a logout while the Access session stands — the next
+    # page load would sign the same Google account straight back in. The SPA sends the
+    # browser here to end the edge session too.
+    team = get_settings().cf_access_team_domain
+    return LogoutResponse(
+        access_logout_url=f"https://{team}/cdn-cgi/access/logout" if team else None
     )
-
-
-@router.post("/totp/confirm", response_model=MeResponse)
-async def totp_confirm(
-    payload: TotpConfirmRequest,
-    request: Request,
-    user: Annotated[User, Depends(current_user)],
-    db: DbDep,
-) -> MeResponse:
-    if user.role != UserRole.admin or not user.totp_secret:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "start enrollment first")
-    if not verify_code(user.totp_secret, payload.totp_code):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "code did not verify")
-    user.totp_enrolled = True
-    from app.auth.sessions import load_session
-
-    loaded = await load_session(db, request.cookies.get(SESSION_COOKIE) or "")
-    csrf = loaded[0].csrf_token if loaded else ""
-    return _me(user, csrf)
-
-
-@router.post("/totp/reset", response_model=MeResponse)
-async def totp_reset(
-    payload: TotpResetRequest,
-    request: Request,
-    user: Annotated[User, Depends(current_user)],
-    db: DbDep,
-) -> MeResponse:
-    """Re-authenticate, then clear TOTP so the admin can enroll a new phone (spec §12.1)."""
-    if user.role != UserRole.admin:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "admin only")
-    if payload.password is not None:
-        ok = verify_password(user.password_hash, payload.password)
-    else:
-        ok = bool(user.totp_secret) and verify_code(user.totp_secret, payload.totp_code or "")
-    if not ok:
-        ratelimit.record_failure(user.username)
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "re-authentication failed")
-
-    user.totp_secret = None
-    user.totp_enrolled = False
-    await audit.record(db, actor=user, action="totp.reset", entity_type="user", entity_id=user.id)
-    from app.auth.sessions import load_session
-
-    loaded = await load_session(db, request.cookies.get(SESSION_COOKIE) or "")
-    csrf = loaded[0].csrf_token if loaded else ""
-    return _me(user, csrf)
 
 
 def _me(user: User, csrf_token: str) -> MeResponse:
@@ -164,7 +133,7 @@ def _me(user: User, csrf_token: str) -> MeResponse:
         id=user.id,
         username=user.username,
         display_name=user.display_name,
+        email=user.email,
         role=user.role,
         csrf_token=csrf_token,
-        totp_enrolled=user.totp_enrolled,
     )

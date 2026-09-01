@@ -2,43 +2,31 @@ from __future__ import annotations
 
 import uuid
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from app.models import UserRole
 
 
-class LoginRequest(BaseModel):
+class BreakGlassLoginRequest(BaseModel):
+    """The local admin password path — everyone else arrives via Cloudflare Access."""
+
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=256)
-    totp_code: str | None = Field(default=None, max_length=8)
 
 
 class MeResponse(BaseModel):
     id: uuid.UUID
     username: str
     display_name: str
+    email: str | None
     role: UserRole
     csrf_token: str
-    totp_enrolled: bool
 
 
-class TotpEnrollResponse(BaseModel):
-    secret: str
-    provisioning_uri: str
+class LogoutResponse(BaseModel):
+    # None when the app is not behind Access (LAN/dev); the SPA then just reloads.
+    access_logout_url: str | None = None
 
 
-class TotpConfirmRequest(BaseModel):
-    totp_code: str = Field(min_length=6, max_length=8)
-
-
-class TotpResetRequest(BaseModel):
-    """Re-auth to drop the current authenticator so a new one can be enrolled."""
-
-    password: str | None = Field(default=None, max_length=256)
-    totp_code: str | None = Field(default=None, max_length=8)
-
-    @model_validator(mode="after")
-    def _exactly_one(self) -> TotpResetRequest:
-        if bool(self.password) == bool(self.totp_code):
-            raise ValueError("provide exactly one of password or totp_code")
-        return self
+class BreakGlassPasswordRequest(BaseModel):
+    new_password: str = Field(min_length=12, max_length=256)

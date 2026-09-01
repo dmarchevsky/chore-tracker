@@ -15,16 +15,23 @@ the origin never listens on a public socket.**
 
 ```
 phone / browser ──TLS──▶ Cloudflare edge ──▶ cloudflared ──▶ proxy (Caddy) ──┬─▶ /api/*  → api:8000
-                          │  Access on /admin, /api/v1/admin                  └─▶ else    → built PWA
-                          │  WAF rate-limit on /api/v1/auth/login
+                          │  Access (Google) on everything                    ├─▶ /api/v1/auth/login → 404
+                          │  except /health + /api/v1/checkin/*               └─▶ else    → built PWA
 ```
+
+Cloudflare Access is also the **sign-in**: once it has authenticated a Google account it
+attaches a signed `Cf-Access-Jwt-Assertion`, and `GET /api/v1/auth/me` maps the verified
+`email` claim to a `users` row and mints the app's own session (spec §12.1). There is no
+sign-in form; a parent adds a kid by putting their Google address in *both* the Access
+policy and the app.
 
 `cloudflared` authenticates to Cloudflare with a **tunnel token** (a bearer credential —
 keep it in `.env`, never commit, rotate on suspicion). It grants no LAN access beyond the
 one mapped service.
 
-**Operator path is separate** (spec §12.2 "two doors"): reach SSH, Postgres, `llama-server`
-and `http://127.0.0.1:8088` over **Tailscale**, never through the tunnel.
+**There is no remote operator path** (spec §12.2 `[D]`). SSH, Postgres, `llama-server` and
+`http://127.0.0.1:8088` are reachable from the LAN or the console only — never through the
+tunnel, and no VPN is maintained for them. A fault that needs a shell needs someone at home.
 
 ---
 
@@ -37,13 +44,30 @@ and `http://127.0.0.1:8088` over **Tailscale**, never through the tunnel.
   origin stays private. This is spec §12.2's explicitly accepted tradeoff and a stated
   exception to spec §5 ("no image leaves the LAN"). If it ever stops feeling acceptable,
   switch to Tailscale-only — no app changes needed.
-- **Layered admin auth**: Cloudflare Access (operator email OTP / Google) **+** app password
-  **+** TOTP **+** the app verifying the `Cf-Access-Jwt-Assertion` header on
-  `/api/v1/admin/*` (`CF_ACCESS_*` env). A tunnel or Access misconfiguration alone does not
-  expose admin.
-- **Kid paths are app-auth only** — long-lived session + strict CSP + the WAF login
-  rate-limit + the per-token 20/h check-in cap. Deliberate: an Access wall in front of a
-  12-year-old at 07:55 kills adoption.
+- **Google and Cloudflare now hold identity.** They learn who signed in and when — never
+  chore content, photos or the ledger. In exchange there is one credential per person
+  instead of a password plus an authenticator app, on accounts the family already secures.
+- **Access fronts every path but two**, kids included. The exemptions are `/api/v1/health`
+  (liveness probe) and `/api/v1/checkin/{token}` (iOS Shortcuts geofence; a Shortcut cannot
+  carry an Access session). The check-in path is therefore **the only unauthenticated
+  surface left**, and it rests entirely on the per-kid token: high-entropy, revocable, and
+  capped at 20 requests/hour. Assume it leaks eventually — rotate it from admin → Kids.
+- **The app verifies the assertion itself**, against Cloudflare's JWKS, with the AUD tag and
+  issuer pinned (`CF_ACCESS_*`). It never reads `CF-Access-Authenticated-User-Email`, which
+  is a plain header anything reaching the origin could set. A tunnel or Access
+  misconfiguration alone does not get anyone in.
+- **Break-glass is kept off the internet by two independent layers**: the app exempts
+  `/api/v1/auth/login` from the Access check so it works on `127.0.0.1:8088`, **and** the
+  Caddy front door answers `404` for that path so the tunnel never carries it. Either layer
+  alone would leave a password-only door on the public internet, so treat both as load
+  bearing — the Caddyfile block carries a comment saying exactly that.
+- **Losing Google or Cloudflare locks everyone out.** That is what break-glass exists for;
+  it works from the LAN when the edge does not. Keep the password somewhere reachable
+  without the app.
+- **Access sessions expire while the PWA is open** (1 month by policy). The edge then
+  answers an API call with a redirect to Google, which `fetch` cannot usefully follow, so
+  the app detects the HTML response and reloads the page — a top-level navigation is the
+  only thing that can complete an Access round-trip.
 - **One third-party host in the CSP**: `https://*.tile.openstreetmap.org` in `img-src`, for
   the admin geofence map picker (spec §6.2). It loads only when a parent opens a location
   chore's editor, and it tells OSM which coordinates are being viewed — a deliberate,
@@ -52,9 +76,10 @@ and `http://127.0.0.1:8088` over **Tailscale**, never through the tunnel.
 - **Client-IP trust**: with `TRUST_PROXY_HEADERS=true` the app believes `CF-Connecting-IP`.
   Set it **only** in this deployment — on the LAN a local client would spoof the header to
   dodge the login rate-limit or poison audit logs.
-- **Login DoS**: the in-process IP limiter is per-process and restart-wiped. The real
-  defense is the **Cloudflare WAF rate-limit rule** on `/api/v1/auth/login` (step 7); the
-  per-account exponential backoff (keyed by username) still works.
+- **Login DoS**: with break-glass unreachable through the tunnel there is no public
+  credential endpoint left to flood; the WAF rate-limit now guards `/api/v1/checkin/*`
+  instead (step 7). The in-process IP limiter and per-account backoff still guard the
+  loopback path.
 - **Cache poisoning / signed-URL leakage**: `/api/*` and media must **never** be edge
   cached. Caddy sends `Cache-Control: private, no-store`; add the Cloudflare Cache Rule
   (step 6) as well. A cached signed media URL served to another session is *the* failure
@@ -74,8 +99,8 @@ and `http://127.0.0.1:8088` over **Tailscale**, never through the tunnel.
 ## Setup
 
 **Prerequisites:** a domain on Cloudflare (free plan), a Zero Trust org (free),
-Docker Compose **v2.24+** (for the `!override` tag in the overlay), and Tailscale on the
-host for the operator path.
+Docker Compose **v2.24+** (for the `!override` tag in the overlay), a Google Cloud project
+for the OAuth client (step 5a), and a Google account for every household member.
 
 ### 1. Create the tunnel
 
@@ -93,8 +118,12 @@ Still in the tunnel config, **Published application routes → Add**:
 | Type | `HTTP` |
 | URL | `proxy:80` |
 
-Cloudflare creates the `CNAME` automatically. No path routing here — Cloudflare Access does
-the admin split.
+`proxy:80`, **not** `proxy:5173`. `5173` is only the host-side port mapping in
+`docker-compose.yml`; inside the compose network Caddy listens on `80`, and pointing the
+tunnel at `5173` gets a `connection refused` from `cloudflared` and a 502 in the browser.
+
+Cloudflare creates the `CNAME` automatically. No path routing here — the Access
+applications do the admin split.
 
 ### 3. Host `.env`
 
@@ -106,7 +135,8 @@ PUBLIC_BASE_URL=https://chores.example.com
 ALLOWED_HOSTS=chores.example.com
 SESSION_SECRET=<openssl rand -hex 32>
 TRUST_PROXY_HEADERS=true
-# CF_ACCESS_* are filled in step 5
+ADMIN_EMAIL=you@gmail.com    # read once by the auth migration to seed the admin identity
+# CF_ACCESS_* are filled in step 5g
 ```
 
 `ENVIRONMENT=prod` and `COOKIE_SECURE=true` are set by the overlay — no need to add them.
@@ -121,42 +151,139 @@ just tunnel-logs        # expect "Registered tunnel connection" x4
 `https://chores.example.com` now serves the PWA. `/docs` returns 404; `/api/v1/health`
 returns `{"status":"ok"}`.
 
-### 5. Cloudflare Access for the admin surface
+### 5. Google sign-in via Cloudflare Access
 
-Zero Trust → **Access → Applications → Add an application → Self-hosted**. Create two
-(optionally three):
+This is what makes Google the login for everyone (spec §12.1). Do all seven sub-steps —
+skipping **5f** breaks the geofence check-ins, and skipping **5g** leaves the app unable to
+verify the assertions it is being handed.
 
-| Application | Domain | Path |
-|---|---|---|
-| ChoreKeeper admin UI | `chores.example.com` | `admin` |
-| ChoreKeeper admin API | `chores.example.com` | `api/v1/admin` |
-| _(optional)_ LLM health | `chores.example.com` | `api/v1/health/llm` |
+#### 5a. Create the Google OAuth client
 
-For each: **Policy** → Action `Allow`, Include → `Emails` → your address. **Identity
-providers** → `One-time PIN` (or Google). Session duration `24h`.
+In the [Google Cloud Console](https://console.cloud.google.com/):
 
-After creating them, open each app's **Overview** and copy the **Application Audience (AUD)
-tag**. Put it in `.env` as `CF_ACCESS_AUD` (they share one if you scope a single app to
-both paths; otherwise use the admin-API one), set
-`CF_ACCESS_TEAM_DOMAIN=<yourteam>.cloudflareaccess.com`, and `just tunnel-up` again.
+1. Create (or pick) a project.
+2. **APIs & Services → OAuth consent screen** → *External*. Fill in app name and support
+   email. Under *Test users*, add the parent's address and each kid's — or **Publish** the
+   app, which avoids the 100-test-user cap and the weekly re-consent. Nothing sensitive is
+   requested; the scopes are the default email/profile.
+3. **APIs & Services → Credentials → Create credentials → OAuth client ID**, type **Web
+   application**.
+4. Under *Authorized redirect URIs* add exactly:
 
-**Do not** add any Access policy that covers the rest of the site — the kid paths stay open
-to app auth only.
+   ```
+   https://<yourteam>.cloudflareaccess.com/cdn-cgi/access/callback
+   ```
+
+   `<yourteam>` is your Zero Trust team name (Zero Trust → Settings → Custom Pages, or the
+   subdomain in the dashboard URL). A wrong or missing redirect URI is the usual cause of
+   `redirect_uri_mismatch` on first sign-in.
+5. Copy the **Client ID** and **Client secret**.
+
+#### 5b. Add Google as the login method
+
+Zero Trust → **Settings → Authentication → Login methods → Add new → Google**. Paste the
+client ID and secret, save, then **Test** — it should round-trip to Google and back.
+
+Then **remove or disable One-time PIN** so Google is the only way in. Leaving it enabled
+means anyone whose address is on a policy can sign in by email code alone, which quietly
+undoes the point of using Google accounts.
+
+#### 5c. App A — the whole app
+
+**Access → Applications → Add an application → Self-hosted.**
+
+| Field | Value |
+|---|---|
+| Name | `ChoreKeeper` |
+| Domain | `chores.example.com` |
+| Path | *(empty — the whole hostname)* |
+| Identity providers | **Google only**; turn *Accept all available identity providers* **off** |
+| Instant Auth | **On** |
+| Session duration | `1 month` (the maximum) |
+
+*Instant Auth* skips Cloudflare's identity-provider chooser and goes straight to Google, so
+a kid whose phone is already signed in to Google lands on the chore list without a prompt.
+That is what makes an Access wall acceptable in front of a 12-year-old at 07:55.
+
+**Policy** → name it `Household`, Action **Allow**, Include → **Emails** → the parent's
+address and every kid's, one per line.
+
+> The 1-month ceiling is shorter than the app's own 90-day kid session, so kids will re-tap
+> Google roughly monthly even though the app would have kept them signed in. Expected, not a
+> bug.
+
+#### 5d. App B — admin, stricter
+
+A second self-hosted application over the same host, path `admin`, and a third over path
+`api/v1/admin` (Cloudflare matches the most specific path first, so these override App A):
+
+| Field | Value |
+|---|---|
+| Domain / path | `chores.example.com` / `admin`, and again `api/v1/admin` |
+| Policy | Action **Allow**, Include → **Emails** → the parent only |
+| Session duration | `24 hours` |
+
+#### 5e. App C — the check-in webhook bypass
+
+**Required.** Add one more self-hosted application:
+
+| Field | Value |
+|---|---|
+| Domain / path | `chores.example.com` / `api/v1/checkin` |
+| Policy | Action **Bypass**, Include → **Everyone** |
+
+iOS Shortcuts and Tasker cannot carry an Access session, so without this every geofence
+check-in gets a redirect to Google instead of reaching the app. The path stays protected by
+the per-kid token and its 20/hour cap (spec §6.2).
+
+#### 5f. Health check
+
+Optionally add a Bypass application for path `api/v1/health` too, if anything outside the
+compose network probes it. Container health checks reach it directly and need nothing.
+
+#### 5g. AUD tags → `.env`
+
+Open each application's **Overview** and copy its **Application Audience (AUD) tag**. Every
+application issues its own, and a JWT minted by one will not verify against another's, so
+list every tag whose traffic reaches the API — App A and the `api/v1/admin` one at minimum:
+
+```sh
+CF_ACCESS_TEAM_DOMAIN=<yourteam>.cloudflareaccess.com
+CF_ACCESS_AUD=<app-A-aud>,<admin-api-aud>
+```
+
+Then `just tunnel-up` again. With these set the app requires a verified assertion on every
+`/api/v1` path except `/health`, `/checkin/{token}` and the break-glass `/auth/login`.
+
+#### 5h. Adding or removing a kid
+
+Two places, both required, in this order:
+
+1. Cloudflare → App A's `Household` policy → add their Google address.
+2. ChoreKeeper → **Kids** → *Add kid* → same address.
+
+Add it only in the app and Cloudflare turns them away at the edge; add it only in Cloudflare
+and the app answers *"…is signed in to Google but is not an active member of this
+household"*, naming the address so the fix is obvious. To remove someone, reverse the order:
+drop the Access policy entry first, then deactivate them in the app.
 
 ### 6. Cache rule
 
 Dashboard → **Rules → Caching → Create rule**: *When* `URI Path` `starts with` `/api/` →
 *Then* `Bypass cache`. (Belt-and-suspenders with the origin `no-store` header, for media.)
 
-### 7. WAF rate-limit on login
+### 7. WAF rate-limit on the check-in webhook
+
+`/api/v1/checkin/*` is the only unauthenticated path left, so it is where the rule belongs.
 
 **Security → WAF → Rate limiting rules → Create rule**:
 
-- Expression: `http.request.uri.path eq "/api/v1/auth/login"`
-- Rate: `10` requests per `1 minute`, characteristic `IP`
+- Expression: `starts_with(http.request.uri.path, "/api/v1/checkin/")`
+- Rate: `30` requests per `1 minute`, characteristic `IP`
 - Action: `Block`, duration `1 minute`
 
-Optionally a looser rule on `starts_with(http.request.uri.path, "/api/v1/checkin/")`.
+There is no longer a public login endpoint to rate-limit: break-glass 404s through the
+tunnel, and everything else sits behind Access.
 
 ### 8. Bot Fight Mode (if you enable it)
 
@@ -177,17 +304,17 @@ would break the geofence automations.
 HSTS to the origin header (Caddy sends it) or enable it here with the same `max-age`.
 Turn *Development Mode* off.
 
-### 10. Operator path (Tailscale)
+### 10. Operator path — LAN and console only
 
-```sh
-tailscale up
-```
+There is nothing to set up, and that is the decision (spec §12.2 `[D]`). The overlay binds
+the API to `127.0.0.1:8088` and Postgres to `127.0.0.1:5432`, so `ssh`, `psql`,
+`llama-server` and the break-glass login are reachable from the host itself or the LAN and
+from nowhere else. No VPN mesh is maintained for them.
 
-Then reach the box over the tailnet: `ssh`, `psql -h <tailnet-ip>`,
-`curl http://<tailnet-ip>:8088/api/v1/health`, and `llama-server`. The overlay binds the
-API to `127.0.0.1:8088` and Postgres to `127.0.0.1:5432` so they are **not** on the LAN and
-**not** in the tunnel ingress. `/admin/jobs` and `/health/llm` are still reachable through
-the tunnel but gated by Access + the app JWT check.
+`/admin/jobs` and `/health/llm` remain reachable through the tunnel, gated by the
+parent-only Access application and the app's own JWT verification.
+
+**Accepted consequence:** a fault needing a shell cannot be fixed from outside the house.
 
 ### 11. Rotating the tunnel token
 
@@ -199,18 +326,31 @@ Dashboard → the tunnel → **Refresh token** (or delete and recreate the tunne
 ## Verify
 
 ```sh
-curl -sI https://chores.example.com | grep -Ei 'content-security-policy|strict-transport|x-frame'
-curl -s  https://chores.example.com/api/v1/health                       # {"status":"ok"}
-curl -s -o /dev/null -w '%{http_code}\n' https://chores.example.com/docs # 404
-curl -s -o /dev/null -w '%{http_code}\n' https://chores.example.com/api/v1/admin/jobs  # 403
+H=https://chores.example.com
+curl -sI $H | grep -Ei 'content-security-policy|strict-transport|x-frame'
+curl -s  $H/api/v1/health                                  # {"status":"ok"} — exempt path
+curl -s -o /dev/null -w '%{http_code}\n' $H/docs            # 404
+curl -s -o /dev/null -w '%{http_code}\n' $H/api/v1/auth/me  # 403 — Access required now
+curl -s -o /dev/null -w '%{http_code}\n' $H/api/v1/auth/login  # 404 — break-glass off the tunnel
+
+# ...and the same break-glass path on the host itself answers for real:
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8088/api/v1/auth/login \
+  -H 'content-type: application/json' -d '{"username":"parent","password":"wrong"}'   # 401
 ```
 
-- Browser → `https://chores.example.com/admin` → Cloudflare Access login → app login →
-  TOTP → dashboard renders.
+- Browser, private window → `https://chores.example.com` → Google → the admin dashboard
+  renders with **no app password prompt**. The Access page must appear *before* the PWA
+  shell, not after.
+- A kid's phone, signed in to their own Google account → same URL → lands on `/me`. Hard
+  reload (Ctrl+Shift+R) the first time: the installed PWA's service worker will otherwise
+  serve the previous bundle.
+- Sign in with a Google account that is on no Access policy → turned away at the edge. One
+  that is on the policy but not in **Kids** → the app names the address and says it is not
+  a member.
 - Phone on cell data → install the PWA, capture a photo, submit → appears in the admin
   inbox; approve → ledger credits once.
-- `curl -X POST https://chores.example.com/api/v1/checkin/<token> -H 'content-type:
-  application/json' -d '{"lat":0,"lon":0,"accuracy":10}'` from outside → 200, no Access
-  prompt.
+- `curl -X POST $H/api/v1/checkin/<token> -H 'content-type: application/json' -d
+  '{"lat":0,"lon":0,"accuracy":10}'` from outside → 200, no Access prompt. If this
+  redirects to Google, the Bypass application (5e) is missing.
 - External port scan of the host's public IP → only Cloudflare's 443; `5432` / `8088`
-  refused. From the tailnet those ports work.
+  refused. Those ports answer from the host itself only.

@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime, time
 
 import pytest
 from PIL import Image
+from tests.helpers import sign_in
 
 from app.models import Chore, ChoreOccurrence, OccurrenceStatus
 
@@ -19,21 +20,18 @@ def _jpeg() -> bytes:
     return buf.getvalue()
 
 
-async def _admin(client, totp_now) -> dict:
-    r = await client.post(
-        "/api/v1/auth/login",
-        json={"username": "parent", "password": "parent-pass", "totp_code": totp_now()},
-    )
+async def _admin(client) -> dict:
+    r = await sign_in(client, "parent@example.com")
     return {"X-CSRF-Token": r.json()["csrf_token"]}
 
 
 async def test_admin_jobs_requires_admin(client, child_user):
-    await client.post("/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"})
+    await sign_in(client, "alice@example.com")
     assert (await client.get("/api/v1/admin/jobs")).status_code == 403
 
 
-async def test_admin_jobs_shape(client, admin_user, child_user, totp_now):
-    h = await _admin(client, totp_now)
+async def test_admin_jobs_shape(client, admin_user, child_user):
+    h = await _admin(client)
     # mint a check-in token so the dashboard has a row
     await client.get(f"/api/v1/children/{child_user.id}/checkin-token", headers=h)
 
@@ -45,7 +43,7 @@ async def test_admin_jobs_shape(client, admin_user, child_user, totp_now):
 
 
 async def test_occurrence_submissions_returns_signed_media(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     chore = Chore(
         household_id=household.id,
@@ -74,9 +72,7 @@ async def test_occurrence_submissions_returns_signed_media(
     db_session.add(occ)
     await db_session.commit()
 
-    login = await client.post(
-        "/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"}
-    )
+    login = await sign_in(client, "alice@example.com")
     await client.post(
         f"/api/v1/occurrences/{occ.id}/submissions",
         files=[("files", ("a.jpg", _jpeg(), "image/jpeg"))],
@@ -84,7 +80,7 @@ async def test_occurrence_submissions_returns_signed_media(
         headers={"X-CSRF-Token": login.json()["csrf_token"]},
     )
 
-    h = await _admin(client, totp_now)
+    h = await _admin(client)
     r = await client.get(f"/api/v1/occurrences/{occ.id}/submissions", headers=h)
     assert r.status_code == 200
     subs = r.json()

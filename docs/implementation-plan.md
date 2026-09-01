@@ -26,10 +26,10 @@ criteria. Build order follows the spec exactly.
 - Cover **all phases 0–7**.
 - ~~**Descoped:** external/remote access via Cloudflare Tunnel~~ — **wired** (§12.2):
   `cloudflared` + a single Caddy front door in `docker-compose.tunnel.yml`, Cloudflare
-  Access on the admin paths, plus the small app hardening the LAN-only assumptions needed
-  (proxy-aware client IP, `TrustedHost`, `Secure` cookies in prod, `Cf-Access-Jwt-Assertion`
-  check). Setup + tradeoffs in [remote-access.md](remote-access.md). Tailscale stays the
-  operator path.
+  Access (Google) in front of the whole hostname, plus the app hardening the LAN-only
+  assumptions needed (proxy-aware client IP, `TrustedHost`, `Secure` cookies in prod,
+  `Cf-Access-Jwt-Assertion` verification). Setup + tradeoffs in
+  [remote-access.md](remote-access.md). The operator path is LAN/physical only — no Tailscale.
 - Backend stack **exactly as spec'd**: Python 3.12, FastAPI + uvicorn, async SQLAlchemy 2.0 +
   Alembic, Postgres 17, Pydantic v2. Worker = same image, different entrypoint.
 - Python tooling: **uv** for env/deps, **ruff** for lint+format, **pytest** for tests.
@@ -47,7 +47,7 @@ Day-to-day process (worktrees, feature branches, quality gates, push flow) is in
 | Web | FastAPI, uvicorn (api), plain asyncio loop (worker) |
 | DB / ORM | Postgres 17, SQLAlchemy 2.0 async (`asyncpg`), Alembic migrations |
 | Validation | Pydantic v2 models for all request/response bodies |
-| Auth | Local accounts, Argon2id (`argon2-cffi`), TOTP (`pyotp`), HTTP-only session cookie + CSRF token |
+| Auth | Google via Cloudflare Access (`pyjwt`), HTTP-only session cookie + CSRF token; Argon2id (`argon2-cffi`) for the break-glass admin password only |
 | Job queue | Postgres table + `SELECT ... FOR UPDATE SKIP LOCKED` (no Redis) |
 | Image pipeline | Pillow (resize/orient/re-encode), `imagehash` or hand-rolled pHash, stdlib `hashlib` sha256 |
 | LLM client | `httpx` async against OpenAI-compatible `/v1/chat/completions` |
@@ -73,7 +73,7 @@ backend/
                             #          verifications, payouts, checkin, push, health, admin_jobs
     services/               # domain logic: scheduling, rotation, cadence, ledger, verification,
                             #               anti_cheat, media, notifications
-    auth/                   # password hashing, sessions, TOTP, CSRF, rate limiting, deps
+    auth/                   # Cloudflare Access verification, sessions, CSRF, rate limiting, deps
     worker/
       __main__.py           # entrypoint: scheduler ticks + verification queue consumer
       scheduler.py  queue.py  verify.py
@@ -92,7 +92,7 @@ docs/
 
 ### Data model (tables — build incrementally, migration per phase)
 
-`households`, `users` (role: admin|child; TOTP secret; argon2 hash), `sessions`,
+`households`, `users` (role: admin|child; Google email; argon2 hash for break-glass only), `sessions`,
 `chores` (full field set from §4.1), `chore_occurrences`
 (`unique(chore_id, due_at, assignee_id)`, status enum from §3 state machine,
 `settlement_locked_at`, `was_late`), `submissions` (proof payload, client_meta, EXIF,
@@ -142,12 +142,14 @@ state, attempts, locked_at), `audit_log` (actor, ts, before/after JSON), `push_s
 
 Postgres schema + Alembic (migration `0001`: `households`, `users`, `sessions`, `audit_log`);
 FastAPI app factory + security-headers middleware; local-account auth (Argon2id), server-side
-sessions, CSRF double-submit, login rate limiting, TOTP enrol/verify for admins;
-`/auth/*` + `/children` (child-account CRUD, password reset, soft deactivate) + `/health`;
+sessions, CSRF double-submit, login rate limiting, TOTP enrol/verify for admins
+(**superseded in Phase 6** — see §12.1: identity is Google via Cloudflare Access, and password
++ TOTP are gone bar one break-glass admin password);
+`/auth/*` + `/children` (child-account CRUD, soft deactivate) + `/health`;
 worker heartbeat entrypoint; `docker-compose.yml` (`db`/`api`/`worker`); `justfile`;
 `app/seed.py`; CI (ruff + `alembic upgrade head` + pytest).
 
-**Accepted:** admin (with TOTP) + two child accounts log in; `just up && just seed && just test`
+**Accepted:** admin + two child accounts log in; `just up && just seed && just test`
 green from a clean clone (13 tests). API on host **:8088**.
 
 ---
@@ -346,10 +348,11 @@ Work items:
    directory listing, `/docs` off in prod — in the Caddy `proxy` + app middleware.
    ✅ **`cloudflared` service + Cloudflare Access** — `docker-compose.tunnel.yml`,
    [remote-access.md](remote-access.md).
-2. Operator path: Tailscale for SSH / Postgres / `llama-server` / `/admin/jobs`. ✅ the
-   tunnel overlay binds `api` + `db` to `127.0.0.1`; ✅ `/api/v1/admin/*` + `/health/llm`
-   require a `Cf-Access-Jwt-Assertion` when `CF_ACCESS_*` is set (Tailscale-CIDR IP
-   restriction still an option, not built).
+2. ✅ Operator path: **LAN / physical only, no Tailscale** (spec §12.2 `[D]`). The tunnel
+   overlay binds `api` + `db` to `127.0.0.1`; `llama-server` stays on the LAN. ✅ Identity is
+   Google via Cloudflare Access: the whole `/api/v1` surface requires a verified
+   `Cf-Access-Jwt-Assertion` when `CF_ACCESS_*` is set, bar `/health`, `/checkin/{token}`
+   and the break-glass `/auth/login` (which Caddy 404s so it never rides the tunnel).
 3. Rate limits across auth + `/checkin` + submission endpoints (Postgres-backed counters).
 4. Retention jobs (worker cron-style ticks): photos → after `MEDIA_RETENTION_DAYS` (180)
    delete original, keep 256px thumbnail + verdict (Q2 default); geo points → 30 days.
@@ -379,7 +382,7 @@ auto-payout on Sundays. Keep as a backlog file `docs/backlog.md`; do not build i
 ## Open questions — implement the stated default + `TODO(decision)` (spec §15)
 
 Q1 no cross-child visibility · Q2 180 d then thumbnail+verdict · Q3 allow negative balance ·
-Q4 admin resets kid password · Q6 filesystem content-addressed media · Q7 assume ages 10–15 ·
+Q6 filesystem content-addressed media · Q7 assume ages 10–15 ·
 Q8 kids get read-only chore definitions · Q9 dedicated Postgres container · Q10 digest except
 school check-in (immediate) · Q11 manual payout, free-text method · Q12 `anyone` field exists,
 UI only `fixed`/`rotating`. Q5/Q13/Q14 already resolved in-spec.
@@ -393,7 +396,7 @@ UI only `fixed`/`rotating`. Q5/Q13/Q14 already resolved in-spec.
 - **Phase 0:** `python scripts/vlm_bakeoff/run.py` produces `RESULTS.md` with precision/recall +
   latency per model.
 - **Phase 1:** from a clean clone, `just up && just seed && just test` green; log in as admin
-  (with TOTP) and both kids via the API / a curl script.
+  and both kids via the API / a curl script.
 - **Phase 2:** unit tests for cadence (DST day, month boundary), rotation 4-week preview;
   `POST /chores/preview` for each of the four brief chores; run the generator twice, assert
   row count unchanged; flip a machine clock forward and confirm `detect_missed` catches up.

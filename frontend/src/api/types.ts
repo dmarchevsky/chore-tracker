@@ -4,18 +4,19 @@ export interface Child {
   id: string;
   username: string;
   display_name: string;
+  /** The Google address Cloudflare Access signs them in with. */
+  email: string | null;
   role: Role;
   is_active: boolean;
-  totp_enrolled: boolean;
 }
 
 export interface Me {
   id: string;
   username: string;
   display_name: string;
+  email: string | null;
   role: Role;
   csrf_token: string;
-  totp_enrolled: boolean;
 }
 
 export type OccurrenceStatus =

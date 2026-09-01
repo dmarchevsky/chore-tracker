@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
 import pytest_asyncio
+from tests.helpers import sign_in
 
 from app.models import Chore, ChoreOccurrence, OccurrenceStatus
 
@@ -54,18 +55,13 @@ async def seeded(db_session, household, child_user):
     return made
 
 
-async def _admin_login(client, totp_now):
-    r = await client.post(
-        "/api/v1/auth/login",
-        json={"username": "parent", "password": "parent-pass", "totp_code": totp_now()},
-    )
+async def _admin_login(client):
+    r = await sign_in(client, "parent@example.com")
     return {"X-CSRF-Token": r.json()["csrf_token"]}
 
 
-async def test_offset_pages_without_overlap_and_reports_the_total(
-    client, seeded, admin_user, totp_now
-):
-    ah = await _admin_login(client, totp_now)
+async def test_offset_pages_without_overlap_and_reports_the_total(client, seeded, admin_user):
+    ah = await _admin_login(client)
     first = await client.get("/api/v1/occurrences?limit=5&order=desc", headers=ah)
     second = await client.get("/api/v1/occurrences?limit=5&offset=5&order=desc", headers=ah)
 
@@ -76,8 +72,8 @@ async def test_offset_pages_without_overlap_and_reports_the_total(
     assert not set(ids1) & set(ids2)
 
 
-async def test_repeated_status_filters_are_ored(client, seeded, admin_user, totp_now):
-    ah = await _admin_login(client, totp_now)
+async def test_repeated_status_filters_are_ored(client, seeded, admin_user):
+    ah = await _admin_login(client)
     both = await client.get("/api/v1/occurrences?status=approved&status=rejected", headers=ah)
     one = await client.get("/api/v1/occurrences?status=approved", headers=ah)
 
@@ -86,8 +82,8 @@ async def test_repeated_status_filters_are_ored(client, seeded, admin_user, totp
     assert {o["status"] for o in one.json()} == {"approved"}
 
 
-async def test_chore_filter_narrows_the_list(client, seeded, admin_user, totp_now):
-    ah = await _admin_login(client, totp_now)
+async def test_chore_filter_narrows_the_list(client, seeded, admin_user):
+    ah = await _admin_login(client)
     chore_id = seeded[0].chore_id  # the "Dog" chore, every third occurrence
     r = await client.get(f"/api/v1/occurrences?chore={chore_id}", headers=ah)
     assert {o["chore_id"] for o in r.json()} == {str(chore_id)}
@@ -97,7 +93,6 @@ async def test_chore_filter_narrows_the_list(client, seeded, admin_user, totp_no
 async def test_a_child_is_still_scoped_to_their_own_occurrences(
     client, db_session, seeded, household, child_user
 ):
-    from app.auth.passwords import hash_password
     from app.models import User
     from app.models.user import UserRole
 
@@ -106,12 +101,12 @@ async def test_a_child_is_still_scoped_to_their_own_occurrences(
         username="bob",
         display_name="Bob",
         role=UserRole.child,
-        password_hash=hash_password("bob-pass"),
+        email="bob@example.com",
     )
     db_session.add(bob)
     await db_session.commit()
 
-    r = await client.post("/api/v1/auth/login", json={"username": "bob", "password": "bob-pass"})
+    r = await sign_in(client, "bob@example.com")
     headers = {"X-CSRF-Token": r.json()["csrf_token"]}
     # ...even when they ask for someone else's.
     listed = await client.get(f"/api/v1/occurrences?child={child_user.id}", headers=headers)

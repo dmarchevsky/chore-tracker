@@ -12,6 +12,7 @@ from datetime import UTC, date, datetime, time
 
 import pytest
 from sqlalchemy import func, select
+from tests.helpers import sign_in
 
 from app.models import Chore, ChoreOccurrence, LedgerEntry, LedgerKind, OccurrenceStatus
 from app.services.ledger import balance_cents
@@ -34,11 +35,8 @@ GROUNDED = [
 ]
 
 
-async def _admin_headers(client, totp_now) -> dict:
-    r = await client.post(
-        "/api/v1/auth/login",
-        json={"username": "parent", "password": "parent-pass", "totp_code": totp_now()},
-    )
+async def _admin_headers(client) -> dict:
+    r = await sign_in(client, "parent@example.com")
     return {"X-CSRF-Token": r.json()["csrf_token"]}
 
 
@@ -112,8 +110,8 @@ async def _rows(db, occ_id) -> list[tuple[str, int]]:
 # --------------------------------------------------------------------- validation
 
 
-async def test_tiers_require_manual_verification(client, admin_user, child_user, totp_now):
-    h = await _admin_headers(client, totp_now)
+async def test_tiers_require_manual_verification(client, admin_user, child_user):
+    h = await _admin_headers(client)
     for mode in ("llm_auto", "llm_assist", "auto_accept"):
         body = _tiered_body(child_user, verification_mode=mode)
         if mode.startswith("llm"):
@@ -123,21 +121,17 @@ async def test_tiers_require_manual_verification(client, admin_user, child_user,
         assert "chosen by a person" in str(r.json()) or "photo proof_type" in str(r.json())
 
 
-async def test_tiered_chore_must_not_also_carry_reward_or_penalty(
-    client, admin_user, child_user, totp_now
-):
+async def test_tiered_chore_must_not_also_carry_reward_or_penalty(client, admin_user, child_user):
     """Rule 4 is what makes "tiers never mix with the classic channel" enforceable."""
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     for over in ({"reward_cents": 100}, {"penalty_cents": 50}, {"late_multiplier": 0.5}):
         r = await client.post("/api/v1/chores", json=_tiered_body(child_user, **over), headers=h)
         assert r.status_code == 422, over
         assert "comes from its tiers" in str(r.json())
 
 
-async def test_tiered_chore_rejects_an_llm_rule_or_checklist(
-    client, admin_user, child_user, totp_now
-):
-    h = await _admin_headers(client, totp_now)
+async def test_tiered_chore_rejects_an_llm_rule_or_checklist(client, admin_user, child_user):
+    h = await _admin_headers(client)
     r = await client.post(
         "/api/v1/chores",
         json=_tiered_body(
@@ -150,8 +144,8 @@ async def test_tiered_chore_rejects_an_llm_rule_or_checklist(
     assert "no LLM step" in str(r.json())
 
 
-async def test_money_tier_needs_a_nonzero_amount(client, admin_user, child_user, totp_now):
-    h = await _admin_headers(client, totp_now)
+async def test_money_tier_needs_a_nonzero_amount(client, admin_user, child_user):
+    h = await _admin_headers(client)
     for bad in (
         {"id": 1, "condition": "x", "outcome_kind": "money"},
         {"id": 1, "condition": "x", "outcome_kind": "money", "amount_cents": 0},
@@ -163,8 +157,8 @@ async def test_money_tier_needs_a_nonzero_amount(client, admin_user, child_user,
         assert r.status_code == 422, bad
 
 
-async def test_text_tier_needs_text_and_no_amount(client, admin_user, child_user, totp_now):
-    h = await _admin_headers(client, totp_now)
+async def test_text_tier_needs_text_and_no_amount(client, admin_user, child_user):
+    h = await _admin_headers(client)
     for bad in (
         {"id": 1, "condition": "x", "outcome_kind": "text"},
         {"id": 1, "condition": "x", "outcome_kind": "text", "text": "  "},
@@ -176,8 +170,8 @@ async def test_text_tier_needs_text_and_no_amount(client, admin_user, child_user
         assert r.status_code == 422, bad
 
 
-async def test_tier_ids_must_be_one_to_n_in_order(client, admin_user, child_user, totp_now):
-    h = await _admin_headers(client, totp_now)
+async def test_tier_ids_must_be_one_to_n_in_order(client, admin_user, child_user):
+    h = await _admin_headers(client)
     tiers = [
         {"id": 1, "condition": "a", "outcome_kind": "text", "text": "x"},
         {"id": 3, "condition": "b", "outcome_kind": "text", "text": "y"},
@@ -189,9 +183,9 @@ async def test_tier_ids_must_be_one_to_n_in_order(client, admin_user, child_user
     assert "1..N in order" in str(r.json())
 
 
-async def test_a_text_only_chore_needs_no_money_at_all(client, admin_user, child_user, totp_now):
+async def test_a_text_only_chore_needs_no_money_at_all(client, admin_user, child_user):
     """The "grounded until it's fixed" case: a real chore with no money anywhere."""
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     r = await client.post(
         "/api/v1/chores", json=_tiered_body(child_user, outcome_tiers=GROUNDED), headers=h
     )
@@ -200,9 +194,9 @@ async def test_a_text_only_chore_needs_no_money_at_all(client, admin_user, child
     assert r.json()["reward_cents"] == 0
 
 
-async def test_an_untiered_chore_is_completely_unaffected(client, admin_user, child_user, totp_now):
+async def test_an_untiered_chore_is_completely_unaffected(client, admin_user, child_user):
     """Every tier rule is gated on outcome_tiers being non-empty."""
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     r = await client.post(
         "/api/v1/chores",
         json={
@@ -223,11 +217,9 @@ async def test_an_untiered_chore_is_completely_unaffected(client, admin_user, ch
     assert r.json()["outcome_tiers"] is None
 
 
-async def test_classic_penalty_still_rejects_a_negative_value(
-    client, admin_user, child_user, totp_now
-):
+async def test_classic_penalty_still_rejects_a_negative_value(client, admin_user, child_user):
     """reward/penalty stay unsigned magnitudes; only a tier amount is signed."""
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     r = await client.post(
         "/api/v1/chores",
         json={
@@ -250,9 +242,9 @@ async def test_classic_penalty_still_rejects_a_negative_value(
 
 
 async def test_generated_occurrence_snapshots_the_tier_list(
-    client, db_session, admin_user, child_user, totp_now
+    client, db_session, admin_user, child_user
 ):
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     created = await client.post(
         "/api/v1/chores",
         json=_tiered_body(child_user, cadence="daily", start_date="2025-01-01"),
@@ -280,10 +272,10 @@ async def test_generated_occurrence_snapshots_the_tier_list(
 
 
 async def test_editing_the_tiers_does_not_reprice_an_existing_occurrence(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     """Same rule as the money snapshot (spec §3): a definition edit never rewrites history."""
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     occ = await _tiered_occ(db_session, household, child_user)
     await db_session.commit()
 
@@ -303,9 +295,9 @@ async def test_editing_the_tiers_does_not_reprice_an_existing_occurrence(
 
 
 async def test_approve_and_reject_are_refused_for_a_tiered_occurrence(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     occ = await _tiered_occ(db_session, household, child_user)
     await db_session.commit()
 
@@ -320,9 +312,9 @@ async def test_approve_and_reject_are_refused_for_a_tiered_occurrence(
 
 
 async def test_positive_tier_writes_an_earning(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     occ = await _tiered_occ(db_session, household, child_user)
     await db_session.commit()
 
@@ -337,10 +329,10 @@ async def test_positive_tier_writes_an_earning(
 
 
 async def test_negative_tier_writes_a_penalty_stored_signed(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     """A tier amount is already signed, so it is stored as-is — never re-abs()'d."""
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     occ = await _tiered_occ(db_session, household, child_user)
     await db_session.commit()
 
@@ -351,9 +343,9 @@ async def test_negative_tier_writes_a_penalty_stored_signed(
 
 
 async def test_text_tier_writes_no_ledger_entry(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     occ = await _tiered_occ(db_session, household, child_user, tiers=GROUNDED)
     await db_session.commit()
 
@@ -367,11 +359,11 @@ async def test_text_tier_writes_no_ledger_entry(
 
 
 async def test_changing_the_tier_reverses_and_nets_correctly(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     """+$50 then re-graded to -$50. The earning slot is taken, so the reversal and the new
     amount are both adjustments — nothing is UPDATEd and the balance is right."""
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     occ = await _tiered_occ(db_session, household, child_user)
     await db_session.commit()
 
@@ -397,11 +389,11 @@ async def test_changing_the_tier_reverses_and_nets_correctly(
 
 
 async def test_changing_between_two_positive_tiers_uses_an_adjustment(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     """The case that would silently keep the old amount: the earning slot is already taken,
     so ON CONFLICT DO NOTHING would swallow the new one."""
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     occ = await _tiered_occ(db_session, household, child_user)
     await db_session.commit()
 
@@ -421,9 +413,9 @@ async def test_changing_between_two_positive_tiers_uses_an_adjustment(
 
 
 async def test_picking_the_same_tier_twice_is_a_noop(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     occ = await _tiered_occ(db_session, household, child_user)
     await db_session.commit()
 
@@ -435,11 +427,11 @@ async def test_picking_the_same_tier_twice_is_a_noop(
 
 
 async def test_excuse_reverses_the_money_and_clears_the_tier(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     """Clearing matters: otherwise re-picking that same tier would hit the no-op guard and
     the money would never come back."""
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     occ = await _tiered_occ(db_session, household, child_user)
     await db_session.commit()
 
@@ -459,10 +451,8 @@ async def test_excuse_reverses_the_money_and_clears_the_tier(
     assert await balance_cents(db_session, child_user.id) == 10000
 
 
-async def test_unknown_tier_id_is_rejected(
-    client, db_session, household, admin_user, child_user, totp_now
-):
-    h = await _admin_headers(client, totp_now)
+async def test_unknown_tier_id_is_rejected(client, db_session, household, admin_user, child_user):
+    h = await _admin_headers(client)
     occ = await _tiered_occ(db_session, household, child_user)
     await db_session.commit()
 
@@ -472,9 +462,9 @@ async def test_unknown_tier_id_is_rejected(
 
 
 async def test_tier_on_a_settlement_locked_occurrence_is_refused(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     occ = await _tiered_occ(db_session, household, child_user)
     occ.settlement_locked_at = datetime(2025, 3, 1, tzinfo=UTC)
     await db_session.commit()
@@ -482,10 +472,8 @@ async def test_tier_on_a_settlement_locked_occurrence_is_refused(
     assert (await _decide(client, h, occ.id, 1)).status_code == 409
 
 
-async def test_tier_action_needs_a_tier_id(
-    client, db_session, household, admin_user, child_user, totp_now
-):
-    h = await _admin_headers(client, totp_now)
+async def test_tier_action_needs_a_tier_id(client, db_session, household, admin_user, child_user):
+    h = await _admin_headers(client)
     occ = await _tiered_occ(db_session, household, child_user)
     await db_session.commit()
 
@@ -498,9 +486,9 @@ async def test_tier_action_needs_a_tier_id(
 
 
 async def test_tier_id_is_rejected_for_a_non_tier_action(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     occ = await _tiered_occ(db_session, household, child_user)
     await db_session.commit()
 
@@ -513,10 +501,10 @@ async def test_tier_id_is_rejected_for_a_non_tier_action(
 
 
 async def test_tier_decision_is_visible_on_the_occurrence(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     """The kid has to be able to see which condition was met — that is the whole point."""
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     occ = await _tiered_occ(db_session, household, child_user)
     await db_session.commit()
 
@@ -528,11 +516,11 @@ async def test_tier_decision_is_visible_on_the_occurrence(
 
 
 async def test_a_tiered_occurrence_writes_one_audit_row_per_decision(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     from app.models import AuditLog
 
-    h = await _admin_headers(client, totp_now)
+    h = await _admin_headers(client)
     occ = await _tiered_occ(db_session, household, child_user)
     await db_session.commit()
 

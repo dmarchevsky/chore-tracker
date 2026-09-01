@@ -12,7 +12,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 
 from app.auth.deps import AdminUser, DbDep, require_self_or_admin
-from app.auth.passwords import hash_password
 from app.auth.sessions import revoke_user_sessions
 from app.config import get_settings
 from app.models import (
@@ -25,13 +24,18 @@ from app.models import (
     UserRole,
 )
 from app.schemas.ledger import BalanceOut, LedgerEntryOut
-from app.schemas.user import CheckinTokenOut, PasswordReset, UserCreate, UserOut, UserUpdate
+from app.schemas.user import CheckinTokenOut, UserCreate, UserOut, UserUpdate
 from app.services import audit, checkin
 from app.services.ledger import balance_cents
 
 router = APIRouter(prefix="/children", tags=["children"])
 
 SelfOrAdmin = Annotated[User, Depends(require_self_or_admin("child_id"))]
+
+
+async def _email_taken(db: DbDep, email: str) -> bool:
+    row = await db.execute(select(User.id).where(User.email == email))
+    return row.first() is not None
 
 
 async def _get_child(db: DbDep, child_id: uuid.UUID) -> User:
@@ -59,12 +63,15 @@ async def create_child(payload: UserCreate, db: DbDep, admin: AdminUser) -> User
     ).scalar_one_or_none()
     if exists is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "username taken")
+    email = payload.email.strip().lower()
+    if await _email_taken(db, email):
+        raise HTTPException(status.HTTP_409_CONFLICT, "that Google address is already in use")
     user = User(
         household_id=household.id,
         username=payload.username,
         display_name=payload.display_name,
         role=UserRole.child,
-        password_hash=hash_password(payload.password),
+        email=email,
     )
     db.add(user)
     await db.flush()
@@ -74,7 +81,7 @@ async def create_child(payload: UserCreate, db: DbDep, admin: AdminUser) -> User
         action="child.create",
         entity_type="user",
         entity_id=user.id,
-        after={"username": user.username, "display_name": user.display_name},
+        after={"username": user.username, "display_name": user.display_name, "email": email},
     )
     return user
 
@@ -89,9 +96,24 @@ async def update_child(
     child_id: uuid.UUID, payload: UserUpdate, db: DbDep, admin: AdminUser
 ) -> User:
     user = await _get_child(db, child_id)
-    before = {"display_name": user.display_name, "is_active": user.is_active}
+    before = {
+        "display_name": user.display_name,
+        "email": user.email,
+        "is_active": user.is_active,
+    }
     if payload.display_name is not None:
         user.display_name = payload.display_name
+    if payload.email is not None:
+        email = payload.email.strip().lower()
+        if email != user.email:
+            if await _email_taken(db, email):
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT, "that Google address is already in use"
+                )
+            user.email = email
+            # The sign-in identity just changed; a session minted for the old address must
+            # not outlive it (spec §12.1).
+            await revoke_user_sessions(db, user.id)
     if payload.is_active is not None:
         user.is_active = payload.is_active
     if not user.is_active:
@@ -103,22 +125,13 @@ async def update_child(
         entity_type="user",
         entity_id=user.id,
         before=before,
-        after={"display_name": user.display_name, "is_active": user.is_active},
+        after={
+            "display_name": user.display_name,
+            "email": user.email,
+            "is_active": user.is_active,
+        },
     )
     return user
-
-
-@router.post("/{child_id}/password-reset", status_code=status.HTTP_204_NO_CONTENT)
-async def reset_child_password(
-    child_id: uuid.UUID, payload: PasswordReset, db: DbDep, admin: AdminUser
-) -> None:
-    # spec §15 Q4 default: admin resets a kid's password from the panel, no email.
-    user = await _get_child(db, child_id)
-    user.password_hash = hash_password(payload.new_password)
-    await revoke_user_sessions(db, user.id)  # force re-login with the new password
-    await audit.record(
-        db, actor=admin, action="child.password_reset", entity_type="user", entity_id=user.id
-    )
 
 
 @router.delete("/{child_id}", status_code=status.HTTP_204_NO_CONTENT)

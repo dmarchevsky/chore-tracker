@@ -25,6 +25,16 @@
 		-Server
 	}
 
+	# The break-glass admin password must never ride the tunnel: the front door refuses
+	# to carry it at all, so that path exists only on the host's loopback port
+	# (spec §12.1, docs/remote-access.md). This is one of the two independent layers
+	# keeping it off the internet — the other is the app exempting it from Access, which
+	# is exactly why it needs blocking here. Do not delete without reading both.
+	@breakglass path /api/v1/auth/login
+	handle @breakglass {
+		respond 404
+	}
+
 	# API + signed media — proxied to the app, never cached at any layer
 	# (a cached signed media URL served to the wrong session is the failure mode).
 	@api path /api/*

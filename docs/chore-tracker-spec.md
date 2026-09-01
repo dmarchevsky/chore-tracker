@@ -28,7 +28,7 @@ Conventions used below:
 3. A **local vision LLM** evaluates photo proof against a natural-language rule and returns a verdict + confidence + reasoning.
 4. Parent reviews anything the model is unsure about, and can override any verdict.
 5. Every completion/miss creates an immutable money ledger entry; parent tracks balances and records payouts.
-6. Everything runs on the home network; photos of the kids and the house never leave it.
+6. Photos of the kids and the house are stored and scored at home — no third-party model, analytics or CDN ever sees them. Two named exceptions transit the public internet and nothing else does: the Cloudflare edge, which terminates TLS on the way to your browser (§12.2), and OpenStreetMap tiles in the admin geofence picker (§6.2).
 
 ### Non-goals (v1)
 - Multi-family / multi-tenant SaaS. Single household, hardcoded tenancy.
@@ -240,7 +240,7 @@ force, plus `standing_on` / `standing_tier_id` / `standing_since`.
 
 ## 5. Non-functional requirements
 
-- **Locality:** no image, location point, or prompt may leave the LAN. No third-party analytics, no CDN-hosted fonts/JS. Vendor everything.
+- **Locality:** no image, location point, or prompt may be *sent to* a third-party service. Scoring is a local vision LLM; no third-party analytics, no CDN-hosted fonts/JS — vendor everything. The two deliberate exceptions are named in §1 goal 6: photo bytes transit the Cloudflare edge in flight (§12.2, never stored there), and OSM serves map tiles to the admin picker (§6.2). Cloudflare and Google additionally hold *identity* — who signed in and when (§12.1) — never chore content.
 - **Availability:** best-effort home hosting. A missed scheduler tick MUST be recoverable — the scheduler is idempotent and backfills on startup (see §8.3).
 - **Retention:** photos default 180 days, then deleted while retaining verdict + thumbnail `[Q2]`.
 - **Backup:** Postgres nightly `pg_dump` + object store rsync to TrueNAS. Restore procedure documented and tested in Phase 6.
@@ -549,11 +549,35 @@ GET    /admin/jobs                        queue depth, failures, last tick
 ## 12. Auth, identity & remote access
 
 ### 12.1 Auth
-`[D]` Local accounts (Argon2id password hashes), not OAuth — the whole point is no external dependency.
-- Kid accounts: username + PIN-length-tolerant password, long-lived sessions (90 days), "remember this device."
-- Admin: password + **TOTP required**. Admin session 12 hours.
-- Rate limiting on login (10/min/IP, exponential backoff per account).
-- `[Q4]` Kid password reset flow — default: admin resets it from the admin panel, no email involved.
+`[D]` **Google identity, delivered by Cloudflare Access.** Everyone — parent and kids alike — signs
+in with a Google account; Cloudflare authenticates them at the edge and the app maps the verified
+`email` claim in the `Cf-Access-Jwt-Assertion` to a `users` row. There is no app password and no
+TOTP.
+
+This reverses the original decision ("local accounts, **not** OAuth — the whole point is no external
+dependency"), and the reason is that the premise expired. Once §12.2 put the app behind Cloudflare,
+Cloudflare became a hard dependency for remote access whether or not it held identity. Against that
+baseline, a per-person password plus a per-person authenticator app buys very little: it is one more
+secret per kid to lose, reset and share, and the household's Google accounts already carry 2FA that
+is better administered than anything this app would ship. One fewer credential is the security win
+here, not a loss.
+
+- The parent-admin adds a kid by entering their Google address (`users.email`, unique per household).
+  The same address must also be listed in the Access policy — the app is the second half of that pair,
+  never the first.
+- Sessions are unchanged: the app still mints its own server-side session + `ck_session` cookie and
+  CSRF token from the verified identity, so revocation, CSRF and the 12h/90d lifetimes all still
+  belong to the app. Access is the outer wall, not the session store.
+- `[D]` **Access is authoritative about who is at the keyboard.** If a session cookie names one user
+  and the Access assertion names another, the cookie is revoked and the assertion wins — otherwise a
+  shared family tablet hands one child the previous child's screen.
+- `[D]` **One local admin password survives as break-glass**, for when Cloudflare or Google is
+  unavailable. It is admin-only, minimum 12 characters, and kept off the internet by two independent
+  layers: the app exempts `/api/v1/auth/login` from the Access check so it works on the loopback port,
+  and the Caddy front door answers `404` for that path so the tunnel never carries it. Rate limiting
+  on it is unchanged (10/min/IP, exponential backoff per account).
+- ~~`[Q4]`~~ **RESOLVED** — there is no kid password to reset. A parent changes the Google address
+  from the admin panel, which revokes that kid's live sessions.
 
 ### 12.2 Remote access — DECIDED: Cloudflare Tunnel
 
@@ -562,10 +586,18 @@ inbound ports are opened on the Asus/Merlin router and no dynamic DNS is needed.
 
 - One named tunnel, one hostname (e.g. `chores.example.com`), ingress → `proxy:80`.
 - Tunnel token injected via env/secret; `cloudflared` has no access to the LAN beyond the mapped service.
-- **Cloudflare Access on `/admin/*` and `/api/v1/admin/*`** (email OTP or Google identity, your address only)
-  layered on top of the app's own password + TOTP. Free tier covers this.
-- **No Access on the kid paths** — app auth only. An Access login wall in front of a 12-year-old at 7:55am
-  guarantees the app gets abandoned. The kid path is protected by long-lived sessions + strict CSP + rate limits.
+- `[D]` **Cloudflare Access fronts the whole hostname, kids included** — Google is the only enabled login
+  method, and the policy lists the household's addresses one by one. Free tier covers this.
+  This replaces the earlier carve-out ("no Access on the kid paths — a login wall in front of a
+  12-year-old at 7:55am guarantees the app gets abandoned"). The objection was to the *ceremony*, and
+  Google + Instant Auth removes it: a signed-in phone passes through without a prompt, so the kid sees
+  the chore list, not a wall. Meanwhile the carve-out was leaving the entire kid surface — photo upload,
+  location, ledger — behind nothing but a password on the open internet.
+- Two exemptions, each because there is no browser to redirect: `/api/v1/health` (liveness probe) and
+  `/api/v1/checkin/{token}` (the iOS Shortcuts geofence webhook, which gets an Access **Bypass** policy
+  and stays token-authenticated + rate-limited per §6.2). A stricter admin-scoped Access application
+  covers `/admin` and `/api/v1/admin` with a parent-only policy and a shorter session; because each
+  application issues its own AUD tag, `CF_ACCESS_AUD` is a comma-separated list.
 - Disable caching for `/api/*` and media routes (cache rules or `Cache-Control: private, no-store`). A cached
   signed media URL served to the wrong session is the failure mode to avoid.
 - Cloudflare's free-plan request body limit is 100MB — irrelevant given client-side downscaling to ~300KB,
@@ -577,8 +609,14 @@ browser. They are never *stored* there and the origin stays unreachable directly
 app this is reasonable; if it later stops feeling reasonable, the migration path is Tailscale + MagicDNS
 with the app unchanged.
 
-`[D]` **Add Tailscale anyway for the operator path** — SSH, Postgres, `llama-server`, `/admin/jobs`. Those
-should not be reachable through the tunnel at all. Two doors, different keys.
+`[D]` **The operator path is LAN and physical access only. No Tailscale, no second door.** SSH, Postgres
+and `llama-server` are bound to the host's loopback or the LAN and have no remote path at all; only the
+app is reachable from outside, through the tunnel. This replaces the earlier `[D]` that added Tailscale
+for the operator surfaces: the parent-admin operates the app through Cloudflare, and a VPN mesh
+maintained for the handful of times a year someone needs `psql` is a standing attack surface bought
+with real upkeep. **Accepted consequence:** a fault that needs a shell cannot be fixed away from home.
+That is also what the break-glass password (§12.1) exists for — it works on the LAN when the edge does
+not.
 
 Options considered:
 
@@ -589,8 +627,7 @@ Options considered:
 | **Reverse proxy + port forward** on the Asus/Merlin router | Fully self-contained | Exposes an internet-facing surface with a home-grown auth layer; must manage certs, fail2ban, and CVEs yourself |
 
 `[D]` The app assumes it is internet-reachable. Strict CSP, HSTS, secure/SameSite
-cookies, no directory listing, no debug endpoints in prod, and `/api/admin/*` additionally IP-restricted
-to the Tailscale CIDR when that path is used. The CSP names exactly one third-party host —
+cookies, no directory listing, and no debug endpoints in prod. The CSP names exactly one third-party host —
 `https://*.tile.openstreetmap.org` in `img-src`, for the geofence map picker (§6.2). Everything
 else, `script-src` and `connect-src` included, stays `'self'`.
 
@@ -634,10 +671,25 @@ LLM_TIMEOUT_S=120
 LLM_MAX_RETRIES=1
 VAPID_PUBLIC_KEY= / VAPID_PRIVATE_KEY=
 SESSION_SECRET=
+ADMIN_EMAIL=                 # parent-admin's Google address; read once by the auth migration
+ADMIN_SESSION_HOURS=12
+CHILD_SESSION_DAYS=90
+COOKIE_SECURE=false
 MEDIA_RETENTION_DAYS=180
 GEO_RETENTION_DAYS=30
 AUTO_PASS_THRESHOLD=0.85
 AUTO_FAIL_THRESHOLD=0.35
+MISS_SETTLE_DELAY_S=21600
+APPEAL_WINDOW_S=259200
+ENVIRONMENT=dev              # prod turns on HSTS and turns off /docs
+LOG_FORMAT=json
+PUBLIC_BASE_URL=http://localhost:8088
+# Internet exposure (§12.2) — used by docker-compose.tunnel.yml
+CLOUDFLARE_TUNNEL_TOKEN=
+ALLOWED_HOSTS=               # empty disables the Host check
+TRUST_PROXY_HEADERS=false
+CF_ACCESS_TEAM_DOMAIN=       # e.g. yourteam.cloudflareaccess.com
+CF_ACCESS_AUD=               # comma-separated, one AUD tag per Access application
 ```
 
 ### 13.3 Dev ergonomics
@@ -700,7 +752,8 @@ each kid through installing it, and must detect and warn when running in a plain
 Remote access wiring, security headers/CSP, rate limits, retention jobs, backup + **tested restore**,
 `/admin/jobs` dashboard, structured logging, alert on scheduler-not-ticking.
 **Accept when:** a restore from last night's backup into a clean environment reproduces all balances
-exactly; an external security scan shows no unauthenticated endpoint other than `/health` and `/checkin/{token}`.
+exactly; an external security scan shows no unauthenticated endpoint other than `/health` and
+`/checkin/{token}`, and `/api/v1/auth/login` answers 404 through the tunnel (§12.1 break-glass).
 
 ### Phase 7 — Nice-to-haves (backlog)
 Streaks and bonus multipliers; sibling leaderboard `[Q1]`; chore trading between kids with parent approval;
@@ -716,7 +769,7 @@ weekly email/Push digest; savings goals; recurring auto-payout on Sundays.
 | Q2 | Photo retention period, and delete-or-thumbnail after? | 180 days, then keep a 256px thumbnail + verdict, delete the original. |
 | Q3 | Can a balance go negative from penalties? | Yes, allow negative. |
 | Q4 | Kid password reset flow? | Admin resets from panel. |
-| ~~Q5~~ | ~~Remote access?~~ | **RESOLVED: Cloudflare Tunnel** (+ Access on admin paths, Tailscale for operator access). §12.2. |
+| ~~Q5~~ | ~~Remote access?~~ | **RESOLVED: Cloudflare Tunnel** + Access (Google) on the whole hostname; operator surfaces are LAN-only. §12.2. |
 | Q6 | Filesystem media storage or MinIO? | Filesystem, content-addressed. |
 | ~~Q13~~ | ~~Device mix?~~ | **RESOLVED: mixed iOS + Android.** Both geofence automation paths required (§6.2); Web Push must be verified on both; iOS requires Home Screen install before push works at all. |
 | ~~Q14~~ | ~~Anti-cheat strictness?~~ | **RESOLVED: strict.** In-app `getUserMedia` only, pHash dedup, gallery uploads forced to review; EXIF/screenshot flags apply to gallery uploads only, and the prompt token was removed. §6.1. |
@@ -739,5 +792,5 @@ weekly email/Push digest; savings goals; recurring auto-payout on Sundays.
 | Kids find the app annoying and stop using it | High | Sub-60-second happy path, useful failure messages, no confidence numbers, fast verdicts |
 | Photo verification becomes a source of family conflict | Medium | Parent override always visible; model framed as "a helper that checks," never as the authority |
 | Home hosting downtime causes false "missed" marks | Medium | Grace periods; admin bulk-excuse; startup reconciliation flags occurrences that expired during a known outage window |
-| Internet-exposed app gets probed | Certain | Tunnel over port-forward, strict CSP, TOTP for admin, rate limits, no default credentials |
+| Internet-exposed app gets probed | Certain | Tunnel over port-forward, Cloudflare Access (Google) in front of every path but two, strict CSP, rate limits, no default credentials |
 | Scope creep into a gamified allowance platform | High | Phase 7 is a backlog, not a plan. Tiered outcomes are bounded by §4.6 `[D]`: parent-authored consequences, no score, streak, badge or leaderboard |

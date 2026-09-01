@@ -1,144 +1,119 @@
-"""Phase 1 acceptance: admin (with TOTP) and child accounts can log in."""
+"""Sign-in: Google via Cloudflare Access, plus the break-glass admin password (spec §12.1)."""
 
 from __future__ import annotations
 
 import pytest
+from tests.helpers import sign_in
+
+from app.auth import SESSION_COOKIE
 
 pytestmark = pytest.mark.asyncio
 
 
-async def _login(client, **body):
-    return await client.post("/api/v1/auth/login", json=body)
+async def test_access_verified_email_mints_a_session(client, admin_user):
+    """The Access assertion *is* the login — there is no form for a parent to fill in."""
+    r = await sign_in(client, "parent@example.com")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["email"] == "parent@example.com"
+    assert body["role"] == "admin"
+    assert body["csrf_token"]
+    assert client.cookies.get(SESSION_COOKIE)
+
+    # The cookie carries the session from here; no further assertion is needed.
+    again = await client.get("/api/v1/auth/me")
+    assert again.status_code == 200
+    assert again.json()["id"] == body["id"]
 
 
-async def test_admin_login_requires_totp(client, admin_user, totp_now):
-    r = await _login(client, username="parent", password="parent-pass")
-    assert r.status_code == 401
-
-    r = await _login(client, username="parent", password="parent-pass", totp_code=totp_now())
-    assert r.status_code == 200
-    data = r.json()
-    assert data["role"] == "admin"
-    assert data["csrf_token"]
-    assert client.cookies.get("ck_session")
-
-
-async def test_admin_wrong_totp_rejected(client, admin_user):
-    r = await _login(client, username="parent", password="parent-pass", totp_code="000000")
-    assert r.status_code == 401
-
-
-async def test_child_login_no_totp(client, child_user):
-    r = await _login(client, username="alice", password="alice-pass")
+async def test_a_kid_signs_in_the_same_way(client, child_user):
+    r = await sign_in(client, "alice@example.com")
     assert r.status_code == 200
     assert r.json()["role"] == "child"
 
 
-async def test_bad_password_rejected(client, child_user):
-    r = await _login(client, username="alice", password="nope")
+async def test_the_address_is_matched_case_insensitively(client, child_user):
+    assert (await sign_in(client, "Alice@Example.com".lower())).status_code == 200
+
+
+async def test_an_unknown_google_account_is_named_in_the_error(client, admin_user):
+    r = await sign_in(client, "stranger@example.com")
+    assert r.status_code == 403
+    # Naming the address is the point: the parent's next move is to paste this exact
+    # string into Kids, and a generic "access denied" hides which account the phone used.
+    assert "stranger@example.com" in r.json()["detail"]
+
+
+async def test_a_deactivated_member_cannot_sign_in(client, db_session, child_user):
+    child_user.is_active = False
+    await db_session.commit()
+    assert (await sign_in(client, "alice@example.com")).status_code == 403
+
+
+async def test_no_session_and_no_assertion_is_401(client, admin_user):
+    assert (await client.get("/api/v1/auth/me")).status_code == 401
+
+
+async def test_logout_revokes_the_session_and_points_at_access(client, admin_user):
+    await sign_in(client, "parent@example.com")
+    out = await client.post("/api/v1/auth/logout")
+    assert out.status_code == 200
+    # Unset locally, so there is no edge session to end and nowhere to send the browser.
+    assert out.json()["access_logout_url"] is None
+    assert (await client.get("/api/v1/auth/me")).status_code == 401
+
+
+async def test_break_glass_admin_password_works(client, admin_user):
+    r = await client.post(
+        "/api/v1/auth/login", json={"username": "parent", "password": "parent-pass"}
+    )
+    assert r.status_code == 200, r.text
+    assert client.cookies.get(SESSION_COOKIE)
+
+
+async def test_break_glass_rejects_a_bad_password(client, admin_user):
+    r = await client.post("/api/v1/auth/login", json={"username": "parent", "password": "nope"})
     assert r.status_code == 401
 
 
-async def test_me_and_logout_roundtrip(client, child_user):
-    await _login(client, username="alice", password="alice-pass")
-
-    me = await client.get("/api/v1/auth/me")
-    assert me.status_code == 200 and me.json()["username"] == "alice"
-    csrf = me.json()["csrf_token"]
-
-    out = await client.post("/api/v1/auth/logout", headers={"X-CSRF-Token": csrf})
-    assert out.status_code == 204
-
-    me2 = await client.get("/api/v1/auth/me")
-    assert me2.status_code == 401
-
-
-async def test_fresh_admin_bootstraps_totp(client, admin_no_totp):
-    # Not-yet-enrolled admin logs in with password alone, then enrolls + confirms.
-    r = await _login(client, username="freshadmin", password="fresh-pass")
-    assert r.status_code == 200
-    csrf = r.json()["csrf_token"]
-
-    enroll = await client.post("/api/v1/auth/totp/enroll", headers={"X-CSRF-Token": csrf})
-    assert enroll.status_code == 200
-    secret = enroll.json()["secret"]
-
-    import pyotp
-
-    confirm = await client.post(
-        "/api/v1/auth/totp/confirm",
-        json={"totp_code": pyotp.TOTP(secret).now()},
-        headers={"X-CSRF-Token": csrf},
+async def test_break_glass_is_closed_to_children(client, child_user):
+    """A kid has no password column at all; the role check must not depend on that."""
+    r = await client.post(
+        "/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"}
     )
-    assert confirm.status_code == 200
-    assert confirm.json()["totp_enrolled"] is True
-
-    # Subsequent login now demands the code.
-    await client.post("/api/v1/auth/logout", headers={"X-CSRF-Token": csrf})
-    r = await _login(client, username="freshadmin", password="fresh-pass")
     assert r.status_code == 401
-    r = await _login(
-        client, username="freshadmin", password="fresh-pass", totp_code=pyotp.TOTP(secret).now()
-    )
-    assert r.status_code == 200
 
 
-async def test_totp_reset_with_password_lets_admin_re_enroll(client, admin_user, totp_now):
-    r = await _login(client, username="parent", password="parent-pass", totp_code=totp_now())
-    csrf = r.json()["csrf_token"]
-
-    reset = await client.post(
-        "/api/v1/auth/totp/reset",
-        json={"password": "parent-pass"},
-        headers={"X-CSRF-Token": csrf},
-    )
-    assert reset.status_code == 200
-    assert reset.json()["totp_enrolled"] is False
-
-    # password alone now logs in (bootstrap window) and enrollment can start again
-    await client.post("/api/v1/auth/logout", headers={"X-CSRF-Token": csrf})
-    r = await _login(client, username="parent", password="parent-pass")
-    assert r.status_code == 200
-    enroll = await client.post(
-        "/api/v1/auth/totp/enroll", headers={"X-CSRF-Token": r.json()["csrf_token"]}
-    )
-    assert enroll.status_code == 200
-
-
-async def test_totp_reset_wrong_password_rejected(client, admin_user, totp_now):
-    r = await _login(client, username="parent", password="parent-pass", totp_code=totp_now())
-    csrf = r.json()["csrf_token"]
-    bad = await client.post(
-        "/api/v1/auth/totp/reset",
-        json={"password": "not-it"},
-        headers={"X-CSRF-Token": csrf},
-    )
-    assert bad.status_code == 401
-    assert (await client.get("/api/v1/auth/me")).json()["totp_enrolled"] is True
-
-
-async def test_totp_reset_forbidden_for_child(client, child_user):
-    r = await _login(client, username="alice", password="alice-pass")
-    csrf = r.json()["csrf_token"]
-    bad = await client.post(
-        "/api/v1/auth/totp/reset",
-        json={"password": "alice-pass"},
-        headers={"X-CSRF-Token": csrf},
-    )
-    assert bad.status_code == 403
-
-
-async def test_login_ip_rate_limited(client, child_user):
-    # 10 requests/min/IP (spec §12.1); the 11th is throttled regardless of validity.
+async def test_break_glass_is_ip_rate_limited(client, admin_user):
     for _ in range(10):
-        await _login(client, username="alice", password="wrong")
-    r = await _login(client, username="alice", password="wrong")
+        await client.post("/api/v1/auth/login", json={"username": "parent", "password": "x"})
+    r = await client.post("/api/v1/auth/login", json={"username": "parent", "password": "x"})
     assert r.status_code == 429
 
 
-async def test_account_backoff_after_failures(client, child_user):
-    for _ in range(4):
-        await _login(client, username="alice", password="wrong")
-    # Backoff engaged; even the correct password is deferred.
-    r = await _login(client, username="alice", password="alice-pass")
+async def test_break_glass_backs_off_per_account(client, admin_user):
+    from app.auth import ratelimit
+
+    for _ in range(3):
+        ratelimit.record_failure("parent")
+    r = await client.post(
+        "/api/v1/auth/login", json={"username": "parent", "password": "parent-pass"}
+    )
     assert r.status_code == 429
+
+
+async def test_admin_can_set_the_break_glass_password(client, admin_user):
+    headers = {"X-CSRF-Token": (await sign_in(client, "parent@example.com")).json()["csrf_token"]}
+    r = await client.post(
+        "/api/v1/admin/break-glass-password",
+        json={"new_password": "a-much-longer-passphrase"},
+        headers=headers,
+    )
+    assert r.status_code == 204
+
+    client.cookies.clear()
+    logged_in = await client.post(
+        "/api/v1/auth/login",
+        json={"username": "parent", "password": "a-much-longer-passphrase"},
+    )
+    assert logged_in.status_code == 200

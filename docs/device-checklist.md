@@ -7,15 +7,17 @@ delivery and the geofence automations all behave differently per platform.
 ## Setup
 
 1. `just up` (backend) then `just web-serve` (builds + serves the PWA on `:5173`).
-2. `just seed` — logs print the `parent` / `alice` / `bea` credentials and the admin
-   TOTP secret. Add the TOTP secret to an authenticator once.
+2. `just seed` — logs print the `parent` / `alice` / `bea` identities. On the LAN stack
+   there is no Cloudflare Access, so sign in with the admin break-glass password the seed
+   prints; testing the real Google sign-in means going through the tunnel hostname.
 3. Put a VAPID keypair in `.env` (`VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY`,
    e.g. `npx web-push generate-vapid-keys`) and set `PUBLIC_BASE_URL` to the URL the
    phones will actually hit, then `just up` to reload. Without VAPID, push is logged as
    `skipped` and everything else still works.
-4. Reach the box from each phone over the LAN (or the Cloudflare tunnel once §12.2 is
-   wired). HTTPS is required for `getUserMedia` and install — use the tunnel hostname, or
-   a trusted local cert.
+4. Reach the box from each phone over the LAN or the Cloudflare tunnel. HTTPS is required
+   for `getUserMedia` and install — use the tunnel hostname, or a trusted local cert. Over
+   the tunnel each phone must be signed in to a Google account that is on **both** the
+   Access policy and the app's Kids list ([remote-access.md](remote-access.md) step 5h).
 
 ## Run on **each** device (iPhone, Android) separately
 

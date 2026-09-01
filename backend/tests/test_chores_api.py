@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import pytest_asyncio
 from sqlalchemy import func, select
+from tests.helpers import sign_in
 
 from app.models import AuditLog, ChoreOccurrence, OccurrenceStatus, User, UserRole
 from app.schemas.chore import ChoreBase
@@ -23,18 +24,14 @@ async def second_child(db_session, household) -> User:
         username="bea",
         display_name="Bea",
         role=UserRole.child,
-        password_hash="x",
     )
     db_session.add(u)
     await db_session.commit()
     return u
 
 
-async def _admin_headers(client, admin_user, totp_now) -> dict:
-    r = await client.post(
-        "/api/v1/auth/login",
-        json={"username": "parent", "password": "parent-pass", "totp_code": totp_now()},
-    )
+async def _admin_headers(client, admin_user) -> dict:
+    r = await sign_in(client, "parent@example.com")
     assert r.status_code == 200
     return {"X-CSRF-Token": r.json()["csrf_token"]}
 
@@ -75,8 +72,8 @@ def _rotating_body(a: User, b: User, **over) -> dict:
     return body
 
 
-async def test_create_list_get_chore(client, admin_user, child_user, second_child, totp_now):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_create_list_get_chore(client, admin_user, child_user, second_child):
+    h = await _admin_headers(client, admin_user)
 
     r = await client.post(
         "/api/v1/chores", json=_rotating_body(child_user, second_child), headers=h
@@ -93,8 +90,8 @@ async def test_create_list_get_chore(client, admin_user, child_user, second_chil
     assert got.json()["reward_cents"] == 200
 
 
-async def test_create_rejects_unknown_assignee(client, admin_user, child_user, totp_now):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_create_rejects_unknown_assignee(client, admin_user, child_user):
+    h = await _admin_headers(client, admin_user)
     body = _rotating_body(child_user, child_user)
     body["assignee_ids"] = [str(child_user.id), "00000000-0000-0000-0000-000000000009"]
     r = await client.post("/api/v1/chores", json=body, headers=h)
@@ -102,9 +99,9 @@ async def test_create_rejects_unknown_assignee(client, admin_user, child_user, t
 
 
 async def test_preview_is_biweekly_alice_alice_bea_bea(
-    client, admin_user, child_user, second_child, totp_now
+    client, admin_user, child_user, second_child
 ):
-    h = await _admin_headers(client, admin_user, totp_now)
+    h = await _admin_headers(client, admin_user)
     r = await client.post(
         "/api/v1/chores/preview?count=4&from_date=2025-06-01",
         json=_rotating_body(child_user, second_child),
@@ -126,8 +123,8 @@ async def test_preview_is_biweekly_alice_alice_bea_bea(
     ]
 
 
-async def test_patch_updates_definition(client, admin_user, child_user, second_child, totp_now):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_patch_updates_definition(client, admin_user, child_user, second_child):
+    h = await _admin_headers(client, admin_user)
     chore_id = (
         await client.post(
             "/api/v1/chores", json=_rotating_body(child_user, second_child), headers=h
@@ -139,9 +136,9 @@ async def test_patch_updates_definition(client, admin_user, child_user, second_c
 
 
 async def test_patch_regenerates_upcoming_occurrences(
-    client, admin_user, child_user, second_child, totp_now, db_session
+    client, admin_user, child_user, second_child, db_session
 ):
-    h = await _admin_headers(client, admin_user, totp_now)
+    h = await _admin_headers(client, admin_user)
     chore_id = (
         await client.post(
             "/api/v1/chores",
@@ -167,9 +164,9 @@ async def test_patch_regenerates_upcoming_occurrences(
 
 
 async def test_patch_reassign_regenerates_with_new_assignee(
-    client, admin_user, child_user, second_child, totp_now, db_session
+    client, admin_user, child_user, second_child, db_session
 ):
-    h = await _admin_headers(client, admin_user, totp_now)
+    h = await _admin_headers(client, admin_user)
     chore_id = (
         await client.post(
             "/api/v1/chores", json=_fixed_body(child_user, cadence="daily"), headers=h
@@ -193,8 +190,8 @@ async def test_patch_reassign_regenerates_with_new_assignee(
     assert set((await db_session.execute(future_assignees)).scalars()) == {second_child.id}
 
 
-async def test_patch_reassigns_fixed_chore(client, admin_user, child_user, second_child, totp_now):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_patch_reassigns_fixed_chore(client, admin_user, child_user, second_child):
+    h = await _admin_headers(client, admin_user)
     chore_id = (
         await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)
     ).json()["id"]
@@ -208,8 +205,8 @@ async def test_patch_reassigns_fixed_chore(client, admin_user, child_user, secon
     assert r.json()["fixed_assignee_id"] == str(second_child.id)
 
 
-async def test_patch_reassign_rejects_unknown_assignee(client, admin_user, child_user, totp_now):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_patch_reassign_rejects_unknown_assignee(client, admin_user, child_user):
+    h = await _admin_headers(client, admin_user)
     chore_id = (
         await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)
     ).json()["id"]
@@ -222,10 +219,8 @@ async def test_patch_reassign_rejects_unknown_assignee(client, admin_user, child
     assert r.status_code == 422
 
 
-async def test_patch_to_rotating_needs_two_assignees(
-    client, admin_user, child_user, second_child, totp_now
-):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_patch_to_rotating_needs_two_assignees(client, admin_user, child_user, second_child):
+    h = await _admin_headers(client, admin_user)
     chore_id = (
         await client.post(
             "/api/v1/chores", json=_rotating_body(child_user, second_child), headers=h
@@ -240,8 +235,8 @@ async def test_patch_to_rotating_needs_two_assignees(
     assert r.status_code == 422
 
 
-async def test_patch_rejects_threshold_inversion(client, admin_user, child_user, totp_now):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_patch_rejects_threshold_inversion(client, admin_user, child_user):
+    h = await _admin_headers(client, admin_user)
     chore_id = (
         await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)
     ).json()["id"]
@@ -253,12 +248,10 @@ async def test_patch_rejects_threshold_inversion(client, admin_user, child_user,
     assert r.status_code == 422
 
 
-async def test_patch_threshold_audits_decimal_snapshot(
-    client, admin_user, child_user, totp_now, db_session
-):
+async def test_patch_threshold_audits_decimal_snapshot(client, admin_user, child_user, db_session):
     # The `before` audit snapshot pulls Numeric columns off the ORM as Decimal;
     # _json() must coerce them or the audit_log INSERT blows up with a 500.
-    h = await _admin_headers(client, admin_user, totp_now)
+    h = await _admin_headers(client, admin_user)
     chore_id = (
         await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)
     ).json()["id"]
@@ -278,10 +271,8 @@ async def test_patch_threshold_audits_decimal_snapshot(
     assert row.after["late_multiplier"] == 0.5
 
 
-async def test_deactivate_drops_future_occurrences(
-    client, admin_user, child_user, totp_now, db_session
-):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_deactivate_drops_future_occurrences(client, admin_user, child_user, db_session):
+    h = await _admin_headers(client, admin_user)
     chore_id = (
         await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)
     ).json()["id"]
@@ -304,8 +295,8 @@ async def test_deactivate_drops_future_occurrences(
     assert (await db_session.execute(future_for_chore)).scalar_one() == 0
 
 
-async def test_delete_is_soft(client, admin_user, child_user, second_child, totp_now):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_delete_is_soft(client, admin_user, child_user, second_child):
+    h = await _admin_headers(client, admin_user)
     chore_id = (
         await client.post(
             "/api/v1/chores", json=_rotating_body(child_user, second_child), headers=h
@@ -319,10 +310,8 @@ async def test_delete_is_soft(client, admin_user, child_user, second_child, totp
     ] is False
 
 
-async def test_child_reads_active_chores_only(
-    client, admin_user, child_user, second_child, totp_now
-):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_child_reads_active_chores_only(client, admin_user, child_user, second_child):
+    h = await _admin_headers(client, admin_user)
     keep = (await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)).json()[
         "id"
     ]
@@ -333,9 +322,7 @@ async def test_child_reads_active_chores_only(
     ).json()["id"]
     await client.delete(f"/api/v1/chores/{gone}", headers=h)
 
-    login = await client.post(
-        "/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"}
-    )
+    login = await sign_in(client, "alice@example.com")
     kh = {"X-CSRF-Token": login.json()["csrf_token"]}
 
     lst = await client.get("/api/v1/chores")
@@ -359,10 +346,10 @@ async def test_child_reads_active_chores_only(
 
 
 async def test_a_kid_only_sees_the_chores_that_are_theirs(
-    client, admin_user, child_user, second_child, totp_now
+    client, admin_user, child_user, second_child
 ):
     """Own + the `anyone` pool; a sibling's chore is invisible, definition and all (§15 Q1)."""
-    h = await _admin_headers(client, admin_user, totp_now)
+    h = await _admin_headers(client, admin_user)
     mine = (await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)).json()[
         "id"
     ]
@@ -393,7 +380,7 @@ async def test_a_kid_only_sees_the_chores_that_are_theirs(
 
     assert len((await client.get("/api/v1/chores", headers=h)).json()) == 4  # admin sees all
 
-    await client.post("/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"})
+    await sign_in(client, "alice@example.com")
     listed = {c["id"] for c in (await client.get("/api/v1/chores")).json()}
     assert listed == {mine, shared, pool}
 
@@ -403,9 +390,9 @@ async def test_a_kid_only_sees_the_chores_that_are_theirs(
 
 
 async def test_occurrences_scoped_and_assignee_swap(
-    client, admin_user, child_user, second_child, totp_now, db_session
+    client, admin_user, child_user, second_child, db_session
 ):
-    h = await _admin_headers(client, admin_user, totp_now)
+    h = await _admin_headers(client, admin_user)
     await client.post(
         "/api/v1/chores",
         json=_rotating_body(child_user, second_child, cadence="daily"),
@@ -420,15 +407,12 @@ async def test_occurrences_scoped_and_assignee_swap(
     target = all_occ[-1]["id"]
 
     # Child sees only their own.
-    await client.post("/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"})
+    await sign_in(client, "alice@example.com")
     mine = (await client.get("/api/v1/occurrences")).json()
     assert all(o["assignee_id"] == str(child_user.id) for o in mine)
 
     # Swap needs admin + CSRF; re-login mints a fresh CSRF token.
-    relog = await client.post(
-        "/api/v1/auth/login",
-        json={"username": "parent", "password": "parent-pass", "totp_code": totp_now()},
-    )
+    relog = await sign_in(client, "parent@example.com")
     r = await client.patch(
         f"/api/v1/occurrences/{target}/assignee",
         json={"assignee_id": str(second_child.id)},
@@ -446,10 +430,8 @@ async def test_occurrences_scoped_and_assignee_swap(
     assert n_audit == 1
 
 
-async def test_occurrences_order_desc(
-    client, admin_user, child_user, second_child, totp_now, db_session
-):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_occurrences_order_desc(client, admin_user, child_user, second_child, db_session):
+    h = await _admin_headers(client, admin_user)
     await client.post(
         "/api/v1/chores",
         json=_rotating_body(child_user, second_child, cadence="daily"),
@@ -468,9 +450,9 @@ async def test_occurrences_order_desc(
 
 
 async def test_assignee_swap_forbidden_for_child(
-    client, admin_user, child_user, second_child, totp_now, db_session
+    client, admin_user, child_user, second_child, db_session
 ):
-    h = await _admin_headers(client, admin_user, totp_now)
+    h = await _admin_headers(client, admin_user)
     await client.post(
         "/api/v1/chores",
         json=_rotating_body(child_user, second_child, cadence="daily"),
@@ -480,9 +462,7 @@ async def test_assignee_swap_forbidden_for_child(
     await db_session.commit()
     occ_id = (await client.get("/api/v1/occurrences", headers=h)).json()[0]["id"]
 
-    login = await client.post(
-        "/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"}
-    )
+    login = await sign_in(client, "alice@example.com")
     r = await client.patch(
         f"/api/v1/occurrences/{occ_id}/assignee",
         json={"assignee_id": str(second_child.id)},
@@ -491,12 +471,10 @@ async def test_assignee_swap_forbidden_for_child(
     assert r.status_code == 403
 
 
-async def test_geofence_is_creatable_and_editable(
-    client, db_session, admin_user, child_user, totp_now
-):
+async def test_geofence_is_creatable_and_editable(client, db_session, admin_user, child_user):
     """geofence was missing from ChoreUpdate, so a fence could only ever be set at
     creation — and the admin form had no control for it at all (spec §6.2)."""
-    h = await _admin_headers(client, admin_user, totp_now)
+    h = await _admin_headers(client, admin_user)
     fence = {"lat": 37.7749, "lon": -122.4194, "radius_m": 120, "arrive_before": None}
 
     created = await client.post(
@@ -555,13 +533,11 @@ async def test_geofence_is_creatable_and_editable(
     assert "geofence" in cleared.text
 
 
-async def test_duplicate_copies_every_definition_field(
-    client, admin_user, child_user, totp_now, db_session
-):
+async def test_duplicate_copies_every_definition_field(client, admin_user, child_user, db_session):
     """Spec §4.1: admin MUST be able to clone a chore. The copy has to carry the fields the
     admin form never renders (grace_period_s, end_date, late_multiplier) — dropping them is
     exactly the bug a client-side "prefill the create form" clone would have."""
-    h = await _admin_headers(client, admin_user, totp_now)
+    h = await _admin_headers(client, admin_user)
     src = (
         await client.post(
             "/api/v1/chores",
@@ -588,10 +564,10 @@ async def test_duplicate_copies_every_definition_field(
 
 
 async def test_duplicate_starts_inactive_with_no_occurrences(
-    client, admin_user, child_user, totp_now, db_session
+    client, admin_user, child_user, db_session
 ):
     """A copy made in order to be edited must not push live work into a kid's list."""
-    h = await _admin_headers(client, admin_user, totp_now)
+    h = await _admin_headers(client, admin_user)
     src = (await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)).json()
 
     copy = (await client.post(f"/api/v1/chores/{src['id']}/duplicate", headers=h)).json()
@@ -606,8 +582,8 @@ async def test_duplicate_starts_inactive_with_no_occurrences(
     assert n == 0
 
 
-async def test_duplicate_titles_the_copy(client, admin_user, child_user, totp_now):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_duplicate_titles_the_copy(client, admin_user, child_user):
+    h = await _admin_headers(client, admin_user)
     src = (await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)).json()
 
     default = (await client.post(f"/api/v1/chores/{src['id']}/duplicate", headers=h)).json()
@@ -621,11 +597,9 @@ async def test_duplicate_titles_the_copy(client, admin_user, child_user, totp_no
     assert named["title"] == "Dishes v2"
 
 
-async def test_duplicate_keeps_a_long_title_within_the_column(
-    client, admin_user, child_user, totp_now
-):
+async def test_duplicate_keeps_a_long_title_within_the_column(client, admin_user, child_user):
     """title is String(160); the suffix must survive the cap, not be sliced off it."""
-    h = await _admin_headers(client, admin_user, totp_now)
+    h = await _admin_headers(client, admin_user)
     src = (
         await client.post(
             "/api/v1/chores", json=_fixed_body(child_user, title="D" * 160), headers=h
@@ -637,8 +611,8 @@ async def test_duplicate_keeps_a_long_title_within_the_column(
     assert copy["title"].endswith(" (copy)")
 
 
-async def test_duplicate_writes_an_audit_row(client, admin_user, child_user, totp_now, db_session):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_duplicate_writes_an_audit_row(client, admin_user, child_user, db_session):
+    h = await _admin_headers(client, admin_user)
     src = (await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)).json()
     copy = (await client.post(f"/api/v1/chores/{src['id']}/duplicate", headers=h)).json()
 
@@ -653,19 +627,17 @@ async def test_duplicate_writes_an_audit_row(client, admin_user, child_user, tot
     assert row.actor_user_id == admin_user.id
 
 
-async def test_duplicate_404_for_unknown_chore(client, admin_user, totp_now):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_duplicate_404_for_unknown_chore(client, admin_user):
+    h = await _admin_headers(client, admin_user)
     r = await client.post(f"/api/v1/chores/{uuid.uuid4()}/duplicate", headers=h)
     assert r.status_code == 404
 
 
-async def test_duplicate_is_admin_only(client, admin_user, child_user, totp_now):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_duplicate_is_admin_only(client, admin_user, child_user):
+    h = await _admin_headers(client, admin_user)
     src = (await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)).json()
 
-    login = await client.post(
-        "/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"}
-    )
+    login = await sign_in(client, "alice@example.com")
     r = await client.post(
         f"/api/v1/chores/{src['id']}/duplicate",
         headers={"X-CSRF-Token": login.json()["csrf_token"]},
@@ -673,10 +645,8 @@ async def test_duplicate_is_admin_only(client, admin_user, child_user, totp_now)
     assert r.status_code == 403
 
 
-async def test_preview_returns_a_single_occurrence_for_a_one_off(
-    client, admin_user, child_user, totp_now
-):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_preview_returns_a_single_occurrence_for_a_one_off(client, admin_user, child_user):
+    h = await _admin_headers(client, admin_user)
     on = (datetime.now(UTC).date() + timedelta(days=5)).isoformat()
 
     r = await client.post(
@@ -689,13 +659,11 @@ async def test_preview_returns_a_single_occurrence_for_a_one_off(
     assert r.json()[0]["due_at"].startswith(on)
 
 
-async def test_patching_a_past_dated_one_off_still_succeeds(
-    client, admin_user, child_user, totp_now
-):
+async def test_patching_a_past_dated_one_off_still_succeeds(client, admin_user, child_user):
     """PATCH re-validates the whole merged definition, so a "the date must be in the future"
     rule would make a spent one-off un-editable — you could not even fix its title. The
     once() rules are deliberately static; this is the guard on that."""
-    h = await _admin_headers(client, admin_user, totp_now)
+    h = await _admin_headers(client, admin_user)
     past = (datetime.now(UTC).date() - timedelta(days=30)).isoformat()
 
     created = await client.post(
@@ -712,8 +680,8 @@ async def test_patching_a_past_dated_one_off_still_succeeds(
     assert r.json()["title"] == "Renamed"
 
 
-async def test_one_off_before_start_date_is_rejected(client, admin_user, child_user, totp_now):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_one_off_before_start_date_is_rejected(client, admin_user, child_user):
+    h = await _admin_headers(client, admin_user)
     r = await client.post(
         "/api/v1/chores",
         json=_fixed_body(child_user, cadence="once(2024-01-01)", start_date="2025-01-01"),
@@ -723,8 +691,8 @@ async def test_one_off_before_start_date_is_rejected(client, admin_user, child_u
     assert "can never fire" in str(r.json())
 
 
-async def test_one_off_after_end_date_is_rejected(client, admin_user, child_user, totp_now):
-    h = await _admin_headers(client, admin_user, totp_now)
+async def test_one_off_after_end_date_is_rejected(client, admin_user, child_user):
+    h = await _admin_headers(client, admin_user)
     r = await client.post(
         "/api/v1/chores",
         json=_fixed_body(
@@ -739,10 +707,10 @@ async def test_one_off_after_end_date_is_rejected(client, admin_user, child_user
     assert "can never fire" in str(r.json())
 
 
-async def test_patch_accepts_grace_period_and_end_date(client, admin_user, child_user, totp_now):
+async def test_patch_accepts_grace_period_and_end_date(client, admin_user, child_user):
     """Both were live in the backend but had no control in the admin form, and both were
     missing from its PATCH allowlist — so the form silently reverted them."""
-    h = await _admin_headers(client, admin_user, totp_now)
+    h = await _admin_headers(client, admin_user)
     created = await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)
 
     r = await client.patch(

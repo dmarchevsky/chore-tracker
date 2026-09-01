@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
 from PIL import Image
+from tests.helpers import sign_in
 
 from app.models import (
     Chore,
@@ -132,7 +133,7 @@ async def test_prune_media_keeps_original_shared_by_a_live_row(
 
 
 async def test_pruned_media_endpoint_serves_the_thumbnail(
-    client, db_session, household, admin_user, child_user, media_root, totp_now
+    client, db_session, household, admin_user, child_user, media_root
 ):
     occ = await _occurrence(db_session, household, child_user)
     m = await _photo_submission(db_session, occ, age_days=200)
@@ -140,10 +141,7 @@ async def test_pruned_media_endpoint_serves_the_thumbnail(
     await retention.prune_media(db_session)
     await db_session.commit()
 
-    login = await client.post(
-        "/api/v1/auth/login",
-        json={"username": "parent", "password": "parent-pass", "totp_code": totp_now()},
-    )
+    login = await sign_in(client, "parent@example.com")
     assert login.status_code == 200
     r = await client.get(f"/api/v1/submissions/{m.submission_id}/media/0")
     assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"

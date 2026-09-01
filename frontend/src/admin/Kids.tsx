@@ -4,7 +4,6 @@ import {
   useCheckinToken,
   useCreateChild,
   useDeactivateChild,
-  useResetChildPassword,
   useRotateCheckinToken,
   useUpdateChild,
 } from './api';
@@ -15,7 +14,7 @@ export function Kids() {
   const kids = useChildren();
   const create = useCreateChild();
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ username: '', display_name: '', password: '' });
+  const [form, setForm] = useState({ username: '', display_name: '', email: '' });
   const [error, setError] = useState<string | null>(null);
 
   if (kids.isLoading) return <Spinner />;
@@ -24,7 +23,7 @@ export function Kids() {
     setError(null);
     try {
       await create.mutateAsync(form);
-      setForm({ username: '', display_name: '', password: '' });
+      setForm({ username: '', display_name: '', email: '' });
       setAdding(false);
     } catch (e) {
       setError((e as Error).message);
@@ -56,11 +55,16 @@ export function Kids() {
           />
           <input
             className="inp"
-            type="password"
-            placeholder="password"
-            value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
+            type="email"
+            inputMode="email"
+            placeholder="google address"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
           />
+          <p className="text-xs text-slate-500">
+            Add this same address to the Cloudflare Access policy too — listing it here alone gets
+            them turned away at the edge, before the app ever sees them.
+          </p>
           {error && <p className="text-sm text-rose-400">{error}</p>}
           <Button
             className="min-h-0 self-start px-3 py-2 text-sm"
@@ -82,7 +86,6 @@ export function Kids() {
 function KidRow({ kid }: { kid: Child }) {
   const update = useUpdateChild();
   const deactivate = useDeactivateChild();
-  const resetPw = useResetChildPassword();
   const rotate = useRotateCheckinToken();
   const token = useCheckinToken(kid.id);
   const [open, setOpen] = useState(false);
@@ -102,7 +105,8 @@ function KidRow({ kid }: { kid: Child }) {
         onClick={() => setOpen((v) => !v)}
       >
         <span className="font-semibold">
-          {kid.display_name} <span className="text-xs text-slate-500">@{kid.username}</span>
+          {kid.display_name}{' '}
+          <span className="text-xs text-slate-500">{kid.email ?? `@${kid.username}`}</span>
         </span>
         <span className={`text-xs ${kid.is_active ? 'text-emerald-400' : 'text-slate-500'}`}>
           {kid.is_active ? 'active' : 'inactive'}
@@ -151,13 +155,16 @@ function KidRow({ kid }: { kid: Child }) {
             <Button
               className="min-h-0 px-3 py-2 text-sm"
               variant="ghost"
-              disabled={resetPw.isPending}
+              disabled={update.isPending}
               onClick={() => {
-                const pw = window.prompt(`New password for ${kid.display_name}`);
-                if (pw) run(resetPw.mutateAsync({ id: kid.id, new_password: pw }));
+                const next = window.prompt(
+                  `Google address for ${kid.display_name}`,
+                  kid.email ?? '',
+                );
+                if (next) run(update.mutateAsync({ id: kid.id, body: { email: next } }));
               }}
             >
-              Reset password
+              Change sign-in address
             </Button>
           </div>
 

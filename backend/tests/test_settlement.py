@@ -41,7 +41,6 @@ async def kid(db_session, household) -> User:
         username="alice",
         display_name="Alice",
         role=UserRole.child,
-        password_hash="x",
     )
     db_session.add(u)
     await db_session.commit()

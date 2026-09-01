@@ -53,9 +53,22 @@ async function apiError(resp: Response): Promise<ApiError> {
   return new ApiError(resp.status, detailText(detail, resp.statusText));
 }
 
+/** Cloudflare Access sessions expire (a month, by policy) while the PWA is still open.
+ *  The edge answers the next API call with a redirect to Google, which `fetch` cannot
+ *  follow usefully — it comes back as the login HTML instead of JSON. A top-level
+ *  navigation is the only thing that can complete an Access round-trip, so send the
+ *  browser through one rather than showing an unexplainable failure. */
+function reloadIfAccessExpired(resp: Response): void {
+  const ct = resp.headers.get('content-type') ?? '';
+  if (!ct.includes('text/html')) return;
+  window.location.reload();
+  throw new ApiError(resp.status, 'Session expired — signing in again…');
+}
+
 /** A GET that also needs a response header — used for paged lists (X-Total-Count). */
 export async function getPage<T>(path: string): Promise<{ items: T; total: number }> {
   const resp = await fetch(BASE + path, { method: 'GET', credentials: 'same-origin' });
+  reloadIfAccessExpired(resp);
   if (!resp.ok) throw await apiError(resp);
   const items = (await resp.json()) as T;
   return { items, total: Number(resp.headers.get('X-Total-Count') ?? 0) };
@@ -74,6 +87,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
 
   const resp = await fetch(BASE + path, init);
+  reloadIfAccessExpired(resp);
   if (!resp.ok) throw await apiError(resp);
   if (resp.status === 204) return undefined as T;
   const ct = resp.headers.get('content-type') ?? '';

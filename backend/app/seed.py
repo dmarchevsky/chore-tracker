@@ -1,6 +1,6 @@
 """Development seed data (spec §13.3).
 
-One household, one admin (TOTP pre-enrolled with a fixed dev secret), two children, and
+One household, one admin (with a break-glass password), two children, and
 the four example chores from the brief. Phase 3 adds 30 days of backdated occurrences in
 mixed states so the UI is never empty.
 
@@ -13,7 +13,6 @@ import asyncio
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-import pyotp
 from sqlalchemy import select
 
 from app.auth.passwords import hash_password
@@ -45,13 +44,17 @@ _STATUS_CYCLE = [
     OccurrenceStatus.excused,
 ]
 
-# Fixed so a developer can add it to an authenticator app once.
-DEV_ADMIN_TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
-
-ADMIN = {"username": "parent", "display_name": "Parent", "password": "parent-dev-pass"}
+# Sign-in is Google via Cloudflare Access (spec §12.1), so what a seeded account needs is
+# an email. The admin also gets the break-glass password, which is the only password left.
+ADMIN = {
+    "username": "parent",
+    "display_name": "Parent",
+    "email": "parent@example.com",
+    "password": "parent-dev-pass",
+}
 CHILDREN = [
-    {"username": "alice", "display_name": "Alice", "password": "alice-dev-pass"},
-    {"username": "bea", "display_name": "Bea", "password": "bea-dev-pass"},
+    {"username": "alice", "display_name": "Alice", "email": "alice@example.com"},
+    {"username": "bea", "display_name": "Bea", "email": "bea@example.com"},
 ]
 
 
@@ -63,9 +66,7 @@ async def seed() -> None:
             db.add(household)
             await db.flush()
 
-        await _upsert_user(
-            db, household.id, ADMIN, UserRole.admin, totp_secret=DEV_ADMIN_TOTP_SECRET
-        )
+        await _upsert_user(db, household.id, ADMIN, UserRole.admin)
         kids = {
             child["username"]: await _upsert_user(db, household.id, child, UserRole.child)
             for child in CHILDREN
@@ -83,11 +84,9 @@ async def seed() -> None:
     print("Seed complete.")
     print(f"  chores:   {n_chores}")
     print(f"  occurrences: {n_occ}")
-    print(f"  admin:    {ADMIN['username']} / {ADMIN['password']}")
-    print(f"  admin TOTP secret: {DEV_ADMIN_TOTP_SECRET}")
-    print(f"  admin TOTP now:    {pyotp.TOTP(DEV_ADMIN_TOTP_SECRET).now()}")
+    print(f"  admin:    {ADMIN['email']}  (break-glass: {ADMIN['username']} / {ADMIN['password']})")
     for child in CHILDREN:
-        print(f"  child:    {child['username']} / {child['password']}")
+        print(f"  child:    {child['username']} / {child['email']}")
 
 
 async def _seed_chores(db, household_id, alice: User, bea: User) -> None:
@@ -278,20 +277,20 @@ async def _apply_seed_money(db, chore, occ, status) -> None:
         await ledger.debit_penalty(db, occurrence=occ, reason=f"seed: {status}")
 
 
-async def _upsert_user(db, household_id, spec, role: UserRole, *, totp_secret: str | None = None):
+async def _upsert_user(db, household_id, spec, role: UserRole):
     existing = (
         await db.execute(select(User).where(User.username == spec["username"]))
     ).scalar_one_or_none()
     if existing is not None:
         return existing
+    password = spec.get("password")
     user = User(
         household_id=household_id,
         username=spec["username"],
         display_name=spec["display_name"],
         role=role,
-        password_hash=hash_password(spec["password"]),
-        totp_secret=totp_secret,
-        totp_enrolled=totp_secret is not None,
+        email=spec["email"],
+        password_hash=hash_password(password) if password else None,
     )
     db.add(user)
     await db.flush()

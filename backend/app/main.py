@@ -21,9 +21,9 @@ from app.config import get_settings
 
 log = logging.getLogger("chorekeeper.api")
 
-# Anything whose name looks like a credential never reaches the log. /auth/login carries a
-# password and a TOTP code, and a malformed login body would otherwise be written in clear.
-_SECRET_KEY = re.compile(r"password|token|secret|api_key|totp", re.I)
+# Anything whose name looks like a credential never reaches the log. /auth/login carries the
+# break-glass password, and a malformed login body would otherwise be written in clear.
+_SECRET_KEY = re.compile(r"password|token|secret|api_key", re.I)
 _MAX_LOGGED_BODY = 2000
 
 

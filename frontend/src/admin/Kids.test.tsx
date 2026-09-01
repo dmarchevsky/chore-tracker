@@ -15,9 +15,9 @@ const ALICE = {
   id: 'k1',
   username: 'alice',
   display_name: 'Alice',
+  email: 'alice@example.com',
   role: 'child',
   is_active: true,
-  totp_enrolled: false,
 };
 
 function setup() {
@@ -67,13 +67,19 @@ describe('admin Kids', () => {
     fireEvent.click(screen.getByRole('button', { name: /add kid/i }));
     fireEvent.change(screen.getByPlaceholderText('username'), { target: { value: 'bob' } });
     fireEvent.change(screen.getByPlaceholderText('display name'), { target: { value: 'Bob' } });
-    fireEvent.change(screen.getByPlaceholderText('password'), { target: { value: 'bob-pass' } });
+    fireEvent.change(screen.getByPlaceholderText('google address'), {
+      target: { value: 'bob@example.com' },
+    });
     fireEvent.click(screen.getByRole('button', { name: /^create$/i }));
 
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
     const post = calls.find((c) => c.method === 'POST')!;
     expect(post.url).toMatch(/\/children$/);
-    expect(post.body).toEqual({ username: 'bob', display_name: 'Bob', password: 'bob-pass' });
+    expect(post.body).toEqual({
+      username: 'bob',
+      display_name: 'Bob',
+      email: 'bob@example.com',
+    });
   });
 
   it('deactivates a kid', async () => {

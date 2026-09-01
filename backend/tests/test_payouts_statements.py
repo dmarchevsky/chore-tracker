@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime, time
 
 import pytest
 from PIL import Image
+from tests.helpers import sign_in
 
 from app.models import Chore, ChoreOccurrence, OccurrenceStatus
 from app.services.settlement import settle_missed
@@ -50,27 +51,22 @@ async def _open_occ(db, household, child, reward=200) -> ChoreOccurrence:
     return occ
 
 
-async def _admin(client, totp_now) -> dict:
-    r = await client.post(
-        "/api/v1/auth/login",
-        json={"username": "parent", "password": "parent-pass", "totp_code": totp_now()},
-    )
+async def _admin(client) -> dict:
+    r = await sign_in(client, "parent@example.com")
     return {"X-CSRF-Token": r.json()["csrf_token"]}
 
 
-async def _earn(client, db, household, admin_user, child_user, headers, reward):
+async def _earn(client, db, household, admin_user, child_user, reward):
     occ = await _open_occ(db, household, child_user, reward)
     await db.commit()
-    login = await client.post(
-        "/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"}
-    )
+    login = await sign_in(client, "alice@example.com")
     await client.post(
         f"/api/v1/occurrences/{occ.id}/submissions",
         files=[("files", ("a.jpg", _jpeg(), "image/jpeg"))],
         data={"source": "camera"},
         headers={"X-CSRF-Token": login.json()["csrf_token"]},
     )
-    h = await _admin(client, headers)  # re-login mints a fresh CSRF token
+    h = await _admin(client)  # re-login mints a fresh CSRF token
     await client.post(
         f"/api/v1/occurrences/{occ.id}/decision",
         json={"action": "approve", "reason": "ok"},
@@ -79,10 +75,8 @@ async def _earn(client, db, household, admin_user, child_user, headers, reward):
     return h
 
 
-async def test_balance_and_ledger_and_csv(
-    client, db_session, household, admin_user, child_user, totp_now
-):
-    h = await _earn(client, db_session, household, admin_user, child_user, totp_now, 250)
+async def test_balance_and_ledger_and_csv(client, db_session, household, admin_user, child_user):
+    h = await _earn(client, db_session, household, admin_user, child_user, 250)
 
     bal = await client.get(f"/api/v1/children/{child_user.id}/balance", headers=h)
     assert bal.status_code == 200 and bal.json()["balance_cents"] == 250
@@ -96,11 +90,11 @@ async def test_balance_and_ledger_and_csv(
 
 
 async def test_the_statement_names_the_chore_each_entry_was_for(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     """ "chore missed" alone doesn't say which chore — the statement carries the title and
     the day it was due (spec §4.3)."""
-    h = await _earn(client, db_session, household, admin_user, child_user, totp_now, 250)
+    h = await _earn(client, db_session, household, admin_user, child_user, 250)
     await client.post(
         "/api/v1/payouts",
         json={"child_id": str(child_user.id), "amount_cents": 250, "method": "cash"},
@@ -122,7 +116,7 @@ async def test_the_statement_names_the_chore_each_entry_was_for(
 
 
 async def test_a_penalty_can_be_excused_from_the_statement(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     """The statement links back to the occurrence, so the fix is the ordinary decision path
     — a reversing entry, never a deleted row (spec §9)."""
@@ -133,7 +127,7 @@ async def test_a_penalty_can_be_excused_from_the_statement(
     await settle_missed(db_session, now=datetime(2025, 1, 3, tzinfo=UTC))
     await db_session.commit()
 
-    h = await _admin(client, totp_now)
+    h = await _admin(client)
     led = (await client.get(f"/api/v1/children/{child_user.id}/ledger", headers=h)).json()
     penalty = next(e for e in led if e["kind"] == "penalty")
     assert penalty["chore_title"] == "Kitchen"
@@ -154,11 +148,11 @@ async def test_a_penalty_can_be_excused_from_the_statement(
 
 
 async def test_child_sees_own_balance_but_not_siblings(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
-    await _earn(client, db_session, household, admin_user, child_user, totp_now, 100)
+    await _earn(client, db_session, household, admin_user, child_user, 100)
 
-    await client.post("/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"})
+    await sign_in(client, "alice@example.com")
     mine = await client.get(f"/api/v1/children/{child_user.id}/balance")
     assert mine.status_code == 200 and mine.json()["balance_cents"] == 100
 
@@ -167,9 +161,9 @@ async def test_child_sees_own_balance_but_not_siblings(
 
 
 async def test_payout_writes_negative_entry_and_zeros_balance(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
-    h = await _earn(client, db_session, household, admin_user, child_user, totp_now, 500)
+    h = await _earn(client, db_session, household, admin_user, child_user, 500)
 
     pay = await client.post(
         "/api/v1/payouts",
@@ -192,10 +186,8 @@ async def test_payout_writes_negative_entry_and_zeros_balance(
     assert len(listing.json()) == 1
 
 
-async def test_negative_balance_is_allowed(
-    client, db_session, household, admin_user, child_user, totp_now
-):
-    h = await _admin(client, totp_now)
+async def test_negative_balance_is_allowed(client, db_session, household, admin_user, child_user):
+    h = await _admin(client)
     r = await client.post(
         "/api/v1/payouts",
         json={"child_id": str(child_user.id), "amount_cents": 100, "method": "cash", "note": ""},

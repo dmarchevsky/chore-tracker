@@ -28,9 +28,9 @@ const ME = {
   id: 'a1',
   username: 'parent',
   display_name: 'Parent',
+  email: 'parent@example.com',
   role: 'admin',
   csrf_token: 'x',
-  totp_enrolled: false,
 };
 
 function setup() {
@@ -41,15 +41,8 @@ function setup() {
     if (method !== 'GET')
       calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
 
-    if (url.includes('/auth/totp/enroll'))
-      return Promise.resolve(
-        json({
-          secret: 'JBSWY3DPEHPK3PXP',
-          provisioning_uri: 'otpauth://totp/ChoreKeeper:parent?secret=JBSWY3DPEHPK3PXP',
-        }),
-      );
-    if (url.includes('/auth/totp/confirm'))
-      return Promise.resolve(json({ ...ME, totp_enrolled: true }));
+    if (url.includes('/admin/break-glass-password'))
+      return Promise.resolve(new Response(null, { status: 204 }));
     if (url.includes('/auth/me')) return Promise.resolve(json(ME));
     if (method === 'PATCH') return Promise.resolve(json(SETTINGS));
     if (url.includes('/admin/llm/models'))
@@ -93,15 +86,18 @@ describe('admin Settings', () => {
     expect((patch.body as Record<string, unknown>).llm_base_url).toBe('http://box:9000/v1');
   });
 
-  it('runs the TOTP enrollment flow', async () => {
+  it('names the Google account in use and sets the break-glass password', async () => {
     const calls = setup();
-    fireEvent.click(await screen.findByRole('button', { name: /set up google authenticator/i }));
+    expect(await screen.findByText(/parent@example.com/)).toBeInTheDocument();
 
-    await waitFor(() => expect(calls.some((c) => c.url.includes('/auth/totp/enroll'))).toBe(true));
-    expect(await screen.findByText(/JBSWY3DPEHPK3PXP/)).toBeInTheDocument();
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('a-much-longer-passphrase');
+    fireEvent.click(screen.getByRole('button', { name: /change break-glass password/i }));
 
-    fireEvent.change(screen.getByPlaceholderText(/6-digit code/i), { target: { value: '123456' } });
-    fireEvent.click(screen.getByRole('button', { name: /^confirm$/i }));
-    await waitFor(() => expect(calls.some((c) => c.url.includes('/auth/totp/confirm'))).toBe(true));
+    await waitFor(() =>
+      expect(calls.some((c) => c.url.includes('/admin/break-glass-password'))).toBe(true),
+    );
+    const post = calls.find((c) => c.url.includes('/admin/break-glass-password'))!;
+    expect(post.body).toEqual({ new_password: 'a-much-longer-passphrase' });
+    prompt.mockRestore();
   });
 });

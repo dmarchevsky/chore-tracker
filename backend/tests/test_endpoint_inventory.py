@@ -20,9 +20,15 @@ from app.main import app
 # path -> why it is reachable without a session
 PUBLIC_ROUTES: dict[str, str] = {
     "/api/v1/health": "liveness probe (spec §10)",
-    "/api/v1/auth/login": "credential handshake; IP + per-account rate limited (spec §12.1)",
+    "/api/v1/auth/login": (
+        "break-glass admin password; loopback only — the Caddy front door 404s it "
+        "(spec §12.1). IP + per-account rate limited."
+    ),
     "/api/v1/auth/logout": "clears the session cookie; no side effects, safe to call anon",
-    "/api/v1/auth/me": "SPA bootstrap probe; returns 401 without a valid session",
+    "/api/v1/auth/me": (
+        "SPA bootstrap probe, and the sign-in itself: behind Cloudflare Access the "
+        "verified Google address becomes a session (spec §12.1). 401 without either."
+    ),
     "/api/v1/checkin/{token}": "per-kid bearer token, rate limited 20/h (spec §6.2)",
     "/api/v1/submissions/{submission_id}/media/{idx}": (
         "HMAC-signed 5-min URL or a valid session (spec §5, §10)"

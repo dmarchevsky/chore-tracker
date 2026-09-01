@@ -201,7 +201,7 @@ const invalidateChildren = (qc: ReturnType<typeof useQueryClient>) =>
 export function useCreateChild() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { username: string; display_name: string; password: string }) =>
+    mutationFn: (body: { username: string; display_name: string; email: string }) =>
       api.post<Child>('/children', body),
     onSuccess: () => invalidateChildren(qc),
   });
@@ -215,16 +215,9 @@ export function useUpdateChild() {
       body,
     }: {
       id: string;
-      body: { display_name?: string; is_active?: boolean };
+      body: { display_name?: string; email?: string; is_active?: boolean };
     }) => api.patch<Child>(`/children/${id}`, body),
     onSuccess: () => invalidateChildren(qc),
-  });
-}
-
-export function useResetChildPassword() {
-  return useMutation({
-    mutationFn: ({ id, new_password }: { id: string; new_password: string }) =>
-      api.post(`/children/${id}/password-reset`, { new_password }),
   });
 }
 
@@ -337,21 +330,10 @@ export function useLlmModels(baseUrl: string, apiKey: string) {
   });
 }
 
-export function useTotpEnroll() {
+/** The local admin password — the way back in when Cloudflare or Google is unavailable. */
+export function useSetBreakGlassPassword() {
   return useMutation({
-    mutationFn: () => api.post<{ secret: string; provisioning_uri: string }>('/auth/totp/enroll'),
-  });
-}
-
-export function useTotpConfirm() {
-  return useMutation({
-    mutationFn: (totp_code: string) => api.post('/auth/totp/confirm', { totp_code }),
-  });
-}
-
-export function useTotpReset() {
-  return useMutation({
-    mutationFn: (password: string) => api.post('/auth/totp/reset', { password }),
+    mutationFn: (new_password: string) => api.post('/admin/break-glass-password', { new_password }),
   });
 }
 

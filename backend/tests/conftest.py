@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import tempfile
 
-import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
@@ -23,7 +22,6 @@ ADMIN_BASE = "postgresql+asyncpg://chore:chore@localhost:5432/chore"
 TEST_DB_URL = os.environ.get(
     "TEST_DATABASE_URL", "postgresql+asyncpg://chore:chore@localhost:5432/chore_test"
 )
-TEST_TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
@@ -92,28 +90,14 @@ async def household(db_session) -> Household:
 
 @pytest_asyncio.fixture
 async def admin_user(db_session, household) -> User:
+    # The parent signs in with the Google address; the password is break-glass only.
     user = User(
         household_id=household.id,
         username="parent",
         display_name="Parent",
         role=UserRole.admin,
+        email="parent@example.com",
         password_hash=hash_password("parent-pass"),
-        totp_secret=TEST_TOTP_SECRET,
-        totp_enrolled=True,
-    )
-    db_session.add(user)
-    await db_session.commit()
-    return user
-
-
-@pytest_asyncio.fixture
-async def admin_no_totp(db_session, household) -> User:
-    user = User(
-        household_id=household.id,
-        username="freshadmin",
-        display_name="Fresh Admin",
-        role=UserRole.admin,
-        password_hash=hash_password("fresh-pass"),
     )
     db_session.add(user)
     await db_session.commit()
@@ -127,15 +111,8 @@ async def child_user(db_session, household) -> User:
         username="alice",
         display_name="Alice",
         role=UserRole.child,
-        password_hash=hash_password("alice-pass"),
+        email="alice@example.com",
     )
     db_session.add(user)
     await db_session.commit()
     return user
-
-
-@pytest.fixture
-def totp_now():
-    import pyotp
-
-    return lambda: pyotp.TOTP(TEST_TOTP_SECRET).now()

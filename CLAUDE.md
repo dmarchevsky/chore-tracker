@@ -5,7 +5,9 @@
 ChoreKeeper is a self-hosted, single-household chore tracker: a parent defines recurring
 chores; kids submit photo / location / checkbox proof from a PWA inside a time window; a
 **local vision LLM** scores photo proof; the parent reviews uncertain cases; every pass or
-miss writes an append-only money ledger. Nothing (photos, prompts, locations) leaves the LAN.
+miss writes an append-only money ledger. Photos, prompts and locations are scored and stored
+at home and never sent to a model provider; the Cloudflare edge terminates TLS in front of
+the app, and Google + Cloudflare hold sign-in identity but never chore content (spec §12).
 
 - **Source of truth:** [docs/chore-tracker-spec.md](docs/chore-tracker-spec.md) — the spec.
   `[D]` = settled decision (don't relitigate), `[Q]` = open question (implement the stated

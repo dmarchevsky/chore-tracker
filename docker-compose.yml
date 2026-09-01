@@ -69,6 +69,8 @@ services:
     depends_on:
       - api
     ports:
+      # 5173 is the HOST mapping only; inside the compose network Caddy listens on 80,
+      # so the tunnel ingress must point at http://proxy:80, not :5173.
       - "5173:80"  # installable PWA + /api proxy — LAN device-test target
 
   # Vision LLM is an external llama-server for now (spec §7.2). Wired in Phase 4.

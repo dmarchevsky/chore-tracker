@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from tests.helpers import sign_in
 
 pytestmark = pytest.mark.asyncio
 
@@ -10,16 +11,13 @@ async def test_health_ok(client):
     assert r.status_code == 200 and r.json() == {"status": "ok"}
 
 
-async def test_health_llm_is_admin_only(client, admin_user, child_user, totp_now):
+async def test_health_llm_is_admin_only(client, admin_user, child_user):
     assert (await client.get("/api/v1/health/llm")).status_code == 401
 
-    await client.post("/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"})
+    await sign_in(client, "alice@example.com")
     assert (await client.get("/api/v1/health/llm")).status_code == 403
 
-    r = await client.post(
-        "/api/v1/auth/login",
-        json={"username": "parent", "password": "parent-pass", "totp_code": totp_now()},
-    )
+    r = await sign_in(client, "parent@example.com")
     assert r.status_code == 200
     assert (await client.get("/api/v1/health/llm")).status_code == 200
 

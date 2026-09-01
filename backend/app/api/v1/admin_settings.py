@@ -12,7 +12,9 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.deps import AdminUser, DbDep
+from app.auth.passwords import hash_password
 from app.config import get_settings
+from app.schemas.auth import BreakGlassPasswordRequest
 from app.services import audit
 from app.services.llm_config import (
     ensure_settings_row,
@@ -103,3 +105,22 @@ async def list_llm_models(
         return await probe_models(base_url, api_key or get_settings().llm_vision_api_key)
     cfg = await get_llm_config(db)
     return await probe_models(cfg.base_url, cfg.api_key)
+
+
+@router.post("/break-glass-password", status_code=204)
+async def set_break_glass_password(
+    payload: BreakGlassPasswordRequest, db: DbDep, admin: AdminUser
+) -> None:
+    """Set the admin's own local password — the only password write path left (spec §12.1).
+
+    It is the way back in when Cloudflare or Google is unavailable, and it is usable only
+    from the host's loopback port, so it is long-minimum and never handed to a child.
+    """
+    admin.password_hash = hash_password(payload.new_password)
+    await audit.record(
+        db,
+        actor=admin,
+        action="breakglass.password.set",
+        entity_type="user",
+        entity_id=admin.id,
+    )

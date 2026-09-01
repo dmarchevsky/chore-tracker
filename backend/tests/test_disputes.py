@@ -7,8 +7,8 @@ from datetime import UTC, date, datetime, time, timedelta
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
+from tests.helpers import sign_in
 
-from app.auth.passwords import hash_password
 from app.config import get_settings
 from app.models import Chore, ChoreOccurrence, Dispute, DisputeStatus, OccurrenceStatus, User
 from app.models.user import UserRole
@@ -47,21 +47,18 @@ async def occ(db_session, household, child_user) -> ChoreOccurrence:
     return o
 
 
-async def _kid_login(client, username="alice", password="alice-pass"):
-    r = await client.post("/api/v1/auth/login", json={"username": username, "password": password})
+async def _kid_login(client, email="alice@example.com"):
+    r = await sign_in(client, email)
     return {"X-CSRF-Token": r.json()["csrf_token"]}
 
 
-async def _admin_login(client, totp_now):
-    r = await client.post(
-        "/api/v1/auth/login",
-        json={"username": "parent", "password": "parent-pass", "totp_code": totp_now()},
-    )
+async def _admin_login(client):
+    r = await sign_in(client, "parent@example.com")
     return {"X-CSRF-Token": r.json()["csrf_token"]}
 
 
 async def test_dispute_reaches_the_parent_and_the_reply_reaches_the_kid(
-    client, db_session, occ, admin_user, child_user, totp_now
+    client, db_session, occ, admin_user, child_user
 ):
     kh = await _kid_login(client)
     filed = await client.post(
@@ -73,7 +70,7 @@ async def test_dispute_reaches_the_parent_and_the_reply_reaches_the_kid(
     assert filed.json()["status"] == "open"
     assert filed.json()["status_at_filing"] == "rejected"
 
-    ah = await _admin_login(client, totp_now)
+    ah = await _admin_login(client)
     listed = (await client.get("/api/v1/disputes", headers=ah)).json()
     assert [d["id"] for d in listed] == [filed.json()["id"]]
     assert listed[0]["chore_title"] == "Walk the dog"
@@ -114,7 +111,7 @@ async def test_a_kid_cannot_read_another_kids_dispute(client, db_session, occ, h
         username="bob",
         display_name="Bob",
         role=UserRole.child,
-        password_hash=hash_password("bob-pass"),
+        email="bob@example.com",
     )
     db_session.add(bob)
     await db_session.commit()
@@ -122,12 +119,12 @@ async def test_a_kid_cannot_read_another_kids_dispute(client, db_session, occ, h
     kh = await _kid_login(client)
     await client.post(f"/api/v1/occurrences/{occ.id}/dispute", json={"message": "hey"}, headers=kh)
 
-    bh = await _kid_login(client, "bob", "bob-pass")
+    bh = await _kid_login(client, "bob@example.com")
     r = await client.get(f"/api/v1/occurrences/{occ.id}/disputes", headers=bh)
     assert r.status_code == 404
 
 
-async def test_resolving_twice_is_a_conflict(client, db_session, occ, admin_user, totp_now):
+async def test_resolving_twice_is_a_conflict(client, db_session, occ, admin_user):
     kh = await _kid_login(client)
     d = (
         await client.post(
@@ -135,7 +132,7 @@ async def test_resolving_twice_is_a_conflict(client, db_session, occ, admin_user
         )
     ).json()
 
-    ah = await _admin_login(client, totp_now)
+    ah = await _admin_login(client)
     body = {"note": "had a look"}
     assert (
         await client.post(f"/api/v1/disputes/{d['id']}/resolve", json=body, headers=ah)

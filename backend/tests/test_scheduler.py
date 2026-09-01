@@ -32,14 +32,12 @@ async def kids(db_session, household) -> tuple[User, User]:
         username="alice",
         display_name="Alice",
         role=UserRole.child,
-        password_hash="x",
     )
     b = User(
         household_id=household.id,
         username="bea",
         display_name="Bea",
         role=UserRole.child,
-        password_hash="x",
     )
     db_session.add_all([a, b])
     await db_session.commit()

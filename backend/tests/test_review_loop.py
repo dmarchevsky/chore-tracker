@@ -9,6 +9,7 @@ from datetime import UTC, date, datetime, time
 import pytest
 from PIL import Image
 from sqlalchemy import func, select
+from tests.helpers import sign_in
 
 from app.models import Chore, ChoreOccurrence, LedgerEntry, OccurrenceStatus, Submission
 from app.services.ledger import balance_cents
@@ -72,17 +73,12 @@ async def _mk_occ(
 
 
 async def _kid_login(client):
-    r = await client.post(
-        "/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"}
-    )
+    r = await sign_in(client, "alice@example.com")
     return {"X-CSRF-Token": r.json()["csrf_token"]}
 
 
-async def _admin_login(client, totp_now):
-    r = await client.post(
-        "/api/v1/auth/login",
-        json={"username": "parent", "password": "parent-pass", "totp_code": totp_now()},
-    )
+async def _admin_login(client):
+    r = await sign_in(client, "parent@example.com")
     return {"X-CSRF-Token": r.json()["csrf_token"]}
 
 
@@ -104,7 +100,7 @@ async def _ledger_rows(db, occ_id) -> int:
 
 
 async def test_manual_loop_photo_to_approve_credits_once(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     occ = await _mk_occ(db_session, household, child_user, reward=250)
     await db_session.commit()
@@ -117,7 +113,7 @@ async def test_manual_loop_photo_to_approve_credits_once(
     await db_session.refresh(occ)
     assert occ.status == OccurrenceStatus.submitted
 
-    ah = await _admin_login(client, totp_now)
+    ah = await _admin_login(client)
     inbox = (await client.get("/api/v1/occurrences?inbox=true", headers=ah)).json()
     assert str(occ.id) in [o["id"] for o in inbox]
 
@@ -132,14 +128,14 @@ async def test_manual_loop_photo_to_approve_credits_once(
 
 
 async def test_double_approve_does_not_double_pay(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     occ = await _mk_occ(db_session, household, child_user, reward=300)
     await db_session.commit()
     kh = await _kid_login(client)
     await _submit_photo(client, occ.id, kh)
 
-    ah = await _admin_login(client, totp_now)
+    ah = await _admin_login(client)
     body = {"action": "approve", "reason": "ok"}
     a = await client.post(f"/api/v1/occurrences/{occ.id}/decision", json=body, headers=ah)
     b = await client.post(f"/api/v1/occurrences/{occ.id}/decision", json=body, headers=ah)
@@ -149,11 +145,11 @@ async def test_double_approve_does_not_double_pay(
     assert await _ledger_rows(db_session, occ.id) == 1
 
 
-async def test_amount_override(client, db_session, household, admin_user, child_user, totp_now):
+async def test_amount_override(client, db_session, household, admin_user, child_user):
     occ = await _mk_occ(db_session, household, child_user, reward=250)
     await db_session.commit()
     await _submit_photo(client, occ.id, await _kid_login(client))
-    ah = await _admin_login(client, totp_now)
+    ah = await _admin_login(client)
     await client.post(
         f"/api/v1/occurrences/{occ.id}/decision",
         json={"action": "approve", "reason": "half - only did part", "amount_override_cents": 120},
@@ -162,13 +158,11 @@ async def test_amount_override(client, db_session, household, admin_user, child_
     assert await balance_cents(db_session, child_user.id) == 120
 
 
-async def test_reject_applies_penalty(
-    client, db_session, household, admin_user, child_user, totp_now
-):
+async def test_reject_applies_penalty(client, db_session, household, admin_user, child_user):
     occ = await _mk_occ(db_session, household, child_user, reward=200, penalty=100)
     await db_session.commit()
     await _submit_photo(client, occ.id, await _kid_login(client))
-    ah = await _admin_login(client, totp_now)
+    ah = await _admin_login(client)
     r = await client.post(
         f"/api/v1/occurrences/{occ.id}/decision",
         json={"action": "reject", "reason": "still dishes in the sink"},
@@ -179,7 +173,7 @@ async def test_reject_applies_penalty(
 
 
 async def test_auto_accept_credits_immediately(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     occ = await _mk_occ(db_session, household, child_user, mode="auto_accept", reward=150)
     await db_session.commit()
@@ -190,9 +184,7 @@ async def test_auto_accept_credits_immediately(
     assert await balance_cents(db_session, child_user.id) == 150
 
 
-async def test_gallery_upload_rules(
-    client, db_session, household, admin_user, child_user, totp_now
-):
+async def test_gallery_upload_rules(client, db_session, household, admin_user, child_user):
     blocked = await _mk_occ(db_session, household, child_user, allow_gallery=False)
     allowed = await _mk_occ(
         db_session,
@@ -215,7 +207,7 @@ async def test_gallery_upload_rules(
 
 
 async def test_cannot_submit_to_terminal_occurrence(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     occ = await _mk_occ(db_session, household, child_user, st=OccurrenceStatus.missed)
     await db_session.commit()
@@ -224,7 +216,7 @@ async def test_cannot_submit_to_terminal_occurrence(
 
 
 async def test_media_served_only_with_auth_or_signature(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     occ = await _mk_occ(db_session, household, child_user)
     await db_session.commit()
@@ -246,12 +238,12 @@ async def test_media_served_only_with_auth_or_signature(
 
 
 async def test_settlement_locked_blocks_decision(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     occ = await _mk_occ(db_session, household, child_user)
     occ.settlement_locked_at = datetime(2025, 2, 1, tzinfo=UTC)
     await db_session.commit()
-    ah = await _admin_login(client, totp_now)
+    ah = await _admin_login(client)
     r = await client.post(
         f"/api/v1/occurrences/{occ.id}/decision",
         json={"action": "approve", "reason": "too late"},
@@ -261,7 +253,7 @@ async def test_settlement_locked_blocks_decision(
 
 
 async def test_rejection_reason_reaches_the_kid_and_nothing_else_does(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     """A decision the kid can't see the reasoning for is just a number moving
     (spec §6.3 rule 1) — but confidence and flags stay admin-only (spec §11)."""
@@ -271,7 +263,7 @@ async def test_rejection_reason_reaches_the_kid_and_nothing_else_does(
     kh = await _kid_login(client)
     await _submit_photo(client, occ.id, kh)
 
-    ah = await _admin_login(client, totp_now)
+    ah = await _admin_login(client)
     await client.post(
         f"/api/v1/occurrences/{occ.id}/decision",
         json={"action": "reject", "reason": "the sink is still full"},
@@ -284,7 +276,7 @@ async def test_rejection_reason_reaches_the_kid_and_nothing_else_does(
     assert seen[0]["kind"] == "manual"  # so the app can say "from a parent"
     assert "confidence" not in seen[0] and "reasoning" not in seen[0]
 
-    ah = await _admin_login(client, totp_now)  # one cookie jar per client
+    ah = await _admin_login(client)  # one cookie jar per client
     admin_view = (
         await client.get(f"/api/v1/occurrences/{occ.id}/verifications", headers=ah)
     ).json()
@@ -292,7 +284,7 @@ async def test_rejection_reason_reaches_the_kid_and_nothing_else_does(
 
 
 async def test_a_past_decision_can_be_changed_and_the_money_follows(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     """History lets a parent reopen a decided item; corrections are reversing entries,
     never an UPDATE (spec §9)."""
@@ -302,7 +294,7 @@ async def test_a_past_decision_can_be_changed_and_the_money_follows(
     kh = await _kid_login(client)
     await _submit_photo(client, occ.id, kh)
 
-    ah = await _admin_login(client, totp_now)
+    ah = await _admin_login(client)
     await client.post(
         f"/api/v1/occurrences/{occ.id}/decision",
         json={"action": "approve", "reason": "looked fine"},
@@ -323,7 +315,7 @@ async def test_a_past_decision_can_be_changed_and_the_money_follows(
 
 
 async def test_auto_accept_photo_is_deduped_before_it_pays(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     """The anti-cheat scan used to run only in the LLM worker, so an auto_accept chore
     paid out a recycled photo without ever comparing pHashes (spec §6.1 item 2)."""
@@ -361,7 +353,7 @@ async def test_auto_accept_photo_is_deduped_before_it_pays(
 
 
 async def test_photo_location_outside_the_fence_is_held(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     """A photo+location submission has kind == photo, so the old out-of-fence guard —
     which only fired for kind == location — never ran for it (spec §6.2)."""
@@ -396,7 +388,7 @@ async def test_photo_location_outside_the_fence_is_held(
 
 
 async def test_a_two_photo_chore_needs_both_photos(
-    client, db_session, household, admin_user, child_user, totp_now
+    client, db_session, household, admin_user, child_user
 ):
     """photo_count was only an upper bound, so a short submission passed over the API and
     the offline replay queue while the camera sheet refused to send one (spec §6.1 item 6)."""

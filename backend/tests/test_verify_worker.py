@@ -12,6 +12,7 @@ import pytest
 import respx
 from PIL import Image
 from sqlalchemy import func, select
+from tests.helpers import sign_in
 
 from app.models import (
     Chore,
@@ -106,9 +107,7 @@ async def _mk_occ(
 
 
 async def _kid_submit(client, occ_id, *, seed=1):
-    login = await client.post(
-        "/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"}
-    )
+    login = await sign_in(client, "alice@example.com")
     return await client.post(
         f"/api/v1/occurrences/{occ_id}/submissions",
         files=[("files", ("sink.jpg", _textured_jpeg(seed), "image/jpeg"))],

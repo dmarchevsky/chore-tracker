@@ -15,13 +15,15 @@ builds it and serves it behind Caddy on `:5173`. Device acceptance:
 ## Remote access
 
 `just tunnel-up` runs the Cloudflare Tunnel deployment (`docker-compose.tunnel.yml`) — one
-outbound-only ingress, no open ports, admin behind Cloudflare Access. Full setup + the
-security tradeoffs: [docs/remote-access.md](docs/remote-access.md).
+outbound-only ingress, no open ports, and Cloudflare Access (Google) in front of the whole
+app for parent and kids alike. SSH / Postgres / `llama-server` stay LAN-only; there is no
+remote operator path. Full setup + the security tradeoffs:
+[docs/remote-access.md](docs/remote-access.md).
 
 ## Status
 
-**Phase 1 (core skeleton) — done.** Postgres schema + Alembic, FastAPI app, local-account
-auth with TOTP for admins, child-account CRUD, Docker Compose, justfile, seed script, CI.
+**Phases 1–5 done; Phase 6 (hardening & operations) in progress.** See
+[docs/implementation-plan.md](docs/implementation-plan.md) for what is built per phase.
 
 ## Quick start
 
@@ -31,7 +33,7 @@ Requires `docker` + `docker compose`, [`uv`](https://docs.astral.sh/uv/), and
 ```sh
 cp .env.example .env
 just up          # build + start db, api, worker
-just seed        # 1 household, admin "parent", children "alice"/"bea" (creds printed)
+just seed        # 1 household, admin "parent", children "alice"/"bea" (identities printed)
 just test        # pytest against the compose Postgres (exposed on :5432)
 ```
 
@@ -50,8 +52,14 @@ Interactive docs at `/docs` when `ENVIRONMENT=dev`.
 
 ## Auth notes
 
-- Admin accounts require TOTP once enrolled. A freshly-seeded/created admin that has not
-  enrolled may log in with a password alone **only** to reach `/api/v1/auth/totp/enroll`
-  + `/confirm`; after that the code is mandatory.
+- **Sign-in is Google, via Cloudflare Access** (spec §12.1). Cloudflare authenticates the
+  visitor at the edge; `GET /api/v1/auth/me` maps the verified `email` claim to a `users`
+  row and mints the session, so there is no sign-in form. A parent adds a kid by entering
+  their Google address under Kids — and in the Access policy, which is the half that
+  actually lets them through the door.
+- **Break-glass:** one local admin password (`POST /api/v1/auth/login`) for when Cloudflare
+  or Google is unavailable. It is reachable only on the host's own port — the Caddy front
+  door answers 404 for that path, so it never rides the tunnel. Set it from admin Settings.
+- On the LAN stack (`just up`, no `CF_ACCESS_*`), break-glass is the only way in.
 - Mutations require the `X-CSRF-Token` header echoing `csrf_token` from the login / `me`
   response. Session is an HTTP-only cookie (`ck_session`).
