@@ -13,7 +13,8 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Chore, ChoreKind, ChoreStateEvent, User
-from app.services import audit
+from app.services import audit, notifications
+from app.services.scheduler import resolve_assignees
 
 
 class StandingError(ValueError):
@@ -54,6 +55,10 @@ async def set_state(
             return latest
 
     now = now or datetime.now(UTC)
+    # Captured before the mutation: the short-circuit above only returns early once the chore
+    # has a flip history, so a never-flipped chore told on=False still lands here and must not
+    # send a "that's lifted" for something that was never in force.
+    was_on = chore.standing_on
     chore.standing_on = on
     chore.standing_tier_id = tier_id
     chore.standing_since = now if on else None
@@ -78,6 +83,16 @@ async def set_state(
         entity_id=chore.id,
         after={"on": on, "tier_id": tier_id, "note": note},
     )
+
+    if on or was_on:
+        # resolve_assignees ignores the date for fixed/all, the only two modes a standing
+        # chore may use (_check_standing) — it is passed for documentation, not as an input.
+        # It can yield None for a fixed chore with no assignee, which notify() would log as a
+        # junk row.
+        recipients = [uid for uid in resolve_assignees(chore, now.date()) if uid is not None]
+        await notifications.notify_standing_flip(
+            db, chore, on=on, tier=tier, note=note, recipients=recipients
+        )
     return event
 
 

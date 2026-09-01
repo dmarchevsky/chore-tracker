@@ -7,7 +7,14 @@ import uuid as uuidlib
 import pytest
 from sqlalchemy import func, select
 
-from app.models import AuditLog, ChoreOccurrence, ChoreStateEvent
+from app.models import (
+    AuditLog,
+    ChoreOccurrence,
+    ChoreStateEvent,
+    NotificationLog,
+    User,
+    UserRole,
+)
 from app.services.cadence import cadence_dates
 from app.services.scheduler import reconcile
 
@@ -499,3 +506,131 @@ async def test_a_blank_tier_condition_is_rejected_as_a_field_error(
     detail = r.json()["detail"]
     assert isinstance(detail, list)
     assert detail[0]["loc"][-1] == "condition"
+
+
+# --------------------------------------------------------------- notifications
+
+# VAPID is unset in tests, so nothing is actually delivered — assert against the log rows,
+# the same way test_push.py does.
+
+
+async def _logs(db, kind: str | None = None) -> list[NotificationLog]:
+    rows = (await db.execute(select(NotificationLog))).scalars().all()
+    return [r for r in rows if kind is None or r.kind == kind]
+
+
+async def test_turning_it_on_tells_the_kid_what_is_in_force(
+    client, db_session, admin_user, child_user, totp_now
+):
+    h = await _admin_headers(client, totp_now)
+    body = await _mk(client, h, child_user)
+
+    await client.post(
+        f"/api/v1/chores/{body['id']}/state",
+        json={"on": True, "tier_id": 1, "note": "third one this week"},
+        headers=h,
+    )
+
+    (row,) = await _logs(db_session, "standing.on")
+    assert row.user_id == child_user.id
+    assert row.title == "grounded until it's fixed"
+    assert "more than one missing assignment" in row.body
+    assert "third one this week" in row.body
+    assert row.url == "/me"
+    assert row.status in ("skipped", "no_subs")
+
+
+async def test_turning_it_off_tells_the_kid_it_is_lifted(
+    client, db_session, admin_user, child_user, totp_now
+):
+    h = await _admin_headers(client, totp_now)
+    body = await _mk(client, h, child_user)
+    await client.post(
+        f"/api/v1/chores/{body['id']}/state", json={"on": True, "tier_id": 1}, headers=h
+    )
+    await client.post(f"/api/v1/chores/{body['id']}/state", json={"on": False}, headers=h)
+
+    (row,) = await _logs(db_session, "standing.off")
+    assert row.user_id == child_user.id
+    assert "lifted" in row.title.lower()
+    assert row.body == "Missing assignments"
+
+
+async def test_a_repeated_flip_sends_nothing(client, db_session, admin_user, child_user, totp_now):
+    h = await _admin_headers(client, totp_now)
+    body = await _mk(client, h, child_user)
+    for _ in range(2):
+        await client.post(
+            f"/api/v1/chores/{body['id']}/state", json={"on": True, "tier_id": 1}, headers=h
+        )
+
+    assert len(await _logs(db_session, "standing.on")) == 1
+
+
+async def test_turning_off_something_that_was_never_on_sends_nothing(
+    client, db_session, admin_user, child_user, totp_now
+):
+    """The idempotent short-circuit only fires once a flip history exists, so this path
+    reaches the notify call with nothing to announce."""
+    h = await _admin_headers(client, totp_now)
+    body = await _mk(client, h, child_user)
+
+    await client.post(f"/api/v1/chores/{body['id']}/state", json={"on": False}, headers=h)
+
+    assert await _logs(db_session, "standing.off") == []
+
+
+async def test_deactivating_a_live_standing_chore_tells_the_kid(
+    client, db_session, admin_user, child_user, totp_now
+):
+    h = await _admin_headers(client, totp_now)
+    body = await _mk(client, h, child_user)
+    await client.post(
+        f"/api/v1/chores/{body['id']}/state", json={"on": True, "tier_id": 1}, headers=h
+    )
+
+    await client.delete(f"/api/v1/chores/{body['id']}", headers=h)
+
+    assert len(await _logs(db_session, "standing.off")) == 1
+
+
+async def test_every_assignee_of_an_all_mode_chore_is_told(
+    client, db_session, household, admin_user, child_user, totp_now
+):
+    second = User(
+        household_id=household.id,
+        username="kira",
+        display_name="Kira",
+        role=UserRole.child,
+        password_hash="x",
+    )
+    db_session.add(second)
+    await db_session.commit()
+
+    h = await _admin_headers(client, totp_now)
+    body = await _mk(
+        client,
+        h,
+        child_user,
+        assignment_mode="all",
+        fixed_assignee_id=None,
+        assignee_ids=[str(child_user.id), str(second.id)],
+    )
+    await client.post(
+        f"/api/v1/chores/{body['id']}/state", json={"on": True, "tier_id": 1}, headers=h
+    )
+
+    rows = await _logs(db_session, "standing.on")
+    assert {r.user_id for r in rows} == {child_user.id, second.id}
+
+
+async def test_a_flip_never_notifies_a_parent(client, db_session, admin_user, child_user, totp_now):
+    """Whose rule is in force is the assignee's own business (spec §15 Q1), and the parent
+    who flipped it already knows."""
+    h = await _admin_headers(client, totp_now)
+    body = await _mk(client, h, child_user)
+    await client.post(
+        f"/api/v1/chores/{body['id']}/state", json={"on": True, "tier_id": 1}, headers=h
+    )
+
+    assert all(r.user_id != admin_user.id for r in await _logs(db_session))

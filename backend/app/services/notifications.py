@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import uuid
+from collections.abc import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -182,3 +183,40 @@ async def notify_dispute_resolved(db: AsyncSession, dispute, note: str) -> None:
         body=note[:140],
         url=f"/me/chores/{dispute.occurrence_id}",
     )
+
+
+async def notify_standing_flip(
+    db: AsyncSession,
+    chore: Chore,
+    *,
+    on: bool,
+    tier: dict | None,
+    note: str | None,
+    recipients: Sequence[uuid.UUID],
+) -> None:
+    """Tell the kid a standing rule started or ended (spec §4.7).
+
+    A standing chore has no occurrence, so the flip *is* the event. Assignees only: whether a
+    rule is in force is the assignee's own business (spec §15 Q1), and the parent who flipped
+    it already knows.
+
+    ``tier`` is a raw JSONB snapshot rather than a validated model, hence the fallbacks. The
+    url is ``/me`` because there is no standing detail route — that is where StandingBanner
+    renders, so the link lands on the thing the notification is about.
+    """
+    if on:
+        title = ((tier or {}).get("text") or chore.title)[:140]
+        body = " — ".join(x for x in [(tier or {}).get("condition"), note] if x)[:140]
+    else:
+        title = "That's lifted"
+        body = chore.title[:140]
+
+    for user_id in recipients:
+        await notify(
+            db,
+            user_id=user_id,
+            kind=f"standing.{'on' if on else 'off'}",
+            title=title,
+            body=body,
+            url="/me",
+        )
