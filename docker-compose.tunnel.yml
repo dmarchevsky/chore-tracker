@@ -4,7 +4,7 @@
 #
 # Requires Compose v2.24+ for the `!override` tag. Reads these from .env:
 #   CLOUDFLARE_TUNNEL_TOKEN  SESSION_SECRET  PUBLIC_BASE_URL  ALLOWED_HOSTS
-#   CF_ACCESS_TEAM_DOMAIN  CF_ACCESS_AUD
+#   CF_ACCESS_TEAM_DOMAIN  CF_ACCESS_AUD  CF_ACCESS_ISSUER
 #
 # CF_ACCESS_* are what make Google the login (spec §12.1): with them set, every /api/v1 path
 # but /health, /checkin/{token} and the break-glass /auth/login needs a verified Access JWT.
@@ -39,6 +39,7 @@ services:
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:?}
       CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:-}
       CF_ACCESS_AUD: ${CF_ACCESS_AUD:-}
+      CF_ACCESS_ISSUER: ${CF_ACCESS_ISSUER:-}
     command: !override >
       sh -c "alembic upgrade head &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000
