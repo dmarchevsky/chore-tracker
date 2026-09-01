@@ -49,9 +49,16 @@ def _guarded(path: str) -> bool:
 
 
 class CfAccessMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, *, team_domain: str, aud: str) -> None:
+    def __init__(self, app, *, team_domain: str, aud: str, issuer: str = "") -> None:
         super().__init__(app)
-        self._issuer = f"https://{team_domain}"
+        # Normally the issuer is the team domain. It stops being so the moment a Zero Trust
+        # team is renamed: Cloudflare serves login and JWKS from the new name but keeps
+        # putting the ORIGINAL name in `iss`, and the old hostname 404s — so the issuer has
+        # to be settable on its own rather than derived. Comma-separated, because a rename
+        # can also flip it back and accepting both avoids a second outage.
+        self._issuers = [i.strip() for i in issuer.split(",") if i.strip()] or [
+            f"https://{team_domain}"
+        ]
         # One AUD tag per Access application, and the deployment runs more than one (the
         # whole-host app and the stricter admin-scoped app), so this is a list.
         self._aud = [a.strip() for a in aud.split(",") if a.strip()]
@@ -61,13 +68,17 @@ class CfAccessMiddleware(BaseHTTPMiddleware):
 
     def _verify(self, token: str) -> dict[str, Any]:
         key = self._jwks.get_signing_key_from_jwt(token).key
-        return jwt.decode(
+        claims = jwt.decode(
             token,
             key,
             algorithms=["RS256"],
             audience=self._aud,
-            issuer=self._issuer,
+            options={"require": ["iss", "aud", "exp"]},
         )
+        # Checked here rather than via PyJWT's `issuer=` so more than one is accepted.
+        if claims["iss"] not in self._issuers:
+            raise jwt.InvalidIssuerError("Invalid issuer")
+        return claims
 
     def _log_rejection(self, request: Request, token: str, exc: Exception) -> None:
         """Say what the token actually claimed, not just that it was wrong.
@@ -86,7 +97,7 @@ class CfAccessMiddleware(BaseHTTPMiddleware):
                 "error": str(exc),
                 "token_iss": claims.get("iss"),
                 "token_aud": claims.get("aud"),
-                "expected_iss": self._issuer,
+                "expected_iss": self._issuers,
                 "expected_aud": self._aud,
             },
         )

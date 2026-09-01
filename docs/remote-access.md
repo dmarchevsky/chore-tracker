@@ -255,6 +255,28 @@ CF_ACCESS_AUD=<app-A-aud>,<admin-api-aud>
 Then `just tunnel-up` again. With these set the app requires a verified assertion on every
 `/api/v1` path except `/health`, `/checkin/{token}` and the break-glass `/auth/login`.
 
+**If your Zero Trust team has ever been renamed, add `CF_ACCESS_ISSUER`.** Cloudflare serves
+the login page and the JWKS from the *new* team name while still putting the *original* one
+in the token's `iss` claim, and the original hostname 404s — so the issuer cannot be derived
+from the team domain and must be pinned:
+
+```sh
+CF_ACCESS_ISSUER=https://<original-team-name>.cloudflareaccess.com
+```
+
+The symptom is `invalid Cloudflare Access token: Invalid issuer` in the browser. Read the
+value Cloudflare is actually sending straight out of the log — the rejection line prints
+both sides:
+
+```sh
+docker compose logs api | grep cf_access.rejected | tail -1
+# ... "error":"Invalid issuer","token_iss":"https://misty-grass-1e4b.cloudflareaccess.com",
+#     "expected_iss":["https://yourteam.cloudflareaccess.com"] ...
+```
+
+`CF_ACCESS_ISSUER` accepts a comma-separated list, so you can keep both the old and the new
+name accepted and not get caught again if Cloudflare ever switches.
+
 #### 5h. Adding or removing a kid
 
 Two places, both required, in this order:

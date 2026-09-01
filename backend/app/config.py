@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     # (spec §12.1). Comma-separated AUD list — one tag per Access application.
     cf_access_team_domain: str = Field(default="", alias="CF_ACCESS_TEAM_DOMAIN")
     cf_access_aud: str = Field(default="", alias="CF_ACCESS_AUD")
+    # Accepted `iss` values, comma-separated. Defaults to https://{team_domain}, which is
+    # right until the Zero Trust team is renamed: Cloudflare keeps minting tokens under the
+    # ORIGINAL team name while serving login and JWKS from the new one, so the two genuinely
+    # differ and the old hostname 404s. Read the real value off a rejected token — the
+    # cf_access.rejected log line prints it.
+    cf_access_issuer: str = Field(default="", alias="CF_ACCESS_ISSUER")
 
     # --- Database ---------------------------------------------------------------
     database_url: str = Field(

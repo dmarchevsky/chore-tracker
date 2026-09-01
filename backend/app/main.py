@@ -82,6 +82,7 @@ def create_app() -> FastAPI:
             CfAccessMiddleware,
             team_domain=settings.cf_access_team_domain,
             aud=settings.cf_access_aud,
+            issuer=settings.cf_access_issuer,
         )
     if settings.allowed_hosts:
         hosts = [h.strip() for h in settings.allowed_hosts.split(",") if h.strip()]

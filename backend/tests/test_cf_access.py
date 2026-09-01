@@ -171,5 +171,38 @@ async def test_a_rejection_logs_what_the_token_actually_claimed(client, caplog):
     assert r.status_code == 403
     (rec,) = [r for r in caplog.records if getattr(r, "event", "") == "cf_access.rejected"]
     assert rec.token_iss == "https://someone-else.example"
-    assert rec.expected_iss == f"https://{TEAM}"
+    assert rec.expected_iss == [f"https://{TEAM}"]
     assert ADMIN_AUD in rec.expected_aud
+
+
+async def test_a_renamed_team_can_pin_the_issuer_it_actually_mints():
+    """Cloudflare keeps the ORIGINAL team name in `iss` after a rename, while serving JWKS
+    from the new one — so the issuer must be settable apart from the team domain."""
+    old = "https://misty-grass-1e4b.cloudflareaccess.com"
+    app = FastAPI()
+    app.add_middleware(CfAccessMiddleware, team_domain=TEAM, aud=AUD, issuer=old)
+
+    @app.get("/api/v1/occurrences")
+    async def _kid(request: Request) -> dict:
+        return {"email": access_email(request)}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as c:
+        renamed = await c.get(
+            "/api/v1/occurrences", headers={"Cf-Access-Jwt-Assertion": _token(iss=old)}
+        )
+        # The team-domain issuer is no longer accepted once one is pinned explicitly.
+        team = await c.get("/api/v1/occurrences", headers={"Cf-Access-Jwt-Assertion": _token()})
+    assert renamed.status_code == 200
+    assert team.status_code == 403
+
+
+async def test_a_token_with_no_issuer_is_rejected(client):
+    """Dropping PyJWT's `issuer=` must not make `iss` optional."""
+    token = jwt.encode(
+        {"aud": AUD, "exp": int(time.time()) + 300, "email": "op@acme.com"},
+        _KEY,
+        algorithm="RS256",
+    )
+    async with client as c:
+        r = await c.get("/api/v1/occurrences", headers={"Cf-Access-Jwt-Assertion": token})
+    assert r.status_code == 403
