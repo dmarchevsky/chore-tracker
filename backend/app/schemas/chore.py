@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.chore import AssignmentMode, ProofType, VerificationMode
 from app.models.occurrence import OccurrenceStatus
-from app.services.cadence import CadenceError, cadence_dates
+from app.services.cadence import CadenceError, cadence_dates, once_date
 from app.services.rotation import RotationPeriod
 
 _PHOTO_PROOFS = {ProofType.photo, ProofType.photo_location}
@@ -73,6 +73,21 @@ class ChoreBase(BaseModel):
 
         if self.end_date and self.end_date < self.start_date:
             raise ValueError("end_date must be on or after start_date")
+
+        # A one-off carries its date in the cadence, so it can contradict the date bounds.
+        # Both rules below are *static* on purpose: PATCH re-validates the whole merged
+        # definition (api/v1/chores.py), so a rule referencing "today" would make a chore
+        # un-editable the day after it fired — you could no longer fix its title.
+        once = once_date(self.cadence)
+        if once is not None:
+            if once < self.start_date:
+                raise ValueError(
+                    f"once({once}) is before start_date {self.start_date}, so it can never fire"
+                )
+            if self.end_date and once > self.end_date:
+                raise ValueError(
+                    f"once({once}) is after end_date {self.end_date}, so it can never fire"
+                )
 
         if self.auto_fail_threshold > self.auto_pass_threshold:
             raise ValueError("auto_fail_threshold must be <= auto_pass_threshold")

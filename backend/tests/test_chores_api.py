@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -627,3 +627,69 @@ async def test_duplicate_is_admin_only(client, admin_user, child_user, totp_now)
         headers={"X-CSRF-Token": login.json()["csrf_token"]},
     )
     assert r.status_code == 403
+
+
+async def test_preview_returns_a_single_occurrence_for_a_one_off(
+    client, admin_user, child_user, totp_now
+):
+    h = await _admin_headers(client, admin_user, totp_now)
+    on = (datetime.now(UTC).date() + timedelta(days=5)).isoformat()
+
+    r = await client.post(
+        "/api/v1/chores/preview?count=8",
+        json=_fixed_body(child_user, cadence=f"once({on})"),
+        headers=h,
+    )
+    assert r.status_code == 200
+    assert len(r.json()) == 1
+    assert r.json()[0]["due_at"].startswith(on)
+
+
+async def test_patching_a_past_dated_one_off_still_succeeds(
+    client, admin_user, child_user, totp_now
+):
+    """PATCH re-validates the whole merged definition, so a "the date must be in the future"
+    rule would make a spent one-off un-editable — you could not even fix its title. The
+    once() rules are deliberately static; this is the guard on that."""
+    h = await _admin_headers(client, admin_user, totp_now)
+    past = (datetime.now(UTC).date() - timedelta(days=30)).isoformat()
+
+    created = await client.post(
+        "/api/v1/chores",
+        json=_fixed_body(child_user, cadence=f"once({past})", start_date=past),
+        headers=h,
+    )
+    assert created.status_code == 201
+
+    r = await client.patch(
+        f"/api/v1/chores/{created.json()['id']}", json={"title": "Renamed"}, headers=h
+    )
+    assert r.status_code == 200
+    assert r.json()["title"] == "Renamed"
+
+
+async def test_one_off_before_start_date_is_rejected(client, admin_user, child_user, totp_now):
+    h = await _admin_headers(client, admin_user, totp_now)
+    r = await client.post(
+        "/api/v1/chores",
+        json=_fixed_body(child_user, cadence="once(2024-01-01)", start_date="2025-01-01"),
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert "can never fire" in str(r.json())
+
+
+async def test_one_off_after_end_date_is_rejected(client, admin_user, child_user, totp_now):
+    h = await _admin_headers(client, admin_user, totp_now)
+    r = await client.post(
+        "/api/v1/chores",
+        json=_fixed_body(
+            child_user,
+            cadence="once(2030-01-01)",
+            start_date="2025-01-01",
+            end_date="2025-12-31",
+        ),
+        headers=h,
+    )
+    assert r.status_code == 422
+    assert "can never fire" in str(r.json())

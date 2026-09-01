@@ -13,6 +13,7 @@ Supported grammar (case-insensitive, whitespace-insensitive):
     weekly(on=[SAT])             one or more of MON TUE WED THU FRI SAT SUN
     weekly(on=[MON,WED,FRI])
     monthly(day=15)              1..31; clamped to the last day of shorter months
+    once(2026-09-14)             fires on that one date and never again
     custom_rule                  not implemented in v1 (see TODO(decision))
 """
 
@@ -24,7 +25,7 @@ from collections.abc import Iterator
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-__all__ = ["CadenceError", "cadence_dates", "due_datetimes"]
+__all__ = ["CadenceError", "cadence_dates", "due_datetimes", "once_date"]
 
 _WEEKDAY_TOKENS = {
     "MON": 0,
@@ -38,12 +39,32 @@ _WEEKDAY_TOKENS = {
 
 _WEEKLY_RE = re.compile(r"^weekly\(on=\[([A-Za-z,]+)\]\)$")
 _MONTHLY_RE = re.compile(r"^monthly\(day=(\d{1,2})\)$")
+# The date lives *inside* the token on purpose. cadence_dates only ever sees the
+# scheduler's clamped window, never chore.start_date (services/scheduler.py clamps to
+# max(start_date, today)) — so a bare "once" would have to mean "fire on the window
+# start", i.e. a fresh occurrence every single day for a chore with no end_date.
+_ONCE_RE = re.compile(r"^once\((\d{4}-\d{2}-\d{2})\)$")
 
 _UTC = ZoneInfo("UTC")
 
 
 class CadenceError(ValueError):
     """Raised for an unparseable or unsupported cadence string."""
+
+
+def once_date(cadence: str) -> date | None:
+    """The date of a ``once(...)`` cadence, or None for any other cadence.
+
+    Lets callers (the chore schema, the admin form) reason about a one-off without
+    re-implementing the regex.
+    """
+    m = _ONCE_RE.match(re.sub(r"\s+", "", cadence.strip()).lower())
+    if not m:
+        return None
+    try:
+        return date.fromisoformat(m.group(1))
+    except ValueError:
+        return None
 
 
 def _iter_days(start: date, end: date) -> Iterator[date]:
@@ -103,6 +124,14 @@ def cadence_dates(cadence: str, start: date, end: date) -> list[date]:
         if not 1 <= day_n <= 31:
             raise CadenceError("monthly(day=N) needs 1 <= N <= 31")
         return _monthly_dates(day_n, start, end)
+
+    m = _ONCE_RE.match(norm)
+    if m:
+        try:
+            d = date.fromisoformat(m.group(1))
+        except ValueError as exc:
+            raise CadenceError(f"once(...) needs a real date, got {m.group(1)!r}") from exc
+        return [d] if start <= d <= end else []
 
     if norm == "custom_rule":
         # TODO(decision): spec §4.1 lists custom_rule but gives no grammar. Until one is

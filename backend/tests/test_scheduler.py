@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, time, timedelta
 
 import pytest_asyncio
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from app.models import Chore, ChoreOccurrence, OccurrenceStatus, User, UserRole
 from app.services.scheduler import (
@@ -201,3 +201,47 @@ async def test_reconcile_catches_up_after_a_short_sleep(db_session, household):
     # 06-01, 06-02, 06-03 all past due+grace; 06-04 (due 06-04 15:00Z) is not.
     assert report.missed == 3
     assert await _count(db_session, status=OccurrenceStatus.missed) == 3
+
+
+async def test_one_off_generates_exactly_one_occurrence_across_repeated_ticks(
+    db_session, household, kids
+):
+    """The reason once() carries its own date: cadence_dates only ever sees the scheduler's
+    clamped window, so a date-less token would fire on every tick forever."""
+    on = (NOW + timedelta(days=3)).date()
+    db_session.add(_chore(household, cadence=f"once({on.isoformat()})"))
+    await db_session.flush()
+
+    await generate_occurrences(db_session, now=NOW)
+    await generate_occurrences(db_session, now=NOW + timedelta(days=1))
+    await generate_occurrences(db_session, now=NOW + timedelta(days=2))
+
+    assert await _count(db_session) == 1
+
+
+async def test_one_off_stops_generating_once_its_date_has_passed(db_session, household, kids):
+    on = (NOW + timedelta(days=2)).date()
+    db_session.add(_chore(household, cadence=f"once({on.isoformat()})"))
+    await db_session.flush()
+
+    await generate_occurrences(db_session, now=NOW)
+    assert await _count(db_session) == 1
+
+    # Wipe it and tick again from a day after the date — nothing comes back.
+    await db_session.execute(delete(ChoreOccurrence))
+    await generate_occurrences(db_session, now=NOW + timedelta(days=3))
+    assert await _count(db_session) == 0
+
+
+async def test_one_off_goes_missed_after_its_grace_period(db_session, household, kids):
+    """A one-off is an ordinary occurrence once materialised — nothing special downstream."""
+    on = NOW.date()
+    db_session.add(_chore(household, cadence=f"once({on.isoformat()})"))
+    await db_session.flush()
+
+    # due 08:00 local on the day; NOW is 05:00 local, so it starts open, then lapses.
+    await reconcile(db_session, now=NOW)
+    assert await _count(db_session, status=OccurrenceStatus.open) == 1
+
+    await detect_missed(db_session, now=NOW + timedelta(days=1))
+    assert await _count(db_session, status=OccurrenceStatus.missed) == 1

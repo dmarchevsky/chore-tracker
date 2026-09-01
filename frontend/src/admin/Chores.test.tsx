@@ -293,4 +293,28 @@ describe('admin Chores', () => {
     // the copy lands in the editor so the parent can vary the one field they wanted
     expect(await screen.findByDisplayValue('Empty the sink (copy)')).toBeInTheDocument();
   });
+
+  it('turns a chore into a one-off and PATCHes a once(...) cadence', async () => {
+    const calls = setup();
+
+    fireEvent.click(await screen.findByText('Empty the sink'));
+    fireEvent.click(screen.getByLabelText('One-off — a single date'));
+    fireEvent.change(screen.getByLabelText(/^Date/), { target: { value: '2026-09-14' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    const body = calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>;
+    expect(body.cadence).toBe('once(2026-09-14)');
+  });
+
+  it('warns when the one-off date has already passed', async () => {
+    setup([{ ...CHORE, cadence: 'once(2020-01-01)' }]);
+
+    fireEvent.click(await screen.findByText('Empty the sink'));
+
+    // the cadence text box is replaced by a date picker, already showing the stored date
+    expect(screen.getByLabelText(/^Date/)).toHaveValue('2020-01-01');
+    expect(screen.queryByLabelText('Cadence')).not.toBeInTheDocument();
+    expect(screen.getByText(/already passed/i)).toBeInTheDocument();
+  });
 });

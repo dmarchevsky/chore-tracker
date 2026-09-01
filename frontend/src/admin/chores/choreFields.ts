@@ -95,3 +95,15 @@ export function opensAt(dueTime: string, offsetSecs: number): string {
   if (days === 1) return `opens ${clock} the day before`;
   return `opens ${clock}, ${days} days before`;
 }
+
+// A one-off carries its date inside the cadence: once(YYYY-MM-DD). Keeping the date in the
+// token (rather than reusing start_date) means the scheduler's window clamping can't turn it
+// into a daily chore, and it stays reschedulable — cadence is in EDITABLE, start_date is not.
+const ONCE_RE = /^once\((\d{4}-\d{2}-\d{2})\)$/i;
+
+/** The YYYY-MM-DD of a one-off cadence, or null if this cadence is a recurring one. */
+export function onceDate(cadence: string): string | null {
+  return ONCE_RE.exec(cadence.trim())?.[1] ?? null;
+}
+
+export const ONCE_TODAY = () => `once(${new Date().toISOString().slice(0, 10)})`;

@@ -2,6 +2,7 @@ import { useChores } from '../api/hooks';
 import type { Chore } from '../api/types';
 import { Card, Spinner } from '../shared/ui';
 import { money } from '../shared/format';
+import { onceDate } from '../admin/chores/choreFields';
 
 function proofSummary(c: Chore): string {
   if (c.proof_type === 'photo')
@@ -37,6 +38,11 @@ export function Rules() {
             )}
           </p>
           <p className="mt-1 text-xs text-slate-500">{proofSummary(c)}</p>
+          {onceDate(c.cadence) && (
+            <p className="mt-1 text-xs text-slate-500">
+              Just once, on {new Date(`${onceDate(c.cadence)}T00:00`).toLocaleDateString()}
+            </p>
+          )}
         </Card>
       ))}
     </div>

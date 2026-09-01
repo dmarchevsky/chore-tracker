@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.services.cadence import CadenceError, cadence_dates, due_datetimes
+from app.services.cadence import CadenceError, cadence_dates, due_datetimes, once_date
 
 LA = ZoneInfo("America/Los_Angeles")
 UTC = ZoneInfo("UTC")
@@ -100,3 +100,45 @@ def test_due_datetimes_empty_for_no_matches():
     assert (
         due_datetimes("weekly(on=[SUN])", date(2025, 3, 3), date(2025, 3, 7), time(8, 0), LA) == []
     )
+
+
+def test_once_fires_only_on_its_date():
+    assert cadence_dates("once(2026-09-14)", date(2026, 9, 1), date(2026, 9, 30)) == [
+        date(2026, 9, 14)
+    ]
+    # inclusive at both ends of a single-day window
+    assert cadence_dates("once(2026-09-14)", date(2026, 9, 14), date(2026, 9, 14)) == [
+        date(2026, 9, 14)
+    ]
+
+
+def test_once_outside_the_window_returns_nothing():
+    """The scheduler clamps its window to [max(start_date, today), horizon]. Once the date
+    has passed, the window never contains it again, so the chore stops generating."""
+    assert cadence_dates("once(2026-09-14)", date(2026, 10, 1), date(2026, 10, 30)) == []
+    assert cadence_dates("once(2026-09-14)", date(2026, 8, 1), date(2026, 8, 30)) == []
+
+
+def test_once_rejects_a_date_that_does_not_exist():
+    with pytest.raises(CadenceError):
+        cadence_dates("once(2026-02-30)", date(2026, 1, 1), date(2026, 12, 31))
+
+
+def test_once_is_whitespace_and_case_tolerant():
+    assert cadence_dates("  ONCE( 2026-09-14 )  ", date(2026, 9, 1), date(2026, 9, 30)) == [
+        date(2026, 9, 14)
+    ]
+
+
+def test_once_date_extracts_the_date_only_for_a_one_off():
+    assert once_date("once(2026-09-14)") == date(2026, 9, 14)
+    assert once_date("ONCE( 2026-09-14 )") == date(2026, 9, 14)
+    assert once_date("daily") is None
+    assert once_date("weekly(on=[SAT])") is None
+    assert once_date("once(2026-02-30)") is None  # malformed: not a one-off we can act on
+
+
+def test_once_carries_the_due_time_like_any_other_cadence():
+    got = due_datetimes("once(2026-09-14)", date(2026, 9, 1), date(2026, 9, 30), time(8, 0), LA)
+    assert len(got) == 1
+    assert got[0].astimezone(LA).hour == 8

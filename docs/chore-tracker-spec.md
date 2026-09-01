@@ -106,7 +106,7 @@ Admin MUST be able to define a chore with:
 | `title`, `description` | Description is also shown to the kid. |
 | `assignment_mode` | `fixed` (one kid), `rotating` (alternate on a period), `anyone` (first to complete claims it), `all` (each kid gets own occurrence). |
 | `rotation_period` | For `rotating`: `weekly` / `biweekly` / `daily`. Plus `rotation_anchor_date` and ordered `assignee_ids` — this is what makes "every other week" deterministic. |
-| `cadence` | `daily`, `weekdays`, `weekends`, `weekly(on=[SAT])`, `monthly(day=N)`, `custom_rule`. |
+| `cadence` | `daily`, `weekdays`, `weekends`, `weekly(on=[SAT])`, `monthly(day=N)`, `once(YYYY-MM-DD)`, `custom_rule`. `[D]` A one-off carries its date **inside the token**, not in `start_date`: occurrence generation only ever passes the cadence its clamped `[max(start_date, today), horizon]` window (§8.1), so a date-less `once` would fire on every tick forever for a chore with no `end_date`. Keeping it in the token also leaves a one-off reschedulable — `cadence` is patchable, `start_date` is not. |
 | `window_opens` | Relative to due time, e.g. `-12h` — kid can't submit tomorrow's kitchen photo at 3pm today. |
 | `due_time` | Local wall-clock time, e.g. `08:00`. Timezone is household-level. |
 | `grace_period` | e.g. `15m`. Late-but-within-grace = pass with `was_late` flag (optionally reduced payout). |
