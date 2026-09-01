@@ -149,6 +149,14 @@ export function useUpdateChore() {
   });
 }
 
+export function useDuplicateChore() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<Chore>(`/chores/${id}/duplicate`),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['chores', 'all'] }),
+  });
+}
+
 export function useDeactivateChore() {
   const qc = useQueryClient();
   return useMutation({

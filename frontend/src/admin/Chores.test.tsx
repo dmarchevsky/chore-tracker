@@ -57,6 +57,10 @@ function setup(chores: unknown[] = [CHORE]) {
     if (method === 'DELETE') return Promise.resolve(json(null, 204));
     if (url.includes('/children'))
       return Promise.resolve(json([{ id: 'k1', display_name: 'Alice', is_active: true }]));
+    if (method === 'POST' && url.includes('/duplicate'))
+      return Promise.resolve(
+        json({ ...CHORE, id: 'c2', title: 'Empty the sink (copy)', active: false }, 201),
+      );
     if (url.includes('/chores')) return Promise.resolve(json(chores));
     return Promise.resolve(json([]));
   });
@@ -274,5 +278,19 @@ describe('admin Chores', () => {
     fireEvent.click(screen.getByRole('button', { name: /deactivate/i }));
     await waitFor(() => expect(calls.some((c) => c.method === 'DELETE')).toBe(true));
     expect(calls.find((c) => c.method === 'DELETE')!.url).toContain('/chores/c1');
+  });
+
+  it('duplicates a chore and opens the copy for editing', async () => {
+    const calls = setup();
+
+    fireEvent.click(await screen.findByLabelText('Duplicate Empty the sink'));
+
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/chores/c1/duplicate'))).toBe(
+        true,
+      ),
+    );
+    // the copy lands in the editor so the parent can vary the one field they wanted
+    expect(await screen.findByDisplayValue('Empty the sink (copy)')).toBeInTheDocument();
   });
 });

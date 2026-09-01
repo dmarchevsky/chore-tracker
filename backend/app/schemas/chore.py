@@ -114,6 +114,17 @@ class ChoreCreate(ChoreBase):
     pass
 
 
+class ChoreDuplicate(BaseModel):
+    """Body for ``POST /chores/{id}/duplicate`` (spec §4.1: admin MUST be able to clone).
+
+    Only the copy's title is settable; every other field is taken from the source.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+
+
 class ChoreUpdate(BaseModel):
     """Partial update. Applied per ``?apply=forward|future_generated`` (spec §4.1, §10)."""
 

@@ -1,5 +1,11 @@
 import { useState } from 'react';
-import { useAdminChores, useChildren, useDeactivateChore, useUpdateChore } from './api';
+import {
+  useAdminChores,
+  useChildren,
+  useDeactivateChore,
+  useDuplicateChore,
+  useUpdateChore,
+} from './api';
 import { api } from '../api/client';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Chore } from '../api/types';
@@ -108,6 +114,7 @@ type FormState = { mode: 'create' } | { mode: 'edit'; chore: Chore };
 
 export function Chores() {
   const chores = useAdminChores();
+  const duplicate = useDuplicateChore();
   const [form, setForm] = useState<FormState | null>(null);
 
   if (chores.isLoading) return <Spinner />;
@@ -128,21 +135,38 @@ export function Chores() {
               form?.mode === 'edit' && form.chore.id === c.id ? 'ring-1 ring-sky-500' : ''
             }`}
           >
-            <button
-              type="button"
-              className="w-full text-left"
-              onClick={() => setForm({ mode: 'edit', chore: c })}
-            >
-              <p className="font-semibold">
-                {c.title}
-                {!c.active && <span className="ml-2 text-xs text-slate-500">(inactive)</span>}
-              </p>
-              <p className="text-xs text-slate-400">
-                {c.proof_type} · {c.verification_mode} · {c.assignment_mode} ·{' '}
-                {money(c.reward_cents)}
-                {c.penalty_cents > 0 && ` / -${money(c.penalty_cents)}`}
-              </p>
-            </button>
+            {/* The Duplicate button is a *sibling* of the open-editor button, never nested
+                inside it — nesting buttons is invalid HTML and swallows the inner click. */}
+            <div className="flex items-start gap-2">
+              <button
+                type="button"
+                className="flex-1 text-left"
+                onClick={() => setForm({ mode: 'edit', chore: c })}
+              >
+                <p className="font-semibold">
+                  {c.title}
+                  {!c.active && <span className="ml-2 text-xs text-slate-500">(inactive)</span>}
+                </p>
+                <p className="text-xs text-slate-400">
+                  {c.proof_type} · {c.verification_mode} · {c.assignment_mode} ·{' '}
+                  {money(c.reward_cents)}
+                  {c.penalty_cents > 0 && ` / -${money(c.penalty_cents)}`}
+                </p>
+              </button>
+              <Button
+                variant="ghost"
+                className="min-h-0 shrink-0 px-2 py-1 text-xs"
+                aria-label={`Duplicate ${c.title}`}
+                disabled={duplicate.isPending}
+                onClick={() =>
+                  duplicate.mutate(c.id, {
+                    onSuccess: (copy) => setForm({ mode: 'edit', chore: copy }),
+                  })
+                }
+              >
+                Duplicate
+              </Button>
+            </div>
           </Card>
         ))}
       </div>

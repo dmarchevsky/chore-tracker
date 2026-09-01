@@ -19,7 +19,14 @@ from sqlalchemy import select
 
 from app.auth.deps import AdminUser, CurrentUser, DbDep
 from app.models import Chore, ChoreOccurrence, Household, OccurrenceStatus, User, UserRole
-from app.schemas.chore import ChoreBase, ChoreCreate, ChoreOut, ChoreUpdate, OccurrencePreviewItem
+from app.schemas.chore import (
+    ChoreBase,
+    ChoreCreate,
+    ChoreDuplicate,
+    ChoreOut,
+    ChoreUpdate,
+    OccurrencePreviewItem,
+)
 from app.services import audit
 from app.services.cadence import due_datetimes
 from app.services.scheduler import generate_occurrences, resolve_assignees
@@ -163,6 +170,47 @@ async def update_chore(
         entity_id=chore.id,
         before=_json(before),
         after=_json(data) | {"dropped_future": dropped},
+    )
+    await db.refresh(chore)
+    return chore
+
+
+@router.post("/{chore_id}/duplicate", response_model=ChoreOut, status_code=status.HTTP_201_CREATED)
+async def duplicate_chore(
+    chore_id: uuid.UUID, db: DbDep, admin: AdminUser, payload: ChoreDuplicate | None = None
+) -> Chore:
+    """Clone a definition so a parent can vary one field instead of retyping it (spec §4.1).
+
+    The copy starts **inactive**: ``create_chore`` materialises occurrences immediately, and a
+    duplicate made in order to be edited must not push live work into a kid's list first. The
+    parent activates it with the existing Reactivate action once the edit is done.
+    """
+    src = await db.get(Chore, chore_id)
+    if src is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "chore not found")
+
+    data = {k: getattr(src, k) for k in ChoreBase.model_fields}
+    # Trim the *base* title, not the result, so the suffix always survives the 160-char cap.
+    data["title"] = (payload.title if payload else None) or f"{src.title[:153]} (copy)"
+    data["active"] = False
+    try:
+        # Re-validate: a row that predates a newer invariant fails loudly here rather than
+        # on the parent's first save of the copy.
+        validated = ChoreCreate.model_validate(data)
+    except ValidationError as exc:
+        raise HTTPException(422, f"invalid chore duplicate: {exc.errors()}") from exc
+
+    chore = Chore(household_id=src.household_id, **_dump(validated))
+    db.add(chore)
+    await db.flush()
+    # Deliberately no generate_occurrences() — an inactive chore materialises nothing.
+    await audit.record(
+        db,
+        actor=admin,
+        action="chore.duplicate",
+        entity_type="chore",
+        entity_id=chore.id,
+        after={"source_chore_id": str(src.id), "title": chore.title},
     )
     await db.refresh(chore)
     return chore

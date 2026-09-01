@@ -10,6 +10,7 @@ import pytest_asyncio
 from sqlalchemy import func, select
 
 from app.models import AuditLog, ChoreOccurrence, OccurrenceStatus, User, UserRole
+from app.schemas.chore import ChoreBase
 from app.services.scheduler import generate_occurrences
 
 pytestmark = pytest.mark.asyncio
@@ -508,3 +509,121 @@ async def test_geofence_is_creatable_and_editable(
     cleared = await client.patch(f"/api/v1/chores/{chore_id}", json={"geofence": None}, headers=h)
     assert cleared.status_code == 422
     assert "geofence" in cleared.text
+
+
+async def test_duplicate_copies_every_definition_field(
+    client, admin_user, child_user, totp_now, db_session
+):
+    """Spec §4.1: admin MUST be able to clone a chore. The copy has to carry the fields the
+    admin form never renders (grace_period_s, end_date, late_multiplier) — dropping them is
+    exactly the bug a client-side "prefill the create form" clone would have."""
+    h = await _admin_headers(client, admin_user, totp_now)
+    src = (
+        await client.post(
+            "/api/v1/chores",
+            json=_fixed_body(
+                child_user,
+                grace_period_s=2700,
+                end_date="2030-12-31",
+                late_multiplier=0.5,
+                window_open_offset_s=-7200,
+                photo_prompts=["sink close-up"],
+                description="under the sink too",
+            ),
+            headers=h,
+        )
+    ).json()
+
+    r = await client.post(f"/api/v1/chores/{src['id']}/duplicate", headers=h)
+    assert r.status_code == 201
+    copy = r.json()
+
+    assert copy["id"] != src["id"]
+    carried = set(ChoreBase.model_fields) - {"title", "active"}
+    assert {k: copy[k] for k in carried} == {k: src[k] for k in carried}
+
+
+async def test_duplicate_starts_inactive_with_no_occurrences(
+    client, admin_user, child_user, totp_now, db_session
+):
+    """A copy made in order to be edited must not push live work into a kid's list."""
+    h = await _admin_headers(client, admin_user, totp_now)
+    src = (await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)).json()
+
+    copy = (await client.post(f"/api/v1/chores/{src['id']}/duplicate", headers=h)).json()
+    assert copy["active"] is False
+
+    await generate_occurrences(db_session)
+    n = await db_session.scalar(
+        select(func.count())
+        .select_from(ChoreOccurrence)
+        .where(ChoreOccurrence.chore_id == uuid.UUID(copy["id"]))
+    )
+    assert n == 0
+
+
+async def test_duplicate_titles_the_copy(client, admin_user, child_user, totp_now):
+    h = await _admin_headers(client, admin_user, totp_now)
+    src = (await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)).json()
+
+    default = (await client.post(f"/api/v1/chores/{src['id']}/duplicate", headers=h)).json()
+    assert default["title"] == "Dishes (copy)"
+
+    named = (
+        await client.post(
+            f"/api/v1/chores/{src['id']}/duplicate", json={"title": "Dishes v2"}, headers=h
+        )
+    ).json()
+    assert named["title"] == "Dishes v2"
+
+
+async def test_duplicate_keeps_a_long_title_within_the_column(
+    client, admin_user, child_user, totp_now
+):
+    """title is String(160); the suffix must survive the cap, not be sliced off it."""
+    h = await _admin_headers(client, admin_user, totp_now)
+    src = (
+        await client.post(
+            "/api/v1/chores", json=_fixed_body(child_user, title="D" * 160), headers=h
+        )
+    ).json()
+
+    copy = (await client.post(f"/api/v1/chores/{src['id']}/duplicate", headers=h)).json()
+    assert len(copy["title"]) <= 160
+    assert copy["title"].endswith(" (copy)")
+
+
+async def test_duplicate_writes_an_audit_row(client, admin_user, child_user, totp_now, db_session):
+    h = await _admin_headers(client, admin_user, totp_now)
+    src = (await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)).json()
+    copy = (await client.post(f"/api/v1/chores/{src['id']}/duplicate", headers=h)).json()
+
+    row = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.action == "chore.duplicate", AuditLog.entity_id == copy["id"]
+            )
+        )
+    ).scalar_one()
+    assert row.after["source_chore_id"] == src["id"]
+    assert row.actor_user_id == admin_user.id
+
+
+async def test_duplicate_404_for_unknown_chore(client, admin_user, totp_now):
+    h = await _admin_headers(client, admin_user, totp_now)
+    r = await client.post(f"/api/v1/chores/{uuid.uuid4()}/duplicate", headers=h)
+    assert r.status_code == 404
+
+
+async def test_duplicate_is_admin_only(client, admin_user, child_user, totp_now):
+    h = await _admin_headers(client, admin_user, totp_now)
+    src = (await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)).json()
+
+    login = await client.post(
+        "/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"}
+    )
+    r = await client.post(
+        f"/api/v1/chores/{src['id']}/duplicate",
+        headers={"X-CSRF-Token": login.json()["csrf_token"]},
+    )
+    assert r.status_code == 403
