@@ -50,8 +50,6 @@ def _checklist(chore: Chore) -> tuple[list[tuple[int, str]], set[int]]:
     """``(id, question)`` pairs plus the ids that must pass. The ids travel all the way to
     the model and back, so a checklist with gaps (a parent deleted a row) still lines up."""
     items = chore.verification_checklist or []
-    if not items and chore.verification_rule:
-        items = [{"id": 1, "text": chore.verification_rule, "required": True}]
     checks = [(it["id"], it["text"]) for it in items]
     required = {it["id"] for it in items if it.get("required", True)}
     return checks, required

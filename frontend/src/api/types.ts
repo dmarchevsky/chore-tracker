@@ -75,7 +75,6 @@ export interface Chore {
   photo_prompts: string[];
   allow_gallery_upload: boolean;
   verification_mode: string;
-  verification_rule: string | null;
   verification_checklist: { id: number; text: string; required: boolean }[] | null;
   outcome_tiers: OutcomeTier[] | null;
   reward_cents: number;

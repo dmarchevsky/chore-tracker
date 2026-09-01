@@ -70,8 +70,7 @@ async def _mk_occ(
     mode="llm_auto",
     reward=200,
     penalty=0,
-    rule="The sink is empty.",
-    checklist=None,
+    checklist=({"id": 1, "text": "Is the sink empty?", "required": True},),
 ) -> ChoreOccurrence:
     chore = Chore(
         household_id=household.id,
@@ -85,8 +84,7 @@ async def _mk_occ(
         photo_count=1,
         photo_prompts=["sink"],
         verification_mode=mode,
-        verification_rule=rule,
-        verification_checklist=checklist,
+        verification_checklist=list(checklist) if checklist else None,
         reward_cents=reward,
         penalty_cents=penalty,
     )
@@ -283,7 +281,6 @@ async def test_sparse_checklist_ids_still_decide_the_verdict(
         child_user,
         reward=200,
         penalty=100,
-        rule=None,
         checklist=[
             {"id": 1, "text": "Is the sink empty?", "required": True},
             {"id": 3, "text": "Is the counter clear?", "required": True},

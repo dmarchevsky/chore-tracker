@@ -113,9 +113,6 @@ async def _seed_chores(db, household_id, alice: User, bea: User) -> None:
                 photo_count=2,
                 photo_prompts=["sink close-up", "wide shot of the counters"],
                 verification_mode="llm_auto",
-                verification_rule=(
-                    "The sink basin is empty and the counters are clear of dirty dishes."
-                ),
                 verification_checklist=[
                     {
                         "id": 1,
@@ -148,7 +145,14 @@ async def _seed_chores(db, household_id, alice: User, bea: User) -> None:
                 photo_count=1,
                 photo_prompts=["wide shot of the whole room"],
                 verification_mode="llm_assist",
-                verification_rule="The floor is clear, the bed is made, and clothes are put away.",
+                verification_checklist=[
+                    {
+                        "id": 1,
+                        "text": "Is the floor clear of clothes and clutter?",
+                        "required": True,
+                    },
+                    {"id": 2, "text": "Is the bed made?", "required": True},
+                ],
                 reward_cents=300,
             ),
             Chore(

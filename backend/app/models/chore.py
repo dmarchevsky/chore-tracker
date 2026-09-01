@@ -101,7 +101,6 @@ class Chore(TimestampMixin, Base):
 
     # --- Verification ------------------------------------------------------
     verification_mode: Mapped[VerificationMode] = mapped_column(String(16))
-    verification_rule: Mapped[str | None] = mapped_column(Text, default=None)
     verification_checklist: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, default=None)
     auto_pass_threshold: Mapped[float] = mapped_column(Numeric(3, 2), default=0.85)
     auto_fail_threshold: Mapped[float] = mapped_column(Numeric(3, 2), default=0.35)

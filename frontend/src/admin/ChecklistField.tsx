@@ -32,6 +32,11 @@ export function ChecklistField({ value, onChange }: Props) {
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-slate-800 p-3">
       <span className="text-sm font-semibold text-slate-300">Checks the AI answers</span>
+      <p className="text-xs text-slate-500">
+        One yes/no question per line — this is the only thing the model is asked. Each gets its own
+        answer, confidence and evidence, so several small checks beat one broad one. With no checks
+        here, every photo comes to you for review.
+      </p>
       {items.length === 0 && (
         <p className="text-xs text-slate-500">
           None yet — the rule above is used as a single check. Atomic yes/no questions beat one

@@ -99,7 +99,6 @@ class ChoreBase(BaseModel):
     geofence: GeofenceSpec | None = None
 
     verification_mode: VerificationMode
-    verification_rule: str | None = None
     verification_checklist: list[ChecklistItem] | None = None
     auto_pass_threshold: float = Field(default=0.85, ge=0, le=1)
     auto_fail_threshold: float = Field(default=0.35, ge=0, le=1)
@@ -210,10 +209,9 @@ class ChoreBase(BaseModel):
                     "a chore with outcome tiers must use verification_mode=manual — "
                     "a tier is chosen by a person"
                 )
-            if self.verification_rule or self.verification_checklist:
+            if self.verification_checklist:
                 raise ValueError(
-                    "a tiered chore has no LLM step, so it cannot carry a "
-                    "verification_rule or verification_checklist"
+                    "a tiered chore has no LLM step, so it cannot carry a verification_checklist"
                 )
             if self.reward_cents or self.penalty_cents or self.late_multiplier != 1.0:
                 raise ValueError(
@@ -295,7 +293,6 @@ class ChoreUpdate(BaseModel):
     allow_gallery_upload: bool | None = None
     geofence: GeofenceSpec | None = None
     verification_mode: VerificationMode | None = None
-    verification_rule: str | None = None
     verification_checklist: list[ChecklistItem] | None = None
     auto_pass_threshold: float | None = Field(default=None, ge=0, le=1)
     auto_fail_threshold: float | None = Field(default=None, ge=0, le=1)

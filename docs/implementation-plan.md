@@ -261,7 +261,7 @@ Original work items (for reference):
    missing EXIF (`NO_EXIF`), screen-aspect + no camera make/model (`SCREENSHOT_SUSPECTED`),
    gallery-upload source (`GALLERY_UPLOAD`). Any flag → force `NEEDS_REVIEW`.
 4. `app/services/verification/prompts.py` (shared with Phase 0) + `build_prompt(chore, photo)`
-   from `verification_checklist` (fallback: single `verification_rule`).
+   from `verification_checklist` (the only input; `verification_rule` was removed — spec §4.1).
 5. `app/services/verification/llm.py` — `httpx` POST to `LLM_VISION_BASE_URL` with base64
    image(s), `response_format` json_schema (§7.2), `temperature 0.1`, `max_tokens 700`,
    `LLM_TIMEOUT_S`. Parse + validate; on failure **one** repair-prompt retry.

@@ -140,7 +140,10 @@ async def test_tiered_chore_rejects_an_llm_rule_or_checklist(
     h = await _admin_headers(client, totp_now)
     r = await client.post(
         "/api/v1/chores",
-        json=_tiered_body(child_user, verification_rule="looks tidy"),
+        json=_tiered_body(
+            child_user,
+            verification_checklist=[{"id": 1, "text": "looks tidy?", "required": True}],
+        ),
         headers=h,
     )
     assert r.status_code == 422
@@ -211,7 +214,6 @@ async def test_an_untiered_chore_is_completely_unaffected(client, admin_user, ch
             "start_date": "2025-01-01",
             "proof_type": "photo",
             "verification_mode": "llm_auto",
-            "verification_rule": "sink is empty",
             "reward_cents": 200,
             "penalty_cents": 100,
         },

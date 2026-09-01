@@ -139,10 +139,9 @@ export function useChoreForm(state: FormState, onDone: () => void) {
     if (!PHOTO_PROOFS.has(String(form.proof_type))) {
       out.photo_prompts = [];
       out.allow_gallery_upload = false;
-      // Nothing reads a rule or a checklist without a photo to look at, and the form hides
-      // both — so don't carry stale text over from a proof_type the parent switched away
-      // from. Same for the mode: only manual / auto_accept are reachable here.
-      out.verification_rule = null;
+      // Nothing reads the checklist without a photo to look at, and the form hides it — so
+      // don't carry stale checks over from a proof_type the parent switched away from.
+      // Same for the mode: only manual / auto_accept are reachable here.
       out.verification_checklist = null;
       if (LLM_MODES.has(String(out.verification_mode))) out.verification_mode = 'manual';
     }
@@ -150,7 +149,6 @@ export function useChoreForm(state: FormState, onDone: () => void) {
       // A tier is chosen by a person, and its money is the tier's — the backend rejects
       // an LLM mode, a rule/checklist, or a non-zero reward on a tiered chore.
       out.verification_mode = 'manual';
-      out.verification_rule = null;
       out.verification_checklist = null;
       out.reward_cents = 0;
       out.penalty_cents = 0;

@@ -118,7 +118,7 @@ Admin MUST be able to define a chore with:
 | `proof_type` | `photo` (1..n photos), `location`, `photo+location`, `acknowledgement`, `none` (parent-verified only). |
 | `photo_count` / `photo_prompts` | e.g. `["kitchen sink close-up", "wide shot of counters"]` — the kid sees these as labeled capture slots. Two labeled photos verify far better than one vague one. |
 | `verification_mode` | `llm_auto`, `llm_assist` (LLM suggests, parent confirms all), `manual`, `auto_accept`. |
-| `verification_rule` | Natural-language criteria fed to the VLM, e.g. *"The sink is empty — no dishes, cups, pans or utensils in the basin. Counters are clear of dirty dishes."* |
+| ~~`verification_rule`~~ | `[D]` **REMOVED.** A free-text rule was never sent to the model as itself: `worker/verify.py` only used it as a fallback when the checklist was empty, wrapping it in a single required check, and ignored it entirely once any check existed — so a parent who wrote both silently lost the rule. The checklist is now the only input (§7.3, and "checklists beat vibes" in §6.3). Reinstating it means a migration, a `build_task_prompt` argument, and a decision about what it means alongside a checklist. |
 | `verification_checklist` | Optional array of atomic boolean checks. The model answers each; the verdict is derived. Much more reliable than one fuzzy prompt (see §7.3). |
 | `auto_pass_threshold` / `auto_fail_threshold` | Confidence bands. Between them → `NEEDS_REVIEW`. Defaults 0.85 / 0.35. |
 | `geofence` | For location proof: lat, lon, radius_m, plus `arrive_before` time. |
@@ -190,7 +190,7 @@ free text assessed by a person — there is no condition language to evaluate.
   tier would ever be picked). A tier is chosen by a person.
 - `[D]` **Never mixed with the classic channel.** A tiered chore's `reward_amount`,
   `penalty_amount` and `late_multiplier` MUST be 0/0/1.0, and it carries no
-  `verification_rule` or `verification_checklist`. Enforced at validation, so "tiers are an
+  `verification_checklist`. Enforced at validation, so "tiers are an
   additional mechanism" is a rule rather than a convention.
 - `[D]` **A tier's `amount_cents` is signed** (negative = penalty), unlike the unsigned
   `reward_amount`/`penalty_amount` — one list carries both, and the sign is what routes the
@@ -316,7 +316,7 @@ Expect it to be over-lenient on cluttered-but-not-dirty rooms and to hallucinate
 1. **The model is an assistant, not a judge.** Its output is a *recommendation with confidence*. Parent override is always one tap away, and every kid-facing message says the parent has the final say. Do not build a system where a child's allowance is decided solely by a 30B model's opinion of a photograph.
 2. **Confidence banding, not thresholding.** Above `auto_pass_threshold` → pass. Below `auto_fail_threshold` → fail. In between → `NEEDS_REVIEW`. Any anti-cheat flag → `NEEDS_REVIEW` regardless of confidence.
 3. **Fail-open on infrastructure errors.** If the LLM endpoint is down, times out, or returns unparseable output after retries, the occurrence goes to `NEEDS_REVIEW` with `verification_error`, never to `VERIFIED_FAIL`. The kid must never lose money because llama.cpp OOMed.
-4. **Checklists beat vibes.** Decompose `verification_rule` into atomic yes/no questions. "Are there dishes in the sink basin?" is answerable; "is the kitchen clean?" is not. Verdict = all required checks pass. Confidence = min of per-check confidences.
+4. **Checklists beat vibes.** Decompose the chore's criteria into atomic yes/no questions. "Are there dishes in the sink basin?" is answerable; "is the kitchen clean?" is not. Verdict = all required checks pass. Confidence = min of per-check confidences.
 5. **Log everything.** Store the full request (prompt, model name, params, image hashes) and the raw response for every call. This is what lets you tune prompts later and defend a verdict at the dinner table.
 6. **Calibration harness.** Ship a `just eval` target that runs a labeled folder of past submissions against the current prompt and reports precision/recall per chore type. Prompt changes without this are guesswork.
 

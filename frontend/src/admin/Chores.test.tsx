@@ -27,7 +27,6 @@ const CHORE = {
   photo_prompts: [],
   allow_gallery_upload: false,
   verification_mode: 'manual',
-  verification_rule: null,
   reward_cents: 200,
   penalty_cents: 0,
   late_multiplier: 1,
@@ -265,7 +264,8 @@ describe('admin Chores', () => {
 
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Feed the cat' } });
     fireEvent.change(screen.getByDisplayValue('manual'), { target: { value: 'llm_auto' } });
-    fireEvent.change(screen.getByLabelText(/verification rule/i), {
+    fireEvent.click(screen.getByRole('button', { name: /add a check/i }));
+    fireEvent.change(screen.getByPlaceholderText(/free of dishes/i), {
       target: { value: 'Is the bowl full?' },
     });
     fireEvent.change(screen.getByDisplayValue('photo'), { target: { value: 'acknowledgement' } });
@@ -276,7 +276,6 @@ describe('admin Chores', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
 
     const body = calls.find((c) => c.method === 'POST')!.body as Record<string, unknown>;
-    expect(body.verification_rule).toBeNull();
     expect(body.verification_checklist).toBeNull();
     expect(body.verification_mode).toBe('manual');
   });
