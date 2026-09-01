@@ -78,3 +78,10 @@ const VERDICT_LABEL: Record<string, string> = {
 };
 
 export const verdictLabel = (verdict: string): string => VERDICT_LABEL[verdict] ?? verdict;
+
+/** A standing chore's state is a different axis from occurrence status — what is in force
+ *  right now, not where a piece of work stands (spec §4.7). Deliberately not folded into
+ *  ADMIN_STATUS/KID_STATUS, which are keyed by OccurrenceStatus. Rose = in force, matching
+ *  me/StandingBanner and me/Rules. */
+export const standingEntry = (on: boolean): Label =>
+  on ? { label: 'In force', tone: 'bad' } : { label: 'Off', tone: 'idle' };

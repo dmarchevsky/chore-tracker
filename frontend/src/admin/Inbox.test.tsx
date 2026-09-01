@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { Inbox } from './Inbox';
 
 function json(body: unknown) {
@@ -68,12 +68,62 @@ const dispute = {
   occurrence_due_at: due,
 };
 
-function renderInbox() {
+const TIER = {
+  id: 1,
+  condition: 'more than one missing assignment',
+  outcome_kind: 'text',
+  amount_cents: null,
+  text: "grounded until it's fixed",
+};
+
+// Deliberately not titled "Empty the sink": queueRow() below picks the LAST match of that
+// title, so a standing chore sharing it would quietly capture the helper.
+const standingOn = {
+  id: 'c9',
+  title: 'Missing assignments',
+  chore_kind: 'standing',
+  active: true,
+  standing_on: true,
+  standing_tier_id: 1,
+  standing_since: '2026-08-20T10:00:00Z',
+  outcome_tiers: [TIER],
+  assignment_mode: 'fixed',
+  fixed_assignee_id: 'k1',
+  assignee_ids: [],
+};
+const standingOff = {
+  ...standingOn,
+  id: 'c8',
+  title: 'Late homework',
+  standing_on: false,
+  standing_tier_id: null,
+  standing_since: null,
+};
+const standingRetired = { ...standingOn, id: 'c7', title: 'Old rule', active: false };
+
+function renderInbox(chores: unknown[] = [], route = '/admin') {
   vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
     const url = String(input);
     if (url.includes('inbox=true')) return Promise.resolve(json([occurrence]));
+    if (url.includes('/state/history'))
+      return Promise.resolve(
+        json([
+          {
+            id: 'e1',
+            chore_id: 'c9',
+            actor_user_id: null,
+            state: true,
+            tier_id: 1,
+            tier: TIER,
+            note: 'third this week',
+            created_at: '2026-08-20T10:00:00Z',
+          },
+        ]),
+      );
     if (url.includes('/chores'))
-      return Promise.resolve(json([{ id: 'c1', title: 'Empty the sink' }]));
+      // The bare stub has no chore_kind, so it is not a standing chore and the section
+      // filters it out — do not "tidy" it into a full Chore or the queue tests shift.
+      return Promise.resolve(json([{ id: 'c1', title: 'Empty the sink' }, ...chores]));
     if (url.endsWith('/children')) return Promise.resolve(json([{ id: 'k1', display_name: 'Mo' }]));
     if (url.endsWith('/occurrences/o1')) return Promise.resolve(json(occurrence));
     if (url.includes('/disputes')) return Promise.resolve(json([dispute]));
@@ -85,14 +135,17 @@ function renderInbox() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
-        <Inbox />
+      <MemoryRouter initialEntries={[route]}>
+        <Routes>
+          <Route path="/admin" element={<Inbox />} />
+          <Route path="/admin/review/:id" element={<Inbox />} />
+        </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
 
-beforeEach(renderInbox);
+beforeEach(() => renderInbox());
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -145,5 +198,115 @@ describe('admin Inbox', () => {
     // ...and the model's own justification is on screen, not buried in raw JSON.
     expect(screen.getByText(/drum set, not a dog/i)).toBeInTheDocument();
     expect(screen.getByText(/The AI says: Fail/i)).toBeInTheDocument();
+  });
+
+  it('lists a standing chore that is in force, with what it is and since when', async () => {
+    cleanup();
+    vi.restoreAllMocks();
+    renderInbox([standingOn]);
+
+    expect(await screen.findByText('Missing assignments')).toBeInTheDocument();
+    expect(screen.getByText("grounded until it's fixed")).toBeInTheDocument();
+    expect(screen.getByText('In force')).toBeInTheDocument();
+    // never the raw boolean
+    expect(screen.queryByText('true')).not.toBeInTheDocument();
+  });
+
+  it('lists a standing chore that is off, so it can be turned on', async () => {
+    cleanup();
+    vi.restoreAllMocks();
+    renderInbox([standingOff]);
+
+    expect(await screen.findByText('Late homework')).toBeInTheDocument();
+    expect(screen.getByText('Off')).toBeInTheDocument();
+  });
+
+  it('leaves a retired standing chore out of the inbox', async () => {
+    cleanup();
+    vi.restoreAllMocks();
+    renderInbox([standingRetired]);
+
+    await waitFor(() => expect(screen.getAllByText('Empty the sink').length).toBeGreaterThan(0));
+    expect(screen.queryByText('Old rule')).not.toBeInTheDocument();
+  });
+
+  it('opens the flip controls instead of the review pane', async () => {
+    cleanup();
+    vi.restoreAllMocks();
+    renderInbox([standingOn]);
+
+    fireEvent.click(await screen.findByText('Missing assignments'));
+
+    expect(
+      await screen.findByRole('button', { name: 'more than one missing assignment' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Turn it off' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Flip note')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^approve$/i })).not.toBeInTheDocument();
+  });
+
+  it('shows the flip history in the pane', async () => {
+    cleanup();
+    vi.restoreAllMocks();
+    renderInbox([standingOn]);
+
+    fireEvent.click(await screen.findByText('Missing assignments'));
+
+    expect(await screen.findByText(/third this week/)).toBeInTheDocument();
+  });
+
+  it('still opens the occurrence pane from a push deep link', async () => {
+    // The selection is tagged now; the route stays the one untagged input and must keep
+    // meaning "an occurrence", or every push notification lands on the wrong pane.
+    cleanup();
+    vi.restoreAllMocks();
+    renderInbox([standingOn], '/admin/review/o1');
+
+    expect(await screen.findByRole('button', { name: /^approve$/i })).toBeInTheDocument();
+  });
+
+  it('keeps the pane open and repaints when a flip lands', async () => {
+    cleanup();
+    vi.restoreAllMocks();
+    // first /chores call says off, every later one says in force — i.e. the invalidation
+    // after the flip returns fresh data
+    let flipped = false;
+    // the SAME chore, flipped — not a different fixture, or the pane's lookup by id misses
+    const after = {
+      ...standingOff,
+      standing_on: true,
+      standing_tier_id: 1,
+      standing_since: '2026-09-01T10:00:00Z',
+    };
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+      if ((init?.method ?? 'GET') === 'POST' && url.includes('/state')) {
+        flipped = true;
+        return Promise.resolve(json(after));
+      }
+      if (url.includes('/state/history')) return Promise.resolve(json([]));
+      if (url.includes('inbox=true')) return Promise.resolve(json([]));
+      if (url.endsWith('/children'))
+        return Promise.resolve(json([{ id: 'k1', display_name: 'Mo' }]));
+      if (url.includes('/chores')) return Promise.resolve(json([flipped ? after : standingOff]));
+      return Promise.resolve(json([]));
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <Inbox />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByText('Late homework'));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'more than one missing assignment' }),
+    );
+
+    // the pane is still here, now showing the new state — it does not close on success
+    expect(await screen.findByText("grounded until it's fixed")).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Turn it off' })).toBeInTheDocument();
   });
 });

@@ -13,7 +13,9 @@
 //   Checking   rule, checklist, thresholds   V is an LLM mode — nothing else reads them
 //   Worth      outcome tiers                 always; text-only when K=standing
 //              reward / penalty              only when there are no tiers
-//   State      on/off, tier, history         K=standing, editing only
+//
+// Flipping a standing chore on/off is NOT here — that is an operational act, so it lives in
+// the review inbox (admin/StandingDetail.tsx) alongside everything else a parent acts on.
 //
 // Deliberately absent: late_multiplier and geofence.arrive_before are specified but not
 // enforced anywhere (spec §15 Q15, Q16), so there is no control for them.
@@ -27,7 +29,6 @@ import { WhenSection } from './sections/WhenSection';
 import { ProofSection } from './sections/ProofSection';
 import { CheckingSection } from './sections/CheckingSection';
 import { WorthSection } from './sections/WorthSection';
-import { StandingSection } from './sections/StandingSection';
 import { isStanding } from './choreFields';
 
 export function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) {
@@ -50,7 +51,9 @@ export function ChoreForm({ state, onDone }: { state: FormState; onDone: () => v
         </>
       )}
       <WorthSection f={f} />
-      <StandingSection f={f} />
+      {standing && f.editing && (
+        <p className="text-xs text-slate-500">Turn this on or off from the review inbox.</p>
+      )}
 
       {f.editing && (
         <p className="text-xs text-slate-500">
