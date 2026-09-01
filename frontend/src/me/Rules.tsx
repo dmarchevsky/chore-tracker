@@ -1,4 +1,6 @@
 import { useChores } from '../api/hooks';
+import { useAuth } from '../auth/AuthContext';
+import { isAssignedTo } from '../shared/assignment';
 import type { Chore } from '../api/types';
 import { Card, Spinner } from '../shared/ui';
 import { money, tierOutcome } from '../shared/format';
@@ -18,6 +20,7 @@ function proofSummary(c: Chore): string {
 // (spec §15 Q8).
 export function Rules() {
   const chores = useChores();
+  const { me } = useAuth();
   if (chores.isLoading) return <Spinner />;
 
   return (
@@ -28,11 +31,15 @@ export function Rules() {
           <Card key={c.id}>
             <p className="font-semibold">
               {c.title}
-              <span
-                className={`ml-2 text-xs ${c.standing_on ? 'text-rose-400' : 'text-slate-500'}`}
-              >
-                {c.standing_on ? 'on right now' : 'off'}
-              </span>
+              {/* The rule itself is open to every kid (spec §15 Q8), but whether it is
+                  currently in force is the assignee's own business (§15 Q1). */}
+              {isAssignedTo(c, me?.id) && (
+                <span
+                  className={`ml-2 text-xs ${c.standing_on ? 'text-rose-400' : 'text-slate-500'}`}
+                >
+                  {c.standing_on ? 'on right now' : 'off'}
+                </span>
+              )}
             </p>
             {c.description && <p className="mt-1 text-sm text-slate-400">{c.description}</p>}
             <ul className="mt-2 flex flex-col gap-1 text-sm text-slate-300">

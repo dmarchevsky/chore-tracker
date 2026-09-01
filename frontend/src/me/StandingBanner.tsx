@@ -1,6 +1,8 @@
 // What is currently in force for this kid. A standing chore has no occurrences, so it never
 // appears in a to-do list — this banner is the only place it shows up (spec §4.7).
 import { useChores } from '../api/hooks';
+import { useAuth } from '../auth/AuthContext';
+import { isAssignedTo } from '../shared/assignment';
 
 function since(iso: string | null): string {
   if (!iso) return '';
@@ -12,7 +14,12 @@ function since(iso: string | null): string {
 
 export function StandingBanner() {
   const chores = useChores();
-  const on = (chores.data ?? []).filter((c) => c.chore_kind === 'standing' && c.standing_on);
+  const { me } = useAuth();
+  // Scoped to the viewer: GET /chores hands every kid the whole household's definitions, so
+  // without this a sibling's grounding shows up on this kid's home screen (spec §15 Q1).
+  const on = (chores.data ?? []).filter(
+    (c) => c.chore_kind === 'standing' && c.standing_on && isAssignedTo(c, me?.id),
+  );
   if (!on.length) return null;
 
   return (
