@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import type { Chore, OutcomeTier } from '../../api/types';
-import { useDeactivateChore, useUpdateChore } from '../api';
+import { useDeactivateChore, useDuplicateChore, useUpdateChore } from '../api';
 import {
   BLANK,
   EDITABLE,
@@ -22,10 +22,15 @@ export type FormState = { mode: 'create' } | { mode: 'edit'; chore: Chore };
 
 export type ChoreFormApi = ReturnType<typeof useChoreForm>;
 
-export function useChoreForm(state: FormState, onDone: () => void) {
+export function useChoreForm(
+  state: FormState,
+  onDone: () => void,
+  onDuplicated?: (copy: Chore) => void,
+) {
   const qc = useQueryClient();
   const update = useUpdateChore();
   const deactivate = useDeactivateChore();
+  const duplicate = useDuplicateChore();
   const chore = state.mode === 'edit' ? state.chore : null;
   const editing = chore !== null;
 
@@ -196,6 +201,17 @@ export function useChoreForm(state: FormState, onDone: () => void) {
     }
   }
 
+  /** The backend copies the chore **as stored**, so anything typed but not saved is not in
+   *  the copy. Say so rather than silently dropping it — see `dirty` below. */
+  async function duplicateChore() {
+    setError(null);
+    try {
+      onDuplicated?.(await duplicate.mutateAsync(chore!.id));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
   function reactivate() {
     set('active', true);
     void update
@@ -204,9 +220,19 @@ export function useChoreForm(state: FormState, onDone: () => void) {
       .catch((e) => setError((e as Error).message));
   }
 
+  // Unsaved edits, measured over the fields a PATCH would actually send.
+  const dirty =
+    editing &&
+    EDITABLE.some(
+      (k) =>
+        JSON.stringify(form[k] ?? null) !==
+        JSON.stringify((chore as unknown as Record<string, unknown>)[k] ?? null),
+    );
+
   return {
     chore,
     editing,
+    dirty,
     form,
     set,
     setPhotoCount,
@@ -221,8 +247,10 @@ export function useChoreForm(state: FormState, onDone: () => void) {
     save,
     remove,
     reactivate,
+    duplicateChore,
     update,
     deactivate,
+    duplicate,
     onDone,
   };
 }

@@ -315,10 +315,14 @@ describe('admin Chores', () => {
     expect(calls.find((c) => c.method === 'DELETE')!.url).toContain('/chores/c1');
   });
 
-  it('duplicates a chore and opens the copy for editing', async () => {
+  it('duplicates from the editor and opens the copy for editing', async () => {
     const calls = setup();
 
-    fireEvent.click(await screen.findByLabelText('Duplicate Empty the sink'));
+    // A list row only opens the editor now — duplicating is one of the things done to the
+    // chore you are looking at.
+    fireEvent.click(await screen.findByText('Empty the sink'));
+    await screen.findByDisplayValue('Empty the sink');
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
 
     await waitFor(() =>
       expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/chores/c1/duplicate'))).toBe(
@@ -327,6 +331,17 @@ describe('admin Chores', () => {
     );
     // the copy lands in the editor so the parent can vary the one field they wanted
     expect(await screen.findByDisplayValue('Empty the sink (copy)')).toBeInTheDocument();
+  });
+
+  it('warns that unsaved edits will not be in the copy', async () => {
+    setup();
+
+    fireEvent.click(await screen.findByText('Empty the sink'));
+    const title = await screen.findByDisplayValue('Empty the sink');
+    expect(screen.queryByText(/save first to carry your edits/i)).not.toBeInTheDocument();
+
+    fireEvent.change(title, { target: { value: 'Empty the sink twice' } });
+    expect(await screen.findByText(/save first to carry your edits/i)).toBeInTheDocument();
   });
 
   it('turns a chore into a one-off and PATCHes a once(...) cadence', async () => {
