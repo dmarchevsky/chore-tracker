@@ -71,6 +71,11 @@ const PHOTO_PROOFS = new Set(['photo', 'photo+location']);
 // Proof types that check where the kid is, and so need a fence (spec §6.2).
 const FENCED = new Set(['location', 'photo+location']);
 
+// Modes that send the photo to the vision model. The backend rejects them for a proof_type
+// with no image (app/schemas/chore.py), and only these modes ever read the rule, the
+// checklist or the thresholds (app/worker/verify.py) — so all four are photo-only fields.
+const LLM_MODES = new Set(['llm_assist', 'llm_auto']);
+
 // Accepted by backend cadence parser (app/services/cadence.py).
 const CADENCE_EXAMPLES = [
   'daily',
@@ -197,6 +202,17 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
     });
   }
 
+  /** An LLM mode needs an image to look at, so it can't survive a switch to a proof type
+   *  that sends none — the select would otherwise show a value it no longer offers. */
+  function setProofType(proof: string) {
+    setForm((f) => {
+      const next: Record<string, unknown> = { ...f, proof_type: proof };
+      if (!PHOTO_PROOFS.has(proof) && LLM_MODES.has(String(next.verification_mode)))
+        next.verification_mode = 'manual';
+      return next;
+    });
+  }
+
   function setAssignmentMode(mode: string) {
     setForm((f) => {
       const next: Record<string, unknown> = { ...f, assignment_mode: mode };
@@ -239,6 +255,12 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
     if (!PHOTO_PROOFS.has(String(form.proof_type))) {
       out.photo_prompts = [];
       out.allow_gallery_upload = false;
+      // Nothing reads a rule or a checklist without a photo to look at, and the form hides
+      // both — so don't carry stale text over from a proof_type the parent switched away
+      // from. Same for the mode: only manual / auto_accept are reachable here.
+      out.verification_rule = null;
+      out.verification_checklist = null;
+      if (LLM_MODES.has(String(out.verification_mode))) out.verification_mode = 'manual';
     }
     return out;
   }
@@ -451,7 +473,7 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
             className="inp"
             disabled={editing}
             value={String(form.proof_type)}
-            onChange={(e) => set('proof_type', e.target.value)}
+            onChange={(e) => setProofType(e.target.value)}
           >
             <option>photo</option>
             <option value="photo+location">photo+location</option>
@@ -465,8 +487,12 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
             onChange={(e) => set('verification_mode', e.target.value)}
           >
             <option>manual</option>
-            <option>llm_assist</option>
-            <option>llm_auto</option>
+            {PHOTO_PROOFS.has(String(form.proof_type)) && (
+              <>
+                <option>llm_assist</option>
+                <option>llm_auto</option>
+              </>
+            )}
             <option>auto_accept</option>
           </select>
         </div>
@@ -524,18 +550,22 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
         />
       )}
 
-      <Field label="Verification rule (natural language)">
-        <input
-          className="inp"
-          value={String(form.verification_rule ?? '')}
-          onChange={(e) => set('verification_rule', e.target.value)}
-        />
-      </Field>
+      {PHOTO_PROOFS.has(String(form.proof_type)) && (
+        <>
+          <Field label="Verification rule (natural language)">
+            <input
+              className="inp"
+              value={String(form.verification_rule ?? '')}
+              onChange={(e) => set('verification_rule', e.target.value)}
+            />
+          </Field>
 
-      <ChecklistField
-        value={(form.verification_checklist as ChecklistItem[] | null) ?? null}
-        onChange={(items) => set('verification_checklist', items)}
-      />
+          <ChecklistField
+            value={(form.verification_checklist as ChecklistItem[] | null) ?? null}
+            onChange={(items) => set('verification_checklist', items)}
+          />
+        </>
+      )}
 
       <Field label="Reward / penalty ($)">
         <div className="flex gap-2">
@@ -557,28 +587,30 @@ function ChoreForm({ state, onDone }: { state: FormState; onDone: () => void }) 
           />
         </div>
       </Field>
-      <Field label="Auto pass / fail confidence">
-        <div className="flex gap-2">
-          <input
-            className="inp"
-            type="number"
-            step="0.05"
-            min="0"
-            max="1"
-            value={Number(form.auto_pass_threshold)}
-            onChange={(e) => set('auto_pass_threshold', parseFloat(e.target.value || '0'))}
-          />
-          <input
-            className="inp"
-            type="number"
-            step="0.05"
-            min="0"
-            max="1"
-            value={Number(form.auto_fail_threshold)}
-            onChange={(e) => set('auto_fail_threshold', parseFloat(e.target.value || '0'))}
-          />
-        </div>
-      </Field>
+      {LLM_MODES.has(String(form.verification_mode)) && (
+        <Field label="Auto pass / fail confidence">
+          <div className="flex gap-2">
+            <input
+              className="inp"
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              value={Number(form.auto_pass_threshold)}
+              onChange={(e) => set('auto_pass_threshold', parseFloat(e.target.value || '0'))}
+            />
+            <input
+              className="inp"
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              value={Number(form.auto_fail_threshold)}
+              onChange={(e) => set('auto_fail_threshold', parseFloat(e.target.value || '0'))}
+            />
+          </div>
+        </Field>
+      )}
 
       {editing && (
         <p className="text-xs text-slate-500">

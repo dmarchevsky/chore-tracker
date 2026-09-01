@@ -212,6 +212,59 @@ describe('admin Chores', () => {
     expect(screen.queryByLabelText(/allow picking an existing photo/i)).not.toBeInTheDocument();
   });
 
+  // Nothing reads a rule, a checklist or the thresholds without a photo for the model to
+  // look at, and the backend rejects an LLM mode for such a chore outright.
+  it('hides the AI-only settings for a chore that sends no photos', async () => {
+    const ACK = { ...CHORE, id: 'c3', title: 'Feed the cat', proof_type: 'acknowledgement' };
+    setup([ACK]);
+    await waitFor(() => expect(screen.getByText('Feed the cat')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Feed the cat'));
+    await screen.findByDisplayValue('Feed the cat');
+
+    expect(screen.queryByLabelText(/verification rule/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add a check/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/auto pass \/ fail confidence/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'llm_auto' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'llm_assist' })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'manual' })).toBeInTheDocument();
+  });
+
+  // The thresholds only mean something once a verdict is banded on confidence (spec §6.3).
+  it('shows the thresholds only for an LLM verification mode', async () => {
+    setup();
+    await waitFor(() => expect(screen.getByText('Empty the sink')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Empty the sink'));
+    await screen.findByDisplayValue('Empty the sink');
+
+    expect(screen.queryByLabelText(/auto pass \/ fail confidence/i)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByDisplayValue('manual'), { target: { value: 'llm_auto' } });
+    expect(screen.getByLabelText(/auto pass \/ fail confidence/i)).toBeInTheDocument();
+  });
+
+  it('drops a stale rule and LLM mode when the proof carries no photo', async () => {
+    const calls = setup([]);
+    await waitFor(() => expect(screen.getByRole('button', { name: /new chore/i })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: /new chore/i }));
+    await screen.findByLabelText('Title');
+
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Feed the cat' } });
+    fireEvent.change(screen.getByDisplayValue('manual'), { target: { value: 'llm_auto' } });
+    fireEvent.change(screen.getByLabelText(/verification rule/i), {
+      target: { value: 'Is the bowl full?' },
+    });
+    fireEvent.change(screen.getByDisplayValue('photo'), { target: { value: 'acknowledgement' } });
+    // The mode select drops back to a value it still offers rather than showing a stale one.
+    expect(screen.getByDisplayValue('manual')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+
+    const body = calls.find((c) => c.method === 'POST')!.body as Record<string, unknown>;
+    expect(body.verification_rule).toBeNull();
+    expect(body.verification_checklist).toBeNull();
+    expect(body.verification_mode).toBe('manual');
+  });
+
   it('deactivates a chore', async () => {
     const calls = setup();
     await waitFor(() => expect(screen.getByText('Empty the sink')).toBeInTheDocument());
