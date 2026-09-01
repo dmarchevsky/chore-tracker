@@ -1,8 +1,8 @@
 """Chore definitions + preview (spec §4.1, §10).
 
-Reads (`GET /chores`, `GET /chores/{id}`) are open to any signed-in user — kids get
-read-only visibility of the chore definitions + amounts (spec §15 Q8), scoped to active
-chores. All writes stay admin-only.
+Reads (`GET /chores`, `GET /chores/{id}`) are open to any signed-in user, but a kid sees
+only the chores that are theirs to do: their own definitions + amounts (spec §15 Q8), scoped
+to active chores, never a sibling's (spec §15 Q1, own data only). All writes stay admin-only.
 """
 
 from __future__ import annotations
@@ -16,10 +16,11 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.auth.deps import AdminUser, CurrentUser, DbDep
 from app.models import (
+    AssignmentMode,
     Chore,
     ChoreOccurrence,
     ChoreStateEvent,
@@ -95,12 +96,37 @@ async def _drop_future_occurrences(db: DbDep, chore: Chore) -> int:
     return len(rows)
 
 
+def _visible_to_child(user_id: uuid.UUID):
+    """The chores a kid may read: their own, plus the unclaimed `anyone` pool.
+
+    Mirrors ``scheduler.resolve_assignees`` — `fixed` names one kid, `rotating`/`all` list
+    them in ``assignee_ids`` — plus `anyone`, which belongs to nobody in particular and so
+    is everybody's business to read the rule for.
+    """
+    return or_(
+        Chore.fixed_assignee_id == user_id,
+        Chore.assignee_ids.any(user_id),
+        Chore.assignment_mode == AssignmentMode.anyone,
+    )
+
+
+def _readable_by(chore: Chore, user: User) -> bool:
+    """The row-at-a-time form of ``_visible_to_child``, for the single-chore endpoints."""
+    return chore.active and (
+        chore.fixed_assignee_id == user.id
+        or user.id in chore.assignee_ids
+        or chore.assignment_mode == AssignmentMode.anyone
+    )
+
+
 @router.get("", response_model=list[ChoreOut])
 async def list_chores(db: DbDep, user: CurrentUser, include_inactive: bool = False) -> list[Chore]:
     stmt = select(Chore).order_by(Chore.title)
     # Kids see the active chore definitions only (spec §15 Q8); include_inactive is admin-only.
     if not include_inactive or user.role == UserRole.child:
         stmt = stmt.where(Chore.active.is_(True))
+    if user.role == UserRole.child:
+        stmt = stmt.where(_visible_to_child(user.id))
     return list((await db.execute(stmt)).scalars())
 
 
@@ -131,7 +157,7 @@ async def create_chore(payload: ChoreCreate, db: DbDep, admin: AdminUser) -> Cho
 @router.get("/{chore_id}", response_model=ChoreOut)
 async def get_chore(chore_id: uuid.UUID, db: DbDep, user: CurrentUser) -> Chore:
     chore = await db.get(Chore, chore_id)
-    if chore is None or (user.role == UserRole.child and not chore.active):
+    if chore is None or (user.role == UserRole.child and not _readable_by(chore, user)):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "chore not found")
     return chore
 
@@ -279,10 +305,11 @@ async def chore_state_history(
     user: CurrentUser,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> list[ChoreStateEvent]:
-    """Newest-first flip history. Open to kids: "how long have I been grounded" is exactly
-    the thing they should be able to check for themselves (spec §15 Q8)."""
+    """Newest-first flip history. Open to the kid it applies to: "how long have I been
+    grounded" is exactly the thing they should be able to check for themselves (spec §15 Q8).
+    A sibling's history is not (spec §15 Q1)."""
     chore = await db.get(Chore, chore_id)
-    if chore is None or (user.role == UserRole.child and not chore.active):
+    if chore is None or (user.role == UserRole.child and not _readable_by(chore, user)):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "chore not found")
     return await standing.history(db, chore_id, limit=limit)
 

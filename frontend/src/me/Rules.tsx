@@ -1,6 +1,6 @@
 import { useChores } from '../api/hooks';
 import { useAuth } from '../auth/AuthContext';
-import { isAssignedTo } from '../shared/assignment';
+import { isAssignedTo, isVisibleTo } from '../shared/assignment';
 import type { Chore } from '../api/types';
 import { Card, Spinner } from '../shared/ui';
 import { money, tierOutcome } from '../shared/format';
@@ -16,23 +16,25 @@ function proofSummary(c: Chore): string {
   return 'Just tick it off';
 }
 
-// Read-only visibility into the chore definitions — transparency reduces arguments
-// (spec §15 Q8).
+// Read-only visibility into the kid's own chore definitions — transparency reduces
+// arguments (spec §15 Q8), but a sibling's chores are not their business (spec §15 Q1).
 export function Rules() {
   const chores = useChores();
   const { me } = useAuth();
   if (chores.isLoading) return <Spinner />;
 
+  const mine = (chores.data ?? []).filter((c) => isVisibleTo(c, me?.id));
+
   return (
     <div className="flex flex-col gap-3 pt-2">
       <h1 className="text-xl font-bold">The rules</h1>
-      {(chores.data ?? []).map((c) =>
+      {mine.map((c) =>
         c.chore_kind === 'standing' ? (
           <Card key={c.id}>
             <p className="font-semibold">
               {c.title}
-              {/* The rule itself is open to every kid (spec §15 Q8), but whether it is
-                  currently in force is the assignee's own business (§15 Q1). */}
+              {/* An `anyone` chore is in the list as a rule anybody may read, but it is
+                  nobody's in particular — so it gets no live on/off state (spec §15 Q1). */}
               {isAssignedTo(c, me?.id) && (
                 <span
                   className={`ml-2 text-xs ${c.standing_on ? 'text-rose-400' : 'text-slate-500'}`}

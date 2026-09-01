@@ -91,8 +91,9 @@ describe('StandingBanner', () => {
   });
 
   it("does not show one kid's standing state to a sibling", async () => {
-    // GET /chores serves every household definition to every kid (spec §15 Q8), so the
-    // banner has to narrow it back to the viewer (spec §15 Q1, own data only).
+    // The banner narrows to the viewer itself rather than trusting the list: a cached
+    // response, or an `anyone` pool chore, must never show as this kid's own state
+    // (spec §15 Q1, own data only).
     viewer = 'kira';
     setup([STANDING]);
 

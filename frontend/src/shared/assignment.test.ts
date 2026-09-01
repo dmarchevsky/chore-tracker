@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAssignedTo } from './assignment';
+import { isAssignedTo, isVisibleTo } from './assignment';
 import type { Chore } from '../api/types';
 
 const c = (over: Partial<Chore>) =>
@@ -26,5 +26,16 @@ describe('isAssignedTo', () => {
   it('is false for a signed-out viewer rather than throwing', () => {
     expect(isAssignedTo(c({ fixed_assignee_id: 'nika' }), null)).toBe(false);
     expect(isAssignedTo(c({ fixed_assignee_id: 'nika' }), undefined)).toBe(false);
+  });
+});
+
+describe('isVisibleTo', () => {
+  it('covers the assignee plus the unassigned pool', () => {
+    expect(isVisibleTo(c({ fixed_assignee_id: 'nika' }), 'nika')).toBe(true);
+    expect(isVisibleTo(c({ assignment_mode: 'anyone' }), 'nika')).toBe(true);
+  });
+
+  it("hides a sibling's chore", () => {
+    expect(isVisibleTo(c({ fixed_assignee_id: 'nika' }), 'kira')).toBe(false);
   });
 });

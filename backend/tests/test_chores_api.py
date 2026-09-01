@@ -358,6 +358,50 @@ async def test_child_reads_active_chores_only(
     ).status_code == 403
 
 
+async def test_a_kid_only_sees_the_chores_that_are_theirs(
+    client, admin_user, child_user, second_child, totp_now
+):
+    """Own + the `anyone` pool; a sibling's chore is invisible, definition and all (§15 Q1)."""
+    h = await _admin_headers(client, admin_user, totp_now)
+    mine = (await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)).json()[
+        "id"
+    ]
+    shared = (
+        await client.post(
+            "/api/v1/chores",
+            json=_rotating_body(child_user, second_child, title="Kitchen", assignment_mode="all"),
+            headers=h,
+        )
+    ).json()["id"]
+    pool = (
+        await client.post(
+            "/api/v1/chores",
+            json=_fixed_body(
+                child_user,
+                title="Bins",
+                assignment_mode="anyone",
+                fixed_assignee_id=None,
+            ),
+            headers=h,
+        )
+    ).json()["id"]
+    sibling = (
+        await client.post(
+            "/api/v1/chores", json=_fixed_body(second_child, title="Beas job"), headers=h
+        )
+    ).json()["id"]
+
+    assert len((await client.get("/api/v1/chores", headers=h)).json()) == 4  # admin sees all
+
+    await client.post("/api/v1/auth/login", json={"username": "alice", "password": "alice-pass"})
+    listed = {c["id"] for c in (await client.get("/api/v1/chores")).json()}
+    assert listed == {mine, shared, pool}
+
+    assert (await client.get(f"/api/v1/chores/{mine}")).status_code == 200
+    assert (await client.get(f"/api/v1/chores/{sibling}")).status_code == 404
+    assert (await client.get(f"/api/v1/chores/{sibling}/state/history")).status_code == 404
+
+
 async def test_occurrences_scoped_and_assignee_swap(
     client, admin_user, child_user, second_child, totp_now, db_session
 ):
