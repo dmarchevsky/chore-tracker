@@ -198,12 +198,25 @@ async def apply_decision(
     action: str,
     reason: str,
     amount_override_cents: int | None = None,
+    tier_id: int | None = None,
 ) -> None:
     if occurrence.settlement_locked_at is not None:
         raise SubmissionError("occurrence is settlement-locked and cannot be changed")
 
     before = occurrence.status
     existing = await _earn_entries(db, occurrence.id)
+
+    # A tiered chore is graded by picking one condition, not by approve/reject. Prefer the
+    # occurrence's snapshot so editing the chore never re-prices a decided occurrence
+    # (spec §3); fall back to the definition for rows generated before tiers existed.
+    tiers = occurrence.outcome_tiers
+    if tiers is None:
+        chore = await db.get(Chore, occurrence.chore_id)
+        tiers = chore.outcome_tiers if chore else None
+    if tiers and action in ("approve", "reject"):
+        raise SubmissionError(
+            "this chore is decided by picking an outcome tier, not approve/reject"
+        )
 
     # `kind` is a plain String column, so an entry loaded in a later request carries a str,
     # not the enum member — `is` silently matched nothing and a changed decision left the
@@ -228,6 +241,36 @@ async def apply_decision(
         await ledger.debit_penalty(db, occurrence=occurrence, actor=admin, reason=reason)
         occurrence.status = OccurrenceStatus.rejected
         verdict = Verdict.fail
+    elif action == "tier":
+        if not tiers:
+            raise SubmissionError("this chore has no outcome tiers")
+        tier = next((t for t in tiers if t["id"] == tier_id), None)
+        if tier is None:
+            raise SubmissionError(f"tier {tier_id} is not one of this chore's outcomes")
+
+        # A double-clicked tier button must not move money twice. This guard is stronger
+        # than the ledger's (occurrence_id, kind) index, which only knows about the kind.
+        if occurrence.outcome_tier_id == tier_id and occurrence.status == OccurrenceStatus.approved:
+            return
+
+        # Re-deciding: unwind whatever the previous tier posted, then post the new amount.
+        for e in existing:
+            if e.reversed_by_entry_id is None and e.kind in (
+                LedgerKind.earning,
+                LedgerKind.penalty,
+            ):
+                await ledger.reverse_entry(
+                    db, entry=e, actor=admin, reason=f"outcome changed: {reason}"
+                )
+        await ledger.post_tier_outcome(
+            db, occurrence=occurrence, tier=tier, actor=admin, reason=reason
+        )
+        occurrence.outcome_tier_id = tier_id
+        occurrence.outcome_tier = tier
+        # No new terminal status: APPROVED plus a recorded tier is the decision (spec §4.6).
+        # The UI renders the tier's condition where it would otherwise say "Approved".
+        occurrence.status = OccurrenceStatus.approved
+        verdict = Verdict.fail if (tier.get("amount_cents") or 0) < 0 else Verdict.pass_
     elif action == "excuse":
         for e in existing:
             if e.reversed_by_entry_id is None and e.kind in (
@@ -235,6 +278,10 @@ async def apply_decision(
                 LedgerKind.penalty,
             ):
                 await ledger.reverse_entry(db, entry=e, actor=admin, reason=f"excused: {reason}")
+        # Clear any chosen tier: otherwise the idempotency guard above would treat a later
+        # re-pick of that same tier as a no-op and the money would never be re-posted.
+        occurrence.outcome_tier_id = None
+        occurrence.outcome_tier = None
         occurrence.status = OccurrenceStatus.excused
         verdict = Verdict.needs_review
     elif action == "redo":
@@ -255,7 +302,11 @@ async def apply_decision(
         entity_type="occurrence",
         entity_id=occurrence.id,
         before={"status": before},
-        after={"status": occurrence.status, "amount_override_cents": amount_override_cents},
+        after={
+            "status": occurrence.status,
+            "amount_override_cents": amount_override_cents,
+            "tier_id": tier_id,
+        },
     )
     if action == "redo":
         await notifications.notify_redo(db, occurrence, reason)

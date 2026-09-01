@@ -41,10 +41,23 @@ export interface Occurrence {
   settlement_locked_at: string | null;
   reward_cents: number;
   penalty_cents: number;
+  outcome_tiers: OutcomeTier[] | null;
+  outcome_tier_id: number | null;
+  outcome_tier: OutcomeTier | null;
   verification_error: string | null;
 }
 
 export type AssignmentMode = 'fixed' | 'rotating' | 'anyone' | 'all';
+
+export interface OutcomeTier {
+  id: number;
+  condition: string;
+  outcome_kind: 'money' | 'text';
+  /** Signed: negative is a penalty. The form offers a Reward/Penalty toggle and applies
+   *  the sign itself — unlike penalty_cents, which is an unsigned magnitude. */
+  amount_cents: number | null;
+  text: string | null;
+}
 
 export interface Chore {
   id: string;
@@ -57,6 +70,7 @@ export interface Chore {
   verification_mode: string;
   verification_rule: string | null;
   verification_checklist: { id: number; text: string; required: boolean }[] | null;
+  outcome_tiers: OutcomeTier[] | null;
   reward_cents: number;
   penalty_cents: number;
   late_multiplier: number;

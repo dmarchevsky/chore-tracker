@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class GeoIn(BaseModel):
@@ -82,6 +82,7 @@ class DecisionAction(enum.StrEnum):
     reject = "reject"
     excuse = "excuse"
     redo = "redo"
+    tier = "tier"
 
 
 class DecisionRequest(BaseModel):
@@ -90,6 +91,18 @@ class DecisionRequest(BaseModel):
     action: DecisionAction
     reason: str = Field(min_length=1, max_length=1000)
     amount_override_cents: int | None = Field(default=None, ge=0)
+    tier_id: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _check(self) -> DecisionRequest:
+        if self.action is DecisionAction.tier:
+            if self.tier_id is None:
+                raise ValueError("action=tier needs a tier_id")
+            if self.amount_override_cents is not None:
+                raise ValueError("action=tier takes its amount from the tier, not an override")
+        elif self.tier_id is not None:
+            raise ValueError(f"tier_id is only meaningful for action=tier, not {self.action}")
+        return self
 
 
 class DisputeRequest(BaseModel):

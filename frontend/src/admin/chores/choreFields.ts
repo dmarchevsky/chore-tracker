@@ -26,6 +26,7 @@ export const BLANK: Record<string, unknown> = {
   geofence: null,
   verification_mode: 'manual',
   verification_rule: '',
+  outcome_tiers: null,
   reward_cents: 100,
   penalty_cents: 0,
   auto_pass_threshold: 0.85,
@@ -51,6 +52,7 @@ export const EDITABLE = [
   'verification_mode',
   'verification_rule',
   'verification_checklist',
+  'outcome_tiers',
   'reward_cents',
   'penalty_cents',
   'auto_pass_threshold',
@@ -107,3 +109,8 @@ export function onceDate(cadence: string): string | null {
 }
 
 export const ONCE_TODAY = () => `once(${new Date().toISOString().slice(0, 10)})`;
+
+/** A tiered chore's money comes from its tiers, so the flat reward/penalty pair is hidden
+ *  and the backend pins both to 0 (app/schemas/chore.py). */
+export const isTiered = (form: Record<string, unknown>): boolean =>
+  Boolean((form.outcome_tiers as unknown[] | null)?.length);

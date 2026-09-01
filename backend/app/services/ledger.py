@@ -113,6 +113,52 @@ async def debit_penalty(
     )
 
 
+async def post_tier_outcome(
+    db: AsyncSession,
+    *,
+    occurrence: ChoreOccurrence,
+    tier: dict,
+    actor: User | None,
+    reason: str,
+) -> LedgerEntry | None:
+    """Move the money for a chosen outcome tier (spec §4.6, §9).
+
+    The tier's ``amount_cents`` is signed, so the sign picks the kind: a positive tier is an
+    ``earning``, a negative one a ``penalty``. Not ``adjustment`` for the first write — that
+    would drop the row out from under the ``(occurrence_id, kind)`` partial unique index and
+    lose the double-click protection that makes a decision exactly-once.
+
+    But a tier *change* is a legitimate second money movement on the same occurrence, and
+    ``_insert_earn_kind`` is ON CONFLICT DO NOTHING: it would silently swallow the new amount
+    and hand back the stale row. So once the kind's slot is taken, post an ``adjustment``
+    instead — append-only holds, the index is never violated, and the balance is right.
+    """
+    amount = tier.get("amount_cents") or 0
+    if not amount:
+        return None  # a text tier moves no money
+
+    kind = LedgerKind.earning if amount > 0 else LedgerKind.penalty
+    taken = await db.scalar(
+        select(LedgerEntry.id)
+        .where(LedgerEntry.occurrence_id == occurrence.id, LedgerEntry.kind == kind)
+        .limit(1)
+    )
+    if taken is None:
+        return await _insert_earn_kind(
+            db, occ=occurrence, kind=kind, amount_cents=amount, reason=reason, actor=actor
+        )
+    return await record_adjustment(
+        db,
+        child_id=occurrence.assignee_id,
+        household_id=occurrence.household_id,
+        amount_cents=amount,
+        actor=actor,
+        reason=reason,
+        occurrence_id=occurrence.id,
+        meta={"tier_id": tier["id"]},
+    )
+
+
 async def reverse_entry(
     db: AsyncSession, *, entry: LedgerEntry, actor: User | None, reason: str
 ) -> LedgerEntry:
@@ -144,6 +190,7 @@ async def record_adjustment(
     actor: User | None,
     reason: str,
     occurrence_id: uuid.UUID | None = None,
+    meta: dict | None = None,
 ) -> LedgerEntry:
     entry = LedgerEntry(
         household_id=household_id,
@@ -154,6 +201,7 @@ async def record_adjustment(
         reason=reason,
         created_by="user" if actor else "system",
         actor_user_id=actor.id if actor else None,
+        meta=meta,
     )
     db.add(entry)
     await db.flush()

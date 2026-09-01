@@ -86,6 +86,14 @@ class Chore(TimestampMixin, Base):
     auto_pass_threshold: Mapped[float] = mapped_column(Numeric(3, 2), default=0.85)
     auto_fail_threshold: Mapped[float] = mapped_column(Numeric(3, 2), default=0.35)
 
+    # --- Outcome tiers (spec §4.6) --------------------------------------
+    # Ordered condition -> outcome list for a chore a person grades ("all A grades" ->
+    # +$100, "at least one C" -> -$50, "more than one missing assignment" -> grounded).
+    # JSONB like verification_checklist: nothing joins tiers, they are always read with
+    # their chore. A tiered chore is never *also* a classic reward/penalty chore — the
+    # schema pins reward_cents/penalty_cents to 0 (app/schemas/chore.py).
+    outcome_tiers: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, default=None)
+
     # --- Money (integer cents, spec §9) --------------------------------
     reward_cents: Mapped[int] = mapped_column(Integer, default=0)
     penalty_cents: Mapped[int] = mapped_column(Integer, default=0)

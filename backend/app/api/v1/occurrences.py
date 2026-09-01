@@ -281,6 +281,7 @@ async def decide(
             action=body.action,
             reason=body.reason,
             amount_override_cents=body.amount_override_cents,
+            tier_id=body.tier_id,
         )
     except review.SubmissionError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc

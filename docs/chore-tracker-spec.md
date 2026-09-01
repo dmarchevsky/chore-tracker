@@ -34,7 +34,11 @@ Conventions used below:
 - Multi-family / multi-tenant SaaS. Single household, hardcoded tenancy.
 - Native mobile apps. A PWA is the client.
 - Background location tracking (see §6.2 — this is a hard constraint, not a laziness call).
-- Gamification beyond money (streaks/badges are a v2 nice-to-have).
+- Gamification beyond money — points, streaks, badges, leaderboards (a v2 nice-to-have).
+  `[D]` Non-money **outcomes** are in scope: a chore may carry parent-authored
+  condition→outcome tiers whose outcome is a plain sentence ("grounded until the missing
+  work is in"). These are consequences a parent already imposes, written down — not a
+  points economy. The bright line: no score, no streak, no badge, no cross-kid comparison.
 
 ---
 
@@ -118,8 +122,9 @@ Admin MUST be able to define a chore with:
 | `verification_checklist` | Optional array of atomic boolean checks. The model answers each; the verdict is derived. Much more reliable than one fuzzy prompt (see §7.3). |
 | `auto_pass_threshold` / `auto_fail_threshold` | Confidence bands. Between them → `NEEDS_REVIEW`. Defaults 0.85 / 0.35. |
 | `geofence` | For location proof: lat, lon, radius_m, plus `arrive_before` time. |
-| `reward_amount` | $ credited on pass. |
-| `penalty_amount` | $ debited on miss/fail. Default 0 — penalties are opt-in per chore. |
+| `outcome_tiers` | Optional ordered condition→outcome list for a chore a person grades (§4.6). Replaces `reward_amount`/`penalty_amount` for that chore; never mixed with them. |
+| `reward_amount` | $ credited on pass. Unsigned magnitude. |
+| `penalty_amount` | $ debited on miss/fail. Default 0 — penalties are opt-in per chore. `[D]` An **unsigned magnitude**, not a signed amount: the API rejects a negative and `debit_penalty` applies the sign. (A tier's `amount_cents` is the opposite — signed — because one tier list carries both rewards and penalties; see §4.6.) |
 | `late_multiplier` | e.g. 0.5 for within-grace-but-late. Default 1.0. |
 | `active` | Soft disable without deleting history. |
 
@@ -162,6 +167,42 @@ already-generated occurrences"**.
 - All notification sends are logged; a failed push MUST NOT block the state machine.
 
 ---
+
+
+### 4.6 Tiered outcomes
+
+A chore whose result a **person** grades, with more than two possible outcomes, carries an
+ordered list of condition→outcome tiers instead of a single reward/penalty pair. The parent
+picks exactly one at review time.
+
+    all A grades      -> +$100
+    at least one B    -> +$50
+    at least one C    -> -$50
+    more than one missing assignment -> "grounded until it's fixed"
+
+Each tier is `{id, condition, outcome_kind: money|text, amount_cents?, text?}`. `condition` is
+free text assessed by a person — there is no condition language to evaluate.
+
+- `[D]` **Manual only.** A tiered chore MUST use `verification_mode: manual`. The LLM modes
+  are rejected (a model cannot judge "all A grades", and under `llm_auto` its opinion would
+  move money), and so is `auto_accept` (it passes terminally with no human in the loop, so no
+  tier would ever be picked). A tier is chosen by a person.
+- `[D]` **Never mixed with the classic channel.** A tiered chore's `reward_amount`,
+  `penalty_amount` and `late_multiplier` MUST be 0/0/1.0, and it carries no
+  `verification_rule` or `verification_checklist`. Enforced at validation, so "tiers are an
+  additional mechanism" is a rule rather than a convention.
+- `[D]` **A tier's `amount_cents` is signed** (negative = penalty), unlike the unsigned
+  `reward_amount`/`penalty_amount` — one list carries both, and the sign is what routes the
+  ledger kind. The admin form offers a reward/penalty toggle and applies the sign itself; a
+  parent never types a minus.
+- `[D]` **No new occurrence status.** A tiered decision lands on the existing terminal
+  `APPROVED` plus the recorded tier. The UI renders the tier's condition where it would
+  otherwise say "Approved" — "approved" reads wrong on a -$50 outcome.
+- `[D]` **The occurrence snapshots the tier list at generation**, exactly as it snapshots the
+  money terms (§3). Editing "+$100" down to "+$50" must not re-price a report card the kid
+  already handed in.
+- Any proof type is allowed: manual grading and photo evidence are orthogonal, and a photo of
+  a report card is exactly the evidence such a chore wants.
 
 ## 5. Non-functional requirements
 
@@ -386,6 +427,14 @@ DST transition days are an explicit test case.
 ---
 
 ## 9. Money ledger
+
+`[D]` **Tier money.** A money tier writes `earning` (positive) or `penalty` (negative) on
+the first decision, so the `(occurrence_id, kind)` partial unique index still makes it
+exactly-once against a double click. Changing the tier afterwards reverses the standing
+entry and posts the new amount as an `adjustment` carrying `meta.tier_id` — the index is
+never violated and nothing is updated in place. Re-selecting the *same* tier is a no-op,
+guarded on `chore_occurrences.outcome_tier_id`; an `excuse` clears that field so a later
+re-grade pays again. A text tier writes no ledger entry at all.
 
 `[D]` Append-only, integer cents, no floats, no UPDATEs.
 
@@ -651,4 +700,4 @@ weekly email/Push digest; savings goals; recurring auto-payout on Sundays.
 | Photo verification becomes a source of family conflict | Medium | Parent override always visible; model framed as "a helper that checks," never as the authority |
 | Home hosting downtime causes false "missed" marks | Medium | Grace periods; admin bulk-excuse; startup reconciliation flags occurrences that expired during a known outage window |
 | Internet-exposed app gets probed | Certain | Tunnel over port-forward, strict CSP, TOTP for admin, rate limits, no default credentials |
-| Scope creep into a gamified allowance platform | High | Phase 7 is a backlog, not a plan |
+| Scope creep into a gamified allowance platform | High | Phase 7 is a backlog, not a plan. Tiered outcomes are bounded by §4.6 `[D]`: parent-authored consequences, no score, streak, badge or leaderboard |

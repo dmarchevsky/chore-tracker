@@ -105,6 +105,7 @@ async def generate_occurrences(
                         "due_at": due_at,
                         "status": status,
                         "was_late": False,
+                        "outcome_tiers": chore.outcome_tiers,
                         "reward_cents": chore.reward_cents,
                         "penalty_cents": chore.penalty_cents,
                         "late_multiplier": chore.late_multiplier,

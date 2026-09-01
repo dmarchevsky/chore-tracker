@@ -271,6 +271,8 @@ def _dump(payload: ChoreCreate) -> dict:
         data["geofence"] = payload.geofence.model_dump(mode="json")
     if data.get("verification_checklist") is not None:
         data["verification_checklist"] = [c.model_dump() for c in payload.verification_checklist]
+    if data.get("outcome_tiers") is not None:
+        data["outcome_tiers"] = [t.model_dump() for t in payload.outcome_tiers]
     if data.get("rotation_period") is not None:
         data["rotation_period"] = str(data["rotation_period"])
     return data

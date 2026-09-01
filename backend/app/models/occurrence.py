@@ -11,6 +11,7 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -23,6 +24,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -96,6 +98,15 @@ class ChoreOccurrence(TimestampMixin, Base):
     reward_cents: Mapped[int] = mapped_column(Integer, default=0)
     penalty_cents: Mapped[int] = mapped_column(Integer, default=0)
     late_multiplier: Mapped[float] = mapped_column(Numeric(4, 2), default=1.0)
+
+    # Snapshot of the chore's tier list at generation time, for the same reason the money
+    # terms above are snapshotted (spec §3): editing "+$100" down to "+$50" must not
+    # re-price a report card the kid already handed in. NULL on rows generated before
+    # tiers existed — the decision path falls back to the chore's current list.
+    outcome_tiers: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, default=None)
+    # The tier the admin picked, and a snapshot of it as it read at decision time.
+    outcome_tier_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    outcome_tier: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
 
     # Set when the LLM path fails open to NEEDS_REVIEW (spec §6.3 rule 3).
     verification_error: Mapped[str | None] = mapped_column(String(200), default=None)

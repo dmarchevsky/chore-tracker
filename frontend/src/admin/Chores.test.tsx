@@ -38,6 +38,7 @@ const CHORE = {
   grace_period_s: 900,
   geofence: null,
   verification_checklist: null,
+  outcome_tiers: null,
   start_date: '2025-01-01',
   end_date: null,
   active: true,
@@ -316,5 +317,83 @@ describe('admin Chores', () => {
     expect(screen.getByLabelText(/^Date/)).toHaveValue('2020-01-01');
     expect(screen.queryByLabelText('Cadence')).not.toBeInTheDocument();
     expect(screen.getByText(/already passed/i)).toBeInTheDocument();
+  });
+
+  it('adding an outcome hides the flat reward and PATCHes the tiers', async () => {
+    const calls = setup();
+
+    fireEvent.click(await screen.findByText('Empty the sink'));
+    expect(screen.getByLabelText('Reward / penalty ($)')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add an outcome' }));
+    fireEvent.change(screen.getByLabelText('Condition 1'), {
+      target: { value: 'all A grades' },
+    });
+    fireEvent.change(screen.getByLabelText('Amount 1'), { target: { value: '100' } });
+
+    // a tiered chore's money comes from its tiers, so the flat pair goes away
+    expect(screen.queryByLabelText('Reward / penalty ($)')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+
+    const body = calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>;
+    expect(body.outcome_tiers).toEqual([
+      {
+        id: 1,
+        condition: 'all A grades',
+        outcome_kind: 'money',
+        amount_cents: 10000,
+        text: null,
+      },
+    ]);
+    // and the backend's tiered invariants are satisfied before it ever sees the request
+    expect(body.reward_cents).toBe(0);
+    expect(body.penalty_cents).toBe(0);
+    expect(body.verification_mode).toBe('manual');
+  });
+
+  it('stores a penalty tier as a negative amount without asking for a minus sign', async () => {
+    const calls = setup();
+
+    fireEvent.click(await screen.findByText('Empty the sink'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add an outcome' }));
+    fireEvent.change(screen.getByLabelText('Condition 1'), {
+      target: { value: 'at least one C' },
+    });
+    fireEvent.change(screen.getByLabelText('Amount 1'), { target: { value: '50' } });
+    fireEvent.change(screen.getByLabelText('Reward or penalty 1'), {
+      target: { value: 'penalty' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    const body = calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>;
+    expect((body.outcome_tiers as { amount_cents: number }[])[0].amount_cents).toBe(-5000);
+  });
+
+  it('switches a tier to a text outcome and drops its amount', async () => {
+    const calls = setup();
+
+    fireEvent.click(await screen.findByText('Empty the sink'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add an outcome' }));
+    fireEvent.change(screen.getByLabelText('Condition 1'), {
+      target: { value: 'more than one missing assignment' },
+    });
+    fireEvent.change(screen.getByLabelText('Outcome type 1'), { target: { value: 'text' } });
+    fireEvent.change(screen.getByLabelText('Outcome text 1'), {
+      target: { value: 'grounded until it is fixed' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    const body = calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>;
+    expect((body.outcome_tiers as Record<string, unknown>[])[0]).toEqual({
+      id: 1,
+      condition: 'more than one missing assignment',
+      outcome_kind: 'text',
+      amount_cents: null,
+      text: 'grounded until it is fixed',
+    });
   });
 });

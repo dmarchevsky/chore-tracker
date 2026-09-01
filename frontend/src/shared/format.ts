@@ -13,3 +13,10 @@ export function dueLabel(iso: string, now = new Date()): string {
   if (hrs < 24) return `due in ${hrs} h`;
   return `due ${new Date(iso).toLocaleDateString()}`;
 }
+
+/** A tier's outcome as the parent wrote it: signed money, or the sentence. */
+export function tierOutcome(t: { amount_cents: number | null; text: string | null }): string {
+  if (t.text) return t.text;
+  const cents = t.amount_cents ?? 0;
+  return `${cents < 0 ? '-' : '+'}${money(Math.abs(cents))}`;
+}

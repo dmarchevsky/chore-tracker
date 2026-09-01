@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import enum
 import uuid
 from datetime import date, datetime, time
 
@@ -14,6 +15,7 @@ from app.services.rotation import RotationPeriod
 
 _PHOTO_PROOFS = {ProofType.photo, ProofType.photo_location}
 _LLM_MODES = {VerificationMode.llm_auto, VerificationMode.llm_assist}
+_MAX_TIERS = 8
 
 
 class GeofenceSpec(BaseModel):
@@ -27,6 +29,44 @@ class ChecklistItem(BaseModel):
     id: int = Field(ge=1)
     text: str = Field(min_length=1, max_length=300)
     required: bool = True
+
+
+class OutcomeKind(enum.StrEnum):
+    money = "money"
+    text = "text"
+
+
+class OutcomeTier(BaseModel):
+    """One condition -> outcome row of a graded chore (spec §4.6).
+
+    ``amount_cents`` is **signed**, unlike ``reward_cents``/``penalty_cents`` which are
+    unsigned magnitudes whose sign ledger.debit_penalty applies. One tier list carries both
+    rewards and penalties, so the sign is the only thing that says which — and it is what
+    routes the ledger kind. The admin form never asks a parent to type a minus sign; it
+    offers a Reward/Penalty toggle and stores the sign itself.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int = Field(ge=1)
+    condition: str = Field(min_length=1, max_length=300)
+    outcome_kind: OutcomeKind
+    amount_cents: int | None = None
+    text: str | None = Field(default=None, max_length=300)
+
+    @model_validator(mode="after")
+    def _shape(self) -> OutcomeTier:
+        if self.outcome_kind is OutcomeKind.money:
+            if not self.amount_cents:
+                raise ValueError("a money tier needs a non-zero amount_cents")
+            if self.text is not None:
+                raise ValueError("a money tier must not carry outcome text")
+        else:
+            if not (self.text and self.text.strip()):
+                raise ValueError("a text tier needs outcome text")
+            if self.amount_cents is not None:
+                raise ValueError("a text tier must not carry an amount")
+        return self
 
 
 class ChoreBase(BaseModel):
@@ -57,6 +97,8 @@ class ChoreBase(BaseModel):
     verification_checklist: list[ChecklistItem] | None = None
     auto_pass_threshold: float = Field(default=0.85, ge=0, le=1)
     auto_fail_threshold: float = Field(default=0.35, ge=0, le=1)
+
+    outcome_tiers: list[OutcomeTier] | None = None
 
     reward_cents: int = Field(default=0, ge=0)
     penalty_cents: int = Field(default=0, ge=0)
@@ -122,6 +164,34 @@ class ChoreBase(BaseModel):
             )
         if self.proof_type in {ProofType.location, ProofType.photo_location} and not self.geofence:
             raise ValueError(f"proof_type {self.proof_type} needs a geofence")
+
+        # Tier rules are all gated on the chore actually having tiers, so every existing
+        # definition keeps validating exactly as before (spec §4.6).
+        if self.outcome_tiers:
+            if len(self.outcome_tiers) > _MAX_TIERS:
+                raise ValueError(f"at most {_MAX_TIERS} outcome tiers")
+            if [t.id for t in self.outcome_tiers] != list(range(1, len(self.outcome_tiers) + 1)):
+                # Same renumber-on-every-edit contract as verification_checklist, so
+                # "tier 3" means the same thing in the audit log as on screen.
+                raise ValueError("outcome_tiers ids must be 1..N in order")
+            if self.verification_mode is not VerificationMode.manual:
+                # An LLM cannot judge "all A grades", and under llm_auto its opinion would
+                # move money. auto_accept terminally passes with no human in the loop, so
+                # nobody would ever pick a tier and the chore would silently pay nothing.
+                raise ValueError(
+                    "a chore with outcome tiers must use verification_mode=manual — "
+                    "a tier is chosen by a person"
+                )
+            if self.verification_rule or self.verification_checklist:
+                raise ValueError(
+                    "a tiered chore has no LLM step, so it cannot carry a "
+                    "verification_rule or verification_checklist"
+                )
+            if self.reward_cents or self.penalty_cents or self.late_multiplier != 1.0:
+                raise ValueError(
+                    "a tiered chore's money comes from its tiers — set reward_cents and "
+                    "penalty_cents to 0 and leave late_multiplier at 1.0"
+                )
         return self
 
 
@@ -170,6 +240,7 @@ class ChoreUpdate(BaseModel):
     verification_checklist: list[ChecklistItem] | None = None
     auto_pass_threshold: float | None = Field(default=None, ge=0, le=1)
     auto_fail_threshold: float | None = Field(default=None, ge=0, le=1)
+    outcome_tiers: list[OutcomeTier] | None = None
     reward_cents: int | None = Field(default=None, ge=0)
     penalty_cents: int | None = Field(default=None, ge=0)
     late_multiplier: float | None = Field(default=None, ge=0, le=1)
@@ -198,6 +269,9 @@ class OccurrenceOut(BaseModel):
     settlement_locked_at: datetime | None
     reward_cents: int
     penalty_cents: int
+    outcome_tiers: list[OutcomeTier] | None = None
+    outcome_tier_id: int | None = None
+    outcome_tier: OutcomeTier | None = None
     verification_error: str | None = None
 
 

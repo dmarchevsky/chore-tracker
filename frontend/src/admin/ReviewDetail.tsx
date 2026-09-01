@@ -11,7 +11,7 @@ import type { AdminSubmission, AdminVerification } from './api';
 import { Button, Card, Spinner } from '../shared/ui';
 import { StatusBadge } from '../shared/StatusBadge';
 import { flagLabel, statusLabel, verdictLabel } from '../shared/status';
-import { money } from '../shared/format';
+import { money, tierOutcome } from '../shared/format';
 import type { Occurrence } from '../api/types';
 
 /** Why this occurrence is sitting in the queue, in one sentence a parent can act on. */
@@ -144,6 +144,11 @@ export function ReviewDetail({ id, onDone }: { id: string; onDone: () => void })
   const locked = o.settlement_locked_at != null;
   const decided = ['approved', 'rejected', 'excused'].includes(o.status);
 
+  // A tiered occurrence is graded by picking one condition, not approved or rejected —
+  // the backend refuses approve/reject for it (spec §4.6).
+  const tiers = o.outcome_tiers ?? [];
+  const tiered = tiers.length > 0;
+
   function act(action: 'approve' | 'reject' | 'excuse' | 'redo') {
     if (!reason.trim()) {
       setReasonError(true);
@@ -156,11 +161,28 @@ export function ReviewDetail({ id, onDone }: { id: string; onDone: () => void })
     );
   }
 
+  function pickTier(tier_id: number) {
+    if (!reason.trim()) {
+      setReasonError(true);
+      return;
+    }
+    decide.mutate({ id, body: { action: 'tier', reason, tier_id } }, { onSuccess: onDone });
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <div>
         <h2 className="text-lg font-bold">
-          <StatusBadge status={o.status} /> · {money(o.reward_cents)}
+          <StatusBadge status={o.status} /> ·{' '}
+          {o.outcome_tier ? (
+            <span className="text-base font-normal">
+              {o.outcome_tier.condition} → {tierOutcome(o.outcome_tier)}
+            </span>
+          ) : tiered ? (
+            <span className="text-base font-normal text-slate-400">not graded yet</span>
+          ) : (
+            money(o.reward_cents)
+          )}
         </h2>
         <p className="text-sm text-slate-400">
           due {new Date(o.due_at).toLocaleString()} · window{' '}
@@ -248,28 +270,48 @@ export function ReviewDetail({ id, onDone }: { id: string; onDone: () => void })
             entry and writes a new one — nothing is edited in place.
           </p>
         )}
-        <input
-          className="mt-2 w-full rounded-xl bg-slate-800 p-2 text-sm"
-          placeholder="Adjust amount ($, optional)"
-          value={override}
-          onChange={(e) => setOverride(e.target.value)}
-        />
+        {!tiered && (
+          <input
+            className="mt-2 w-full rounded-xl bg-slate-800 p-2 text-sm"
+            placeholder="Adjust amount ($, optional)"
+            value={override}
+            onChange={(e) => setOverride(e.target.value)}
+          />
+        )}
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button
-            className="min-h-0 px-3 py-2 text-sm"
-            disabled={locked}
-            onClick={() => act('approve')}
-          >
-            Approve
-          </Button>
-          <Button
-            className="min-h-0 px-3 py-2 text-sm"
-            variant="danger"
-            disabled={locked}
-            onClick={() => act('reject')}
-          >
-            Reject
-          </Button>
+          {tiered ? (
+            tiers.map((t) => (
+              <Button
+                key={t.id}
+                className={`min-h-0 px-3 py-2 text-sm ${
+                  o.outcome_tier_id === t.id ? 'ring-2 ring-sky-300' : ''
+                }`}
+                variant={(t.amount_cents ?? 0) < 0 ? 'danger' : 'primary'}
+                disabled={locked}
+                onClick={() => pickTier(t.id)}
+              >
+                {t.condition} → {tierOutcome(t)}
+              </Button>
+            ))
+          ) : (
+            <>
+              <Button
+                className="min-h-0 px-3 py-2 text-sm"
+                disabled={locked}
+                onClick={() => act('approve')}
+              >
+                Approve
+              </Button>
+              <Button
+                className="min-h-0 px-3 py-2 text-sm"
+                variant="danger"
+                disabled={locked}
+                onClick={() => act('reject')}
+              >
+                Reject
+              </Button>
+            </>
+          )}
           <Button
             className="min-h-0 px-3 py-2 text-sm"
             variant="ghost"

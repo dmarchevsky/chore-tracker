@@ -7,7 +7,15 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import type { Chore } from '../../api/types';
 import { useDeactivateChore, useUpdateChore } from '../api';
-import { BLANK, EDITABLE, FENCED, LLM_MODES, PHOTO_PROOFS, type PreviewItem } from './choreFields';
+import {
+  BLANK,
+  EDITABLE,
+  FENCED,
+  isTiered,
+  LLM_MODES,
+  PHOTO_PROOFS,
+  type PreviewItem,
+} from './choreFields';
 
 export type FormState = { mode: 'create' } | { mode: 'edit'; chore: Chore };
 
@@ -115,6 +123,16 @@ export function useChoreForm(state: FormState, onDone: () => void) {
       out.verification_rule = null;
       out.verification_checklist = null;
       if (LLM_MODES.has(String(out.verification_mode))) out.verification_mode = 'manual';
+    }
+    if (isTiered(form)) {
+      // A tier is chosen by a person, and its money is the tier's — the backend rejects
+      // an LLM mode, a rule/checklist, or a non-zero reward on a tiered chore.
+      out.verification_mode = 'manual';
+      out.verification_rule = null;
+      out.verification_checklist = null;
+      out.reward_cents = 0;
+      out.penalty_cents = 0;
+      out.late_multiplier = 1;
     }
     return out;
   }
