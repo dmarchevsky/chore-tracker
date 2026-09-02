@@ -11,8 +11,21 @@ export default defineConfig({
       injectRegister: 'auto',
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-        navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api/],
+        // NO navigateFallback, deliberately. It served every navigation from the precached
+        // shell, which means Cloudflare Access never saw a navigation — and Access can only
+        // re-authenticate on a top-level navigation. Once the edge session ended, the app
+        // kept loading from cache, every API call got a cross-origin redirect that `fetch`
+        // cannot follow, and the user was locked out with no way to sign in again.
+        //
+        // Behind Access an offline shell buys almost nothing anyway: every screen needs an
+        // API call, and those need both the network and a live edge session. What spec §11
+        // actually requires — capturing and queueing a submission when the network drops
+        // mid-use — happens in IndexedDB in an already-open tab and is unaffected.
+        // Assets stay precached, so loads are still fast.
+        //
+        // Must be set explicitly: vite-plugin-pwa defaults it to 'index.html', so simply
+        // omitting the option leaves the navigation route in place.
+        navigateFallback: undefined,
       },
       manifest: {
         name: 'ChoreKeeper',

@@ -1,14 +1,17 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { api, ApiError, setCsrfToken } from '../api/client';
+import { api, ApiError, NetworkError, setCsrfToken } from '../api/client';
 import type { Me } from '../api/types';
 
 interface AuthState {
   me: Me | null;
   loading: boolean;
-  /** Why the bootstrap probe failed, when it failed for a reason worth showing: a Google
-   *  account Cloudflare Access let through but the household does not know. */
+  /** Why the bootstrap probe failed, when it failed for a reason worth showing. */
   error: string | null;
+  /** True only when Access vouched for a Google account the household does not know —
+   *  the one case where ending the edge session and picking another account helps. A
+   *  network failure also sets `error`, and offering it there would just fail again. */
+  canSwitchAccount: boolean;
   /** The local admin password. Reachable only on the LAN — the tunnel's front door
    *  refuses this path outright (see docs/remote-access.md). */
   breakGlassLogin: (username: string, password: string) => Promise<void>;
@@ -26,6 +29,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [canSwitchAccount, setCanSwitch] = useState(false);
 
   const apply = useCallback((m: Me | null) => {
     setMe(m);
@@ -38,12 +42,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       apply(await api.get<Me>('/auth/me'));
       setError(null);
+      setCanSwitch(false);
     } catch (e) {
       apply(null);
       // 401 is just "not signed in" — silent. A 403 means Access vouched for an address
       // the household has never heard of, and the message names it, which is the one
-      // thing that lets the parent fix it.
-      setError(e instanceof ApiError && e.status === 403 ? e.message : null);
+      // thing that lets the parent fix it. A NetworkError produced no status at all, so
+      // saying "not signed in" would be a guess — and was, when a stale service worker
+      // served the shell offline and every call died on a cross-origin redirect.
+      const notAMember = e instanceof ApiError && e.status === 403;
+      setCanSwitch(notAMember);
+      if (e instanceof NetworkError) {
+        setError('Could not reach ChoreKeeper. Check your connection, then try again.');
+      } else {
+        setError(notAMember ? e.message : null);
+      }
     }
   }, [apply]);
 
@@ -55,6 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (username: string, password: string) => {
       apply(await api.post<Me>('/auth/login', { username, password }));
       setError(null);
+      setCanSwitch(false);
     },
     [apply],
   );
@@ -73,8 +87,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [apply]);
 
   const value = useMemo(
-    () => ({ me, loading, error, breakGlassLogin, logout, refresh: probe }),
-    [me, loading, error, breakGlassLogin, logout, probe],
+    () => ({ me, loading, error, canSwitchAccount, breakGlassLogin, logout, refresh: probe }),
+    [me, loading, error, canSwitchAccount, breakGlassLogin, logout, probe],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

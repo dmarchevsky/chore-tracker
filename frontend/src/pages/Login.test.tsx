@@ -7,13 +7,14 @@ vi.mock('../auth/AuthContext', () => ({ useAuth: vi.fn() }));
 
 const NOT_A_MEMBER = 'stranger@example.com is signed in to Google but is not an active member';
 
-function setup(error: string | null) {
+function setup(error: string | null, canSwitchAccount = error !== null) {
   const logout = vi.fn();
   const refresh = vi.fn();
   vi.mocked(useAuth).mockReturnValue({
     me: null,
     loading: false,
     error,
+    canSwitchAccount,
     breakGlassLogin: vi.fn(),
     logout,
     refresh,
@@ -48,6 +49,14 @@ describe('Login', () => {
     setup(null);
     expect(screen.queryByRole('button', { name: /different google account/i })).toBeNull();
     expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
+  });
+
+  it('does not offer an account switch when the app was simply unreachable', () => {
+    // A network failure sets an error too, but ending the edge session cannot fix it —
+    // and the request to do so would fail the same way.
+    setup('Could not reach ChoreKeeper. Check your connection, then try again.', false);
+    expect(screen.getByText(/could not reach/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /different google account/i })).toBeNull();
   });
 
   it('reveals the break-glass form on demand', () => {

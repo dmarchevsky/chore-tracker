@@ -9,6 +9,19 @@ export class ApiError extends Error {
   }
 }
 
+/** The request never produced an HTTP status: offline, or the edge answered with a
+ *  cross-origin redirect that `fetch` refuses to follow. Distinguished from ApiError
+ *  because "no answer" and "answered 401" call for very different things to be said. */
+export class NetworkError extends Error {}
+
+async function send(path: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(BASE + path, init);
+  } catch {
+    throw new NetworkError('could not reach ChoreKeeper');
+  }
+}
+
 let csrfToken = '';
 export function setCsrfToken(token: string) {
   csrfToken = token;
@@ -67,7 +80,7 @@ function reloadIfAccessExpired(resp: Response): void {
 
 /** A GET that also needs a response header — used for paged lists (X-Total-Count). */
 export async function getPage<T>(path: string): Promise<{ items: T; total: number }> {
-  const resp = await fetch(BASE + path, { method: 'GET', credentials: 'same-origin' });
+  const resp = await send(path, { method: 'GET', credentials: 'same-origin' });
   reloadIfAccessExpired(resp);
   if (!resp.ok) throw await apiError(resp);
   const items = (await resp.json()) as T;
@@ -86,7 +99,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     init.body = JSON.stringify(body);
   }
 
-  const resp = await fetch(BASE + path, init);
+  const resp = await send(path, init);
   reloadIfAccessExpired(resp);
   if (!resp.ok) throw await apiError(resp);
   if (resp.status === 204) return undefined as T;

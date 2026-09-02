@@ -7,7 +7,7 @@ import { Button, Card } from '../shared/ui';
  *  In the normal case Cloudflare Access has already signed the visitor in and the app
  *  goes straight to their screens — nobody sees this page. */
 export function Login() {
-  const { error, refresh, logout } = useAuth();
+  const { error, canSwitchAccount, refresh, logout } = useAuth();
   const [breakGlass, setBreakGlass] = useState(false);
 
   if (breakGlass) return <BreakGlassForm onCancel={() => setBreakGlass(false)} />;
@@ -30,7 +30,7 @@ export function Login() {
         <Button onClick={() => void refresh()}>Try again</Button>
         {/* Only offered when Cloudflare did sign someone in (the 403 above). With no Access
             session there is nothing to switch away from, and the request would just fail. */}
-        {error && (
+        {canSwitchAccount && (
           <>
             <button
               type="button"
