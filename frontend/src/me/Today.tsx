@@ -1,9 +1,12 @@
 import { Link } from 'react-router-dom';
-import { useChores, useOccurrences } from '../api/hooks';
+import { useAuth } from '../auth/AuthContext';
+import { useChores, useLedger, useOccurrences } from '../api/hooks';
 import type { Occurrence } from '../api/types';
 import { Spinner } from '../shared/ui';
 import { dueLabel } from '../shared/format';
 import { OccRow } from './occRow';
+import { chargedPenalties } from './penalties';
+import { PenaltyRow } from './penaltyRow';
 
 // Chores the kid still has to act on right now.
 const DO_NOW = new Set(['open', 'verified_fail']);
@@ -27,7 +30,8 @@ function todaySpan(now = new Date()) {
   return { from: start.toISOString(), to: end.toISOString() };
 }
 
-export function Pending() {
+export function Today() {
+  const { me } = useAuth();
   const open = useOccurrences({ status: 'open' });
   const redo = useOccurrences({ status: 'verified_fail' });
   const later = useOccurrences({ status: 'pending' });
@@ -35,12 +39,20 @@ export function Pending() {
   // appeal window is open (spec §4.2), so it belongs on the screen they actually look at.
   const missed = useOccurrences({ status: 'missed', ...todaySpan() });
   const chores = useChores();
+  // Penalties a parent charged today (spec §4.8). They cost real money and nothing else on
+  // this screen mentions them — without this the first the kid hears of one is the balance.
+  const ledger = useLedger(me?.id ?? '');
 
   if (open.isLoading || redo.isLoading || later.isLoading || missed.isLoading) return <Spinner />;
   if (open.error) return <p className="text-rose-400">Couldn’t load your chores.</p>;
 
   const byId = new Map((chores.data ?? []).map((c) => [c.id, c]));
   const byDue = (a: Occurrence, b: Occurrence) => +new Date(a.due_at) - +new Date(b.due_at);
+  const span = todaySpan();
+  const penalties = chargedPenalties(ledger.data, {
+    since: new Date(span.from),
+    until: new Date(span.to),
+  });
 
   const doNow = [...(open.data ?? []), ...(redo.data ?? [])]
     .filter((o) => DO_NOW.has(o.status))
@@ -52,10 +64,13 @@ export function Pending() {
 
   return (
     <div className="flex flex-col gap-3 pt-2">
-      <h1 className="text-xl font-bold">To do</h1>
+      <h1 className="text-xl font-bold">Today</h1>
 
       {doNow.length === 0 && missedToday.length === 0 && (
-        <p className="text-slate-500">Nothing to do right now. 🎉</p>
+        // A charge is bad news sitting right below; don't cheer over it.
+        <p className="text-slate-500">
+          {penalties.length > 0 ? 'Nothing left to do today.' : 'Nothing to do right now. 🎉'}
+        </p>
       )}
       {doNow.map((o) => (
         <Link key={o.id} to={`/me/chores/${o.id}`}>
@@ -77,6 +92,22 @@ export function Pending() {
                 })}`}
               />
             </Link>
+          ))}
+        </>
+      )}
+
+      {penalties.length > 0 && (
+        <>
+          <h2 className="mt-4 text-sm font-semibold text-slate-400">Penalties</h2>
+          {penalties.map((e) => (
+            <PenaltyRow
+              key={e.id}
+              entry={e}
+              when={new Date(e.created_at).toLocaleTimeString([], {
+                hour: 'numeric',
+                minute: '2-digit',
+              })}
+            />
           ))}
         </>
       )}

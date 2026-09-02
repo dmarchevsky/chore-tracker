@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import { Pending } from './Pending';
+import { AuthProvider } from '../auth/AuthContext';
+import { Today } from './Today';
 
 function json(body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -28,12 +29,31 @@ function occ(over: Record<string, unknown>) {
   };
 }
 
+const ME = { id: 'k1', username: 'alice', display_name: 'Alice', role: 'child', csrf_token: 'x' };
+
+/** A penalty a parent charged by hand: no occurrence, a rule behind it (spec §4.8). */
+function penalty(over: Record<string, unknown> = {}) {
+  return {
+    id: 'pen1',
+    kind: 'penalty',
+    amount_cents: -150,
+    reason: 'House rules: swore at your sister',
+    created_at: new Date().toISOString(),
+    occurrence_id: null,
+    reversed_by_entry_id: null,
+    chore_id: 'r1',
+    chore_title: 'House rules',
+    occurrence_due_at: null,
+    ...over,
+  };
+}
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
 
-function renderPending() {
+function renderToday(ledger: unknown[] = []) {
   vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
     const url = String(input);
     if (url.includes('status=open'))
@@ -53,6 +73,8 @@ function renderPending() {
           occ({ id: 'p4', status: 'pending', chore_id: 'c3', window_open_at: soon(12) }),
         ]),
       );
+    if (url.includes('/auth/me')) return Promise.resolve(json(ME));
+    if (url.includes('/ledger')) return Promise.resolve(json(ledger));
     if (url.includes('/chores'))
       return Promise.resolve(
         json([
@@ -68,7 +90,9 @@ function renderPending() {
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
-        <Pending />
+        <AuthProvider>
+          <Today />
+        </AuthProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -78,9 +102,9 @@ function soon(hours = 6) {
   return new Date(Date.now() + hours * 3600_000).toISOString();
 }
 
-describe('kid Pending', () => {
+describe('kid Today', () => {
   it('lists open chores as tappable rows and pending ones under Later, not tappable', async () => {
-    renderPending();
+    renderToday();
 
     const doNow = await screen.findByText('Empty the sink');
     expect(doNow.closest('a')).toHaveAttribute('href', '/me/chores/o1');
@@ -92,7 +116,7 @@ describe('kid Pending', () => {
   });
 
   it('lists chores missed today, tappable so the kid can still dispute them', async () => {
-    renderPending();
+    renderToday();
 
     expect(await screen.findByText('Missed today')).toBeInTheDocument();
     const miss = screen.getByText('Feed the cat');
@@ -100,7 +124,7 @@ describe('kid Pending', () => {
   });
 
   it('shows only the next upcoming occurrence of each chore', async () => {
-    renderPending();
+    renderToday();
     await screen.findByText('Coming up');
 
     // Three pending "Walk the dog" rows collapse to the soonest one...
@@ -109,5 +133,30 @@ describe('kid Pending', () => {
     expect(screen.getAllByText(/opens/)).toHaveLength(2);
     // ...and a different chore still gets its own row.
     expect(screen.getByText('Take out the bins')).toBeInTheDocument();
+  });
+
+  it('shows penalties charged today, and leaves undone ones off', async () => {
+    renderToday([
+      penalty(),
+      // Already reversed — no longer charged, so it has no business on today's screen.
+      penalty({ id: 'pen2', chore_title: 'Undone rule', reversed_by_entry_id: 'adj1' }),
+      // Yesterday's charge belongs to History, not Today.
+      penalty({
+        id: 'pen3',
+        chore_title: 'Old rule',
+        created_at: new Date(Date.now() - 36 * 3600_000).toISOString(),
+      }),
+      // A missed chore's penalty already has an occurrence row of its own.
+      penalty({ id: 'pen4', chore_title: 'Feed the cat', occurrence_id: 'm1', chore_id: null }),
+    ]);
+
+    expect(await screen.findByText('Penalties')).toBeInTheDocument();
+    expect(screen.getByText('House rules')).toBeInTheDocument();
+    expect(screen.getByText('House rules: swore at your sister')).toBeInTheDocument();
+    expect(screen.getByText('-$1.50')).toBeInTheDocument();
+    expect(screen.queryByText('Undone rule')).not.toBeInTheDocument();
+    expect(screen.queryByText('Old rule')).not.toBeInTheDocument();
+    // "Feed the cat" is on screen once — as the missed-chore row, not twice.
+    expect(screen.getAllByText('Feed the cat')).toHaveLength(1);
   });
 });

@@ -4,8 +4,8 @@ import { AuthProvider, useAuth } from './auth/AuthContext';
 import { Login } from './pages/Login';
 import { Spinner } from './shared/ui';
 import { MeShell } from './me/MeShell';
-import { Pending } from './me/Pending';
-import { Complete } from './me/Complete';
+import { Today } from './me/Today';
+import { History as KidHistory } from './me/History';
 import { ChoreView } from './me/ChoreView';
 import { Money as KidMoney } from './me/Money';
 import { Rules } from './me/Rules';
@@ -39,8 +39,8 @@ function Shell() {
       <Route path="/login" element={<Navigate to={home} replace />} />
       {me.role === 'child' ? (
         <Route path="/me" element={<MeShell />}>
-          <Route index element={<Pending />} />
-          <Route path="complete" element={<Complete />} />
+          <Route index element={<Today />} />
+          <Route path="history" element={<KidHistory />} />
           <Route path="money" element={<KidMoney />} />
           <Route path="rules" element={<Rules />} />
           <Route path="settings" element={<KidSettings />} />

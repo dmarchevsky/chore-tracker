@@ -8,8 +8,8 @@ import { pushState, type PushState } from '../pwa/push';
 import { StandingBanner } from './StandingBanner';
 
 const tabs = [
-  { to: '/me', label: 'Pending', end: true },
-  { to: '/me/complete', label: 'Complete' },
+  { to: '/me', label: 'Today', end: true },
+  { to: '/me/history', label: 'History' },
   { to: '/me/money', label: 'Money' },
   { to: '/me/rules', label: 'Rules' },
 ];
