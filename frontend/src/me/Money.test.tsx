@@ -88,6 +88,52 @@ describe('kid Money', () => {
     expect(screen.getByText('Missed chore')).toBeInTheDocument();
   });
 
+  it('opens the chore behind an entry, and leaves entries with no chore alone', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes('/auth/me')) return Promise.resolve(json(ME));
+      if (url.includes('/balance')) return Promise.resolve(json({ balance_cents: 300 }));
+      if (url.includes('/ledger'))
+        return Promise.resolve(
+          json([
+            {
+              id: 'e1',
+              kind: 'earning',
+              amount_cents: 200,
+              reason: '',
+              created_at: '2025-01-01',
+              occurrence_id: 'o1',
+              chore_title: 'Walk the dog',
+            },
+            {
+              id: 'e2',
+              kind: 'payout',
+              amount_cents: -100,
+              reason: '',
+              created_at: '2025-01-02',
+              occurrence_id: null,
+            },
+          ]),
+        );
+      return Promise.resolve(json([]));
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider>
+          <MemoryRouter>
+            <Money />
+          </MemoryRouter>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    const chore = await screen.findByText(/Walk the dog/);
+    expect(chore.closest('a')).toHaveAttribute('href', '/me/chores/o1');
+    // A payout has no occurrence behind it — no tap that leads nowhere.
+    expect(screen.getByText('Paid out').closest('a')).toBeNull();
+  });
+
   it('does not call a hand-applied penalty a missed chore', async () => {
     // Both are `penalty` kind, so the flat label map used to read "Missed chore" on a
     // charge for something that was never a chore at all (spec §4.8).
