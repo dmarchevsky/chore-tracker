@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .venv/
 .env
+env.production
 .ruff_cache/
 .pytest_cache/
 .coverage

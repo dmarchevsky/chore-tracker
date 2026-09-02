@@ -20,6 +20,12 @@ app for parent and kids alike. SSH / Postgres / `llama-server` stay LAN-only; th
 remote operator path. Full setup + the security tradeoffs:
 [docs/remote-access.md](docs/remote-access.md).
 
+## Production deployment
+
+[docs/deploy-dockhand.md](docs/deploy-dockhand.md) — `docker-compose.prod.yml` is the whole
+production stack as a single compose file (+ `env.production.example`), sized for DockHand
+or any orchestrator that deploys one stack; it includes the readiness audit.
+
 ## Status
 
 **Phases 1–5 done; Phase 6 (hardening & operations) in progress.** See

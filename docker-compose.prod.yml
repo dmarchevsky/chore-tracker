@@ -1,0 +1,150 @@
+# ChoreKeeper — single-file PRODUCTION compose (DockHand-ready; no !override tags).
+#
+# This is docker-compose.yml + docker-compose.tunnel.yml merged into one file for
+# orchestrators that deploy exactly one compose file. The dev pair stays canonical for
+# `just up` / `just tunnel-up`; nothing here changes them.
+#
+#   manual:  docker compose -f docker-compose.prod.yml --env-file env.production up -d --build
+#   dockhand: stack source = this repo, compose path = docker-compose.prod.yml,
+#             stack environment = the filled env.production values (see env.production.example)
+#
+# Security-critical settings (ENVIRONMENT, COOKIE_SECURE, TRUST_PROXY_HEADERS) are pinned
+# HERE, not read from env — a production stack cannot be misconfigured into dev mode by a
+# stray .env. Secrets use ${VAR:?} guards: a missing one fails the deploy loudly.
+#
+# Topology (docs/remote-access.md):
+#   internet → cloudflared → proxy:80 (tunnel door; break-glass 404ed by Caddy) → api:8000
+#   home LAN → host :5173    → proxy:81 (LAN door; break-glass sign-in, X-CK-Door: lan)
+#   host     → 127.0.0.1:8088 api, 127.0.0.1:5432 postgres — operator/break-glass, LAN-never.
+#
+# The vision LLM is NOT a service here: it runs on another LAN machine and is reached via
+# LLM_VISION_BASE_URL. With it unset (or LLM_VISION_MODEL empty) verification fails open
+# to NEEDS_REVIEW (spec §6.3).
+
+name: chorekeeper-prod
+
+services:
+  db:
+    # Pinned, not `17`: a redeploy must never pull a new major out from under the data dir.
+    image: postgres:17.6
+    environment:
+      POSTGRES_USER: ${DB_USER:-chore}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in the stack environment}
+      POSTGRES_DB: ${DB_NAME:-chore}
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"   # operator psql from the host only
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-chore} -d ${DB_NAME:-chore}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    environment: &app-env
+      # --- pinned: production cannot downgrade these ---
+      ENVIRONMENT: prod                # HSTS on, /docs + /openapi.json off
+      COOKIE_SECURE: "true"
+      TRUST_PROXY_HEADERS: "true"      # believe CF-Connecting-IP behind the tunnel
+      LOG_FORMAT: json
+      # --- required (fail the deploy if missing) ---
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?}
+      SESSION_SECRET: ${SESSION_SECRET:?}
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:-chore}:${DB_PASSWORD:?}@db:5432/${DB_NAME:-chore}
+      # --- Cloudflare Access = Google sign-in (docs/remote-access.md §5) ---
+      CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:-}
+      CF_ACCESS_AUD: ${CF_ACCESS_AUD:-}
+      CF_ACCESS_ISSUER: ${CF_ACCESS_ISSUER:-}
+      # --- first boot seeds the admin identity from this (read ONCE by the auth migration) ---
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      # --- general / storage ---
+      TZ: ${TZ:-America/Los_Angeles}
+      MEDIA_ROOT: /data/media
+      MEDIA_RETENTION_DAYS: ${MEDIA_RETENTION_DAYS:-180}
+      GEO_RETENTION_DAYS: ${GEO_RETENTION_DAYS:-30}
+      # --- local vision LLM on another LAN machine; empty model = scoring off, fail-open ---
+      LLM_VISION_BASE_URL: ${LLM_VISION_BASE_URL:-}
+      LLM_VISION_MODEL: ${LLM_VISION_MODEL:-}
+      LLM_VISION_API_KEY: ${LLM_VISION_API_KEY:-not-needed}
+      LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-120}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-1}
+      # --- verification banding ---
+      AUTO_PASS_THRESHOLD: ${AUTO_PASS_THRESHOLD:-0.85}
+      AUTO_FAIL_THRESHOLD: ${AUTO_FAIL_THRESHOLD:-0.35}
+      MISS_SETTLE_DELAY_S: ${MISS_SETTLE_DELAY_S:-21600}
+      APPEAL_WINDOW_S: ${APPEAL_WINDOW_S:-259200}
+      # --- sessions ---
+      ADMIN_SESSION_HOURS: ${ADMIN_SESSION_HOURS:-12}
+      CHILD_SESSION_DAYS: ${CHILD_SESSION_DAYS:-90}
+      # --- web push (empty pair = push disabled) ---
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    # Migrations run here, before uvicorn; worker waits on api: service_healthy.
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000
+             --proxy-headers --forwarded-allow-ips='*'"
+    ports:
+      - "127.0.0.1:8088:8000"   # operator + break-glass; host loopback only
+    volumes:
+      - media_data:/data/media
+    healthcheck:
+      # No curl in python:3.12-slim; /health is Access-exempt and localhost passes
+      # TrustedHostMiddleware, so this probe survives every prod setting.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3).status == 200 else 1)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  worker:
+    build: ./backend
+    environment: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy   # api-healthy ⇒ alembic upgrade head has run
+    command: ["python", "-m", "app.worker"]
+    volumes:
+      - media_data:/data/media
+    restart: unless-stopped
+
+  # Caddy front door (frontend/Caddyfile): :80 = tunnel door (stays unpublished,
+  # cloudflared reaches it on the compose network), :81 = LAN break-glass door.
+  proxy:
+    build: ./frontend
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${LAN_DOOR_PORT:-5173}:81"   # LAN door only; :80 must NOT be published
+    restart: unless-stopped
+
+  # Outbound-only connection to Cloudflare's edge — the sole ingress path.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.8.3
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in the stack environment}
+    depends_on:
+      - proxy
+    restart: unless-stopped
+
+volumes:
+  db_data:
+  media_data:
