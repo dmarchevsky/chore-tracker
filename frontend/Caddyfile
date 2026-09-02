@@ -66,6 +66,7 @@
 # ---- the tunnel door -------------------------------------------------------
 :80 {
 	vars door "tunnel"
+	vars upstream_host {host}
 	header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 
 	# The break-glass admin password must never ride the tunnel: this door refuses to
@@ -86,5 +87,6 @@
 # break it. Nothing here is reachable from the internet — see the header comment.
 :81 {
 	vars door "lan"
+	vars upstream_host "localhost"
 	import app
 }
