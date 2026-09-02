@@ -213,7 +213,9 @@ async def prepare(
 ) -> dict:
     """The whole operation, in one transaction the caller commits."""
     now = now or datetime.now(UTC)
-    household = (await db.execute(select(Household).limit(1))).scalar_one()
+    household = (await db.execute(select(Household).limit(1))).scalar_one_or_none()
+    if household is None:
+        raise SystemExit("no household in this database — run the bootstrap seed first")
     today = now.astimezone(ZoneInfo(household.timezone)).date()
 
     before = await counts(db)

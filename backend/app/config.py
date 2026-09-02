@@ -7,6 +7,10 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Named so create_app() can refuse to boot a production app that is still using it; the
+# value itself has to stay a working default or a fresh checkout cannot start at all.
+DEFAULT_SESSION_SECRET = "dev-insecure-change-me"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -76,7 +80,7 @@ class Settings(BaseSettings):
     vapid_private_key: str = Field(default="", alias="VAPID_PRIVATE_KEY")
 
     # --- Auth / sessions --------------------------------------------------
-    session_secret: str = Field(default="dev-insecure-change-me", alias="SESSION_SECRET")
+    session_secret: str = Field(default=DEFAULT_SESSION_SECRET, alias="SESSION_SECRET")
     admin_session_hours: int = Field(default=12, alias="ADMIN_SESSION_HOURS")
     child_session_days: int = Field(default=90, alias="CHILD_SESSION_DAYS")
     cookie_secure: bool = Field(default=False, alias="COOKIE_SECURE")

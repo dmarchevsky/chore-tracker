@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime, time, timedelta
 import pytest_asyncio
 from sqlalchemy import delete, func, select
 
-from app.models import Chore, ChoreOccurrence, OccurrenceStatus, User, UserRole
+from app.models import Chore, ChoreOccurrence, Household, OccurrenceStatus, User, UserRole
 from app.services.scheduler import (
     detect_missed,
     generate_occurrences,
@@ -243,3 +243,15 @@ async def test_one_off_goes_missed_after_its_grace_period(db_session, household,
 
     await detect_missed(db_session, now=NOW + timedelta(days=1))
     assert await _count(db_session, status=OccurrenceStatus.missed) == 1
+
+
+async def test_generate_is_a_quiet_no_op_before_the_household_exists(db_session):
+    """A production stack comes up on an empty volume and stays empty until the bootstrap
+    seed runs. Raising there turned every worker tick into a traceback, which is how a real
+    fault gets lost in the noise (docs/deploy-dockhand.md, readiness item 11)."""
+    await db_session.execute(delete(Household))
+    await db_session.commit()
+
+    assert await generate_occurrences(db_session, now=NOW) == 0
+    report = await reconcile(db_session, now=NOW)
+    assert (report.generated, report.opened, report.missed) == (0, 0, 0)

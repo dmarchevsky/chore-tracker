@@ -17,7 +17,7 @@ from starlette.responses import Response
 from app import obs
 from app.api.v1 import api_router
 from app.auth.cf_access import CfAccessMiddleware
-from app.config import get_settings
+from app.config import DEFAULT_SESSION_SECRET, get_settings
 
 log = logging.getLogger("chorekeeper.api")
 
@@ -86,6 +86,16 @@ def create_app() -> FastAPI:
         raise RuntimeError(
             "DEV_AUTH is on with ENVIRONMENT=prod: that is passwordless sign-in on a "
             "production stack. Unset DEV_AUTH, or run the dev compose file."
+        )
+    # The session secret signs the session cookie's server-side lookup AND the short-lived
+    # media URLs (services/media.py). Its default is published in this repo, so a prod app
+    # running on it hands out forgeable media links — and, like DEV_AUTH, looks completely
+    # healthy from the outside. Compose guards this with ${SESSION_SECRET:?}, which covers
+    # the compose path only; this covers every other way the app gets started.
+    if settings.is_prod and settings.session_secret == DEFAULT_SESSION_SECRET:
+        raise RuntimeError(
+            "SESSION_SECRET is still the development default under ENVIRONMENT=prod. "
+            "Generate one (openssl rand -hex 32) and set it in env.production."
         )
     if settings.cf_access_team_domain and settings.cf_access_aud:
         if settings.dev_auth:

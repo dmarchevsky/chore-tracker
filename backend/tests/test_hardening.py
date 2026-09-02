@@ -12,6 +12,10 @@ from app.main import create_app
 @pytest.fixture
 def fresh_app(monkeypatch):
     def _build(**env: str):
+        # A prod app refuses to start on the default session secret, which every test here
+        # but that one would otherwise trip over. Supply a real-looking one by default and
+        # let a test override it to assert the refusal.
+        env.setdefault("SESSION_SECRET", "0" * 64)
         for k, v in env.items():
             monkeypatch.setenv(k, v)
         get_settings.cache_clear()
@@ -82,6 +86,19 @@ def test_dev_auth_refuses_to_start_in_prod(fresh_app):
     so the only safe place to catch this is before the port is bound."""
     with pytest.raises(RuntimeError, match="DEV_AUTH"):
         fresh_app(DEV_AUTH="true", ENVIRONMENT="prod")
+
+
+def test_prod_refuses_to_start_on_the_default_session_secret(fresh_app):
+    """It signs the media URLs too, and its default is in this repo — a prod app running on
+    it hands out forgeable links while looking perfectly healthy."""
+    with pytest.raises(RuntimeError, match="SESSION_SECRET"):
+        fresh_app(ENVIRONMENT="prod", SESSION_SECRET="dev-insecure-change-me")
+
+
+def test_dev_keeps_the_default_session_secret(fresh_app):
+    """A fresh checkout has to start with no configuration at all."""
+    app = fresh_app(ENVIRONMENT="dev", SESSION_SECRET="dev-insecure-change-me")
+    assert app is not None
 
 
 def test_dev_auth_refuses_to_start_alongside_cloudflare_access(fresh_app):

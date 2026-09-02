@@ -84,7 +84,13 @@ async def generate_occurrences(
     Returns the number of rows actually inserted.
     """
     now = _now(now)
-    household = (await db.execute(select(Household).limit(1))).scalar_one()
+    household = (await db.execute(select(Household).limit(1))).scalar_one_or_none()
+    if household is None:
+        # A production stack comes up on an empty volume and stays empty until someone runs
+        # the bootstrap seed. That is a normal state, not a fault, and raising here turned
+        # every worker tick into a NoResultFound traceback — noise that hides a real one.
+        log.info("no household yet; nothing to generate")
+        return 0
     tz = ZoneInfo(household.timezone)
     today = now.astimezone(tz).date()
     horizon_end = today + timedelta(days=horizon_days)
