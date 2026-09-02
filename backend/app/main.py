@@ -77,7 +77,21 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(SecurityHeadersMiddleware)
     # Added last = runs first (outermost). Order: TrustedHost -> CfAccess -> headers.
+    #
+    # DEV_AUTH hands out a session to anyone who names a user, so it and Access are mutually
+    # exclusive and a prod app carrying it must not start at all. Refusing here — before the
+    # port is bound — is the only check that cannot be missed: a running-but-open ChoreKeeper
+    # looks exactly like a working one from the outside.
+    if settings.dev_auth and settings.is_prod:
+        raise RuntimeError(
+            "DEV_AUTH is on with ENVIRONMENT=prod: that is passwordless sign-in on a "
+            "production stack. Unset DEV_AUTH, or run the dev compose file."
+        )
     if settings.cf_access_team_domain and settings.cf_access_aud:
+        if settings.dev_auth:
+            raise RuntimeError(
+                "DEV_AUTH is on with CF_ACCESS_* set: pick one identity source, not both."
+            )
         app.add_middleware(
             CfAccessMiddleware,
             team_domain=settings.cf_access_team_domain,

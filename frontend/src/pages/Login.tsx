@@ -1,14 +1,19 @@
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { ApiError } from '../api/client';
+import type { DevUser } from '../api/types';
 import { Button, Card } from '../shared/ui';
 
 /** Shown only when the automatic Google sign-in did not land on a household member.
  *  In the normal case Cloudflare Access has already signed the visitor in and the app
  *  goes straight to their screens — nobody sees this page. */
 export function Login() {
-  const { error, canSwitchAccount, refresh, logout } = useAuth();
+  const { error, canSwitchAccount, devUsers, refresh, logout } = useAuth();
   const [breakGlass, setBreakGlass] = useState(false);
+
+  // The dev stack has no Cloudflare and no break-glass, so none of the copy below applies
+  // there — the picker is the only door, and offering the others would just dead-end.
+  if (devUsers && devUsers.length > 0) return <DevPicker users={devUsers} />;
 
   if (breakGlass) return <BreakGlassForm onCancel={() => setBreakGlass(false)} />;
 
@@ -56,6 +61,44 @@ export function Login() {
         >
           Use the break-glass password
         </button>
+      </Card>
+    </div>
+  );
+}
+
+/** Sign in as anyone, no password — the dev stack only. The API route backing this 404s
+ *  unless DEV_AUTH is set, and the app refuses to start with DEV_AUTH in prod, so this
+ *  cannot appear anywhere real. */
+function DevPicker({ users }: { users: DevUser[] }) {
+  const { devLogin } = useAuth();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function pick(user: DevUser) {
+    setBusy(user.id);
+    setError(null);
+    try {
+      await devLogin(user.id);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not sign in');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="mx-auto flex min-h-full max-w-sm flex-col justify-center gap-4 p-6">
+      <h1 className="text-2xl font-bold">ChoreKeeper</h1>
+      <Card className="flex flex-col gap-3">
+        <p className="text-sm text-slate-400">
+          Development sign-in — no password. Pick who you want to be.
+        </p>
+        {users.map((u) => (
+          <Button key={u.id} disabled={busy !== null} onClick={() => void pick(u)}>
+            {busy === u.id ? 'Signing in…' : `${u.display_name} (${u.role})`}
+          </Button>
+        ))}
+        {error && <p className="text-sm text-rose-400">{error}</p>}
       </Card>
     </div>
   );

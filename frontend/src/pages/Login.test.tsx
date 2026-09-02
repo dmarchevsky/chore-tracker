@@ -1,27 +1,40 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Login } from './Login';
 import { useAuth } from '../auth/AuthContext';
+import type { DevUser } from '../api/types';
 
 vi.mock('../auth/AuthContext', () => ({ useAuth: vi.fn() }));
 
 const NOT_A_MEMBER = 'stranger@example.com is signed in to Google but is not an active member';
 
-function setup(error: string | null, canSwitchAccount = error !== null) {
+function setup(
+  error: string | null,
+  canSwitchAccount = error !== null,
+  devUsers: DevUser[] | null = null,
+) {
   const logout = vi.fn();
   const refresh = vi.fn();
+  const devLogin = vi.fn();
   vi.mocked(useAuth).mockReturnValue({
     me: null,
     loading: false,
     error,
     canSwitchAccount,
+    devUsers,
     breakGlassLogin: vi.fn(),
+    devLogin,
     logout,
     refresh,
   });
   render(<Login />);
-  return { logout, refresh };
+  return { logout, refresh, devLogin };
 }
+
+const DEV_USERS: DevUser[] = [
+  { id: 'u-1', username: 'parent', display_name: 'Parent', role: 'admin' },
+  { id: 'u-2', username: 'alice', display_name: 'Alice', role: 'child' },
+];
 
 afterEach(() => {
   cleanup();
@@ -63,5 +76,25 @@ describe('Login', () => {
     setup(null);
     fireEvent.click(screen.getByRole('button', { name: /break-glass/i }));
     expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
+  });
+
+  it('signs in as the picked user on the dev stack', async () => {
+    const { devLogin } = setup(null, false, DEV_USERS);
+    fireEvent.click(screen.getByRole('button', { name: /alice \(child\)/i }));
+    await waitFor(() => expect(devLogin).toHaveBeenCalledWith('u-2'));
+  });
+
+  it('offers nothing but the picker on the dev stack', () => {
+    // Neither Access nor break-glass exists there, so both would be dead ends: the
+    // break-glass route 404s under DEV_AUTH and there is no edge session to retry.
+    setup(null, false, DEV_USERS);
+    expect(screen.queryByRole('button', { name: /break-glass/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /try again/i })).toBeNull();
+  });
+
+  it('falls back to the Access page when the picker is empty', () => {
+    // devUsers is null in every deployed configuration — the route does not exist there.
+    setup(null, false, null);
+    expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
   });
 });

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { api, ApiError, NetworkError, setCsrfToken } from '../api/client';
-import type { Me } from '../api/types';
+import type { DevUser, Me } from '../api/types';
 
 interface AuthState {
   me: Me | null;
@@ -12,9 +12,14 @@ interface AuthState {
    *  the one case where ending the edge session and picking another account helps. A
    *  network failure also sets `error`, and offering it there would just fail again. */
   canSwitchAccount: boolean;
+  /** The household, when the dev stack's passwordless sign-in is on; null in every
+   *  deployed configuration, where the route does not exist. */
+  devUsers: DevUser[] | null;
   /** The local admin password. Reachable only on the LAN — the tunnel's front door
    *  refuses this path outright (see docs/remote-access.md). */
   breakGlassLogin: (username: string, password: string) => Promise<void>;
+  /** Become the named user, no password. Dev stack only. */
+  devLogin: (userId: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -30,6 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [canSwitchAccount, setCanSwitch] = useState(false);
+  const [devUsers, setDevUsers] = useState<DevUser[] | null>(null);
 
   const apply = useCallback((m: Me | null) => {
     setMe(m);
@@ -57,6 +63,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setError(notAMember ? e.message : null);
       }
+      // Is this the dev stack? Asking the route is the whole test — it 404s unless DEV_AUTH
+      // is on, so no separate mode endpoint has to exist (and be kept honest) in production.
+      try {
+        setDevUsers(await api.get<DevUser[]>('/auth/dev/users'));
+      } catch {
+        setDevUsers(null);
+      }
     }
   }, [apply]);
 
@@ -67,6 +80,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const breakGlassLogin = useCallback(
     async (username: string, password: string) => {
       apply(await api.post<Me>('/auth/login', { username, password }));
+      setError(null);
+      setCanSwitch(false);
+    },
+    [apply],
+  );
+
+  const devLogin = useCallback(
+    async (userId: string) => {
+      apply(await api.post<Me>('/auth/dev/login', { user_id: userId }));
       setError(null);
       setCanSwitch(false);
     },
@@ -87,8 +109,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [apply]);
 
   const value = useMemo(
-    () => ({ me, loading, error, canSwitchAccount, breakGlassLogin, logout, refresh: probe }),
-    [me, loading, error, canSwitchAccount, breakGlassLogin, logout, probe],
+    () => ({
+      me,
+      loading,
+      error,
+      canSwitchAccount,
+      devUsers,
+      breakGlassLogin,
+      devLogin,
+      logout,
+      refresh: probe,
+    }),
+    [me, loading, error, canSwitchAccount, devUsers, breakGlassLogin, devLogin, logout, probe],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

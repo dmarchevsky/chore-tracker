@@ -29,6 +29,14 @@ PUBLIC_ROUTES: dict[str, str] = {
         "SPA bootstrap probe, and the sign-in itself: behind Cloudflare Access the "
         "verified Google address becomes a session (spec §12.1). 401 without either."
     ),
+    "/api/v1/auth/dev/users": (
+        "DEV_AUTH only — 404 in every other configuration, and create_app() refuses to "
+        "start with DEV_AUTH under ENVIRONMENT=prod or alongside Access (spec §12.1)"
+    ),
+    "/api/v1/auth/dev/login": (
+        "DEV_AUTH only — the local sign-in picker; same 404 and same startup guard as "
+        "/auth/dev/users above"
+    ),
     "/api/v1/checkin/{token}": "per-kid bearer token, rate limited 20/h (spec §6.2)",
     "/api/v1/submissions/{submission_id}/media/{idx}": (
         "HMAC-signed 5-min URL or a valid session (spec §5, §10)"

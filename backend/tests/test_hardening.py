@@ -72,3 +72,23 @@ def test_session_cookie_not_secure_in_dev(fresh_app):
     resp = Response()
     _set_session_cookie(resp, "sid-123", max_age=3600)
     assert "Secure" not in resp.headers["set-cookie"]
+
+
+# --- DEV_AUTH must never boot outside dev (spec §12.1) --------------------------------
+
+
+def test_dev_auth_refuses_to_start_in_prod(fresh_app):
+    """A passwordless production stack looks exactly like a working one from the outside,
+    so the only safe place to catch this is before the port is bound."""
+    with pytest.raises(RuntimeError, match="DEV_AUTH"):
+        fresh_app(DEV_AUTH="true", ENVIRONMENT="prod")
+
+
+def test_dev_auth_refuses_to_start_alongside_cloudflare_access(fresh_app):
+    with pytest.raises(RuntimeError, match="DEV_AUTH"):
+        fresh_app(
+            DEV_AUTH="true",
+            ENVIRONMENT="dev",
+            CF_ACCESS_TEAM_DOMAIN="acme.cloudflareaccess.com",
+            CF_ACCESS_AUD="aud-tag",
+        )

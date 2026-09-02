@@ -15,7 +15,13 @@ from app.auth.sessions import create_session, load_session, revoke_session
 from app.config import get_settings
 from app.models import User, UserRole
 from app.net import client_ip
-from app.schemas.auth import BreakGlassLoginRequest, LogoutResponse, MeResponse
+from app.schemas.auth import (
+    BreakGlassLoginRequest,
+    DevLoginRequest,
+    DevUser,
+    LogoutResponse,
+    MeResponse,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -93,6 +99,12 @@ async def break_glass_login(
     Reachable on the LAN door and the host's loopback only: the tunnel's Caddy site answers
     404 for this path, so it never rides the tunnel (see docs/remote-access.md).
     """
+    # Dev mode has no break-glass: there is nothing to break out of when the whole stack
+    # signs you in by name, and a second password path would only be one more thing that can
+    # drift from what production actually does. 404, so the door does not appear to exist.
+    if get_settings().dev_auth:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+
     ip = client_ip(request)
     if not ratelimit.ip_allowed(ip):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "too many attempts, slow down")
@@ -119,6 +131,44 @@ async def break_glass_login(
         user.password_hash = hash_password(payload.password)
 
     ratelimit.record_success(payload.username)
+    return await start_session(user, request, response, db)
+
+
+def _require_dev_auth() -> None:
+    """404 unless the dev sign-in is switched on — the route must not exist otherwise."""
+    if not get_settings().dev_auth:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+
+
+@router.get("/dev/users", response_model=list[DevUser])
+async def dev_users(db: DbDep) -> list[User]:
+    """Who a local developer can sign in as (DEV_AUTH only).
+
+    The dev stack has no Cloudflare in front of it and no break-glass behind it, so this list
+    plus the click below is the entire way in. It is safe only because create_app() refuses to
+    start a prod app with DEV_AUTH set (spec §12.1).
+    """
+    _require_dev_auth()
+    users = (await db.execute(select(User).where(User.is_active))).scalars().all()
+    # Parents first — the admin screens are what a developer usually wants.
+    return sorted(users, key=lambda u: (u.role != UserRole.admin, u.display_name.lower()))
+
+
+@router.post("/dev/login", response_model=MeResponse)
+async def dev_login(
+    payload: DevLoginRequest, request: Request, response: Response, db: DbDep
+) -> MeResponse:
+    """Become the named user, no password (DEV_AUTH only).
+
+    Deliberately routed through the same start_session() as every other sign-in, so sessions,
+    CSRF and cookie lifetimes are exercised locally exactly as they behave in production.
+    """
+    _require_dev_auth()
+    user = (
+        await db.execute(select(User).where(User.id == payload.user_id, User.is_active))
+    ).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such user")
     return await start_session(user, request, response, db)
 
 

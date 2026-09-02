@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import UserRole
 
@@ -30,3 +30,19 @@ class LogoutResponse(BaseModel):
 
 class BreakGlassPasswordRequest(BaseModel):
     new_password: str = Field(min_length=12, max_length=256)
+
+
+class DevUser(BaseModel):
+    """One entry in the dev sign-in picker. No email: the point of dev mode is that Google
+    is not involved, and showing addresses would only suggest otherwise."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    username: str
+    display_name: str
+    role: UserRole
+
+
+class DevLoginRequest(BaseModel):
+    user_id: uuid.UUID

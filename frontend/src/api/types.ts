@@ -19,6 +19,14 @@ export interface Me {
   csrf_token: string;
 }
 
+/** One entry in the dev stack's sign-in picker. No email — dev mode has no Google. */
+export interface DevUser {
+  id: string;
+  username: string;
+  display_name: string;
+  role: Role;
+}
+
 export type OccurrenceStatus =
   | 'pending'
   | 'open'

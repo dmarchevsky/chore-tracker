@@ -164,3 +164,69 @@ async def test_the_lan_door_gets_a_non_secure_cookie(client, admin_user, monkeyp
     assert "secure" not in lan.headers["set-cookie"].lower()
     # Everywhere else the cookie stays Secure — the exemption is the door, not the build.
     assert "secure" in tunnel.headers["set-cookie"].lower()
+
+
+# --- Dev-mode sign-in (DEV_AUTH) -----------------------------------------------------
+# The dev stack has no Cloudflare in front of it and no break-glass behind it, so this
+# picker is the whole way in. Everything here is about it staying strictly local.
+
+
+@pytest.fixture
+def dev_auth(monkeypatch):
+    """Turn DEV_AUTH on for one test, and back off however the test ends."""
+    from app.config import get_settings
+
+    monkeypatch.setenv("DEV_AUTH", "true")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+async def test_dev_routes_do_not_exist_without_dev_auth(client, admin_user):
+    """Not 403 — 404. A route that answers "forbidden" tells an internet scanner the
+    passwordless door is there and only bolted; this one is not there at all."""
+    assert (await client.get("/api/v1/auth/dev/users")).status_code == 404
+    r = await client.post("/api/v1/auth/dev/login", json={"user_id": str(admin_user.id)})
+    assert r.status_code == 404
+
+
+async def test_dev_users_lists_the_household_parents_first(
+    client, admin_user, child_user, dev_auth
+):
+    r = await client.get("/api/v1/auth/dev/users")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [u["username"] for u in body] == ["parent", "alice"]
+    # No addresses: Google is not part of dev sign-in and showing them would imply it is.
+    assert "email" not in body[0]
+
+
+async def test_dev_users_omits_deactivated_members(client, db_session, child_user, dev_auth):
+    child_user.is_active = False
+    await db_session.commit()
+    assert (await client.get("/api/v1/auth/dev/users")).json() == []
+
+
+async def test_dev_login_mints_a_real_session(client, child_user, dev_auth):
+    r = await client.post("/api/v1/auth/dev/login", json={"user_id": str(child_user.id)})
+    assert r.status_code == 200, r.text
+    assert r.json()["username"] == "alice"
+    assert client.cookies.get(SESSION_COOKIE)
+    # The same session machinery production uses — the cookie alone carries the next call.
+    assert (await client.get("/api/v1/auth/me")).json()["id"] == r.json()["id"]
+
+
+async def test_dev_login_refuses_a_deactivated_member(client, db_session, child_user, dev_auth):
+    child_user.is_active = False
+    await db_session.commit()
+    r = await client.post("/api/v1/auth/dev/login", json={"user_id": str(child_user.id)})
+    assert r.status_code == 404
+
+
+async def test_break_glass_is_gone_in_dev_mode(client, admin_user, dev_auth):
+    """One sign-in path per mode. A second one that only exists locally is a second one
+    that can quietly stop matching what production does."""
+    r = await client.post(
+        "/api/v1/auth/login", json={"username": "parent", "password": "parent-pass"}
+    )
+    assert r.status_code == 404

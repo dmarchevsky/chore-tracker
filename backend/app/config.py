@@ -80,6 +80,12 @@ class Settings(BaseSettings):
     admin_session_hours: int = Field(default=12, alias="ADMIN_SESSION_HOURS")
     child_session_days: int = Field(default=90, alias="CHILD_SESSION_DAYS")
     cookie_secure: bool = Field(default=False, alias="COOKIE_SECURE")
+    # Dev-only sign-in: the login page lists the household's members and you click one, no
+    # password and no Cloudflare in front. It exists because the dev stack has neither Access
+    # nor break-glass, so without it there is no way into a local checkout at all. It is
+    # mutually exclusive with Access and create_app() refuses to start a prod app with it on
+    # (spec §12.1).
+    dev_auth: bool = Field(default=False, alias="DEV_AUTH")
 
     @property
     def is_prod(self) -> bool:
