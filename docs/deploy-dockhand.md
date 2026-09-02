@@ -40,23 +40,35 @@ deploy loudly instead of booting with a default.
    and paste the values into the stack's environment (or host the filled `env.production`
    on the agent for manual runs — it is gitignored; never commit it). The `:?` guards make
    a missing variable fail the deploy with a named error.
-4. **First deploy against a fresh volume** — a brand-new database has **no household and
-   no users**, and nothing creates them automatically. The worker ticks quietly until one
-   exists. Set `ADMIN_PASSWORD` (12+ characters) in the stack environment, then bootstrap
-   once from the host:
-   ```sh
-   docker compose -f docker-compose.prod.yml exec api python -m app.seed
-   ```
-   That creates the household, the parent-admin with **your** `ADMIN_PASSWORD` as its
-   break-glass password, and placeholder kids. The seed **refuses to run** under
-   `ENVIRONMENT=prod` without `ADMIN_PASSWORD` rather than planting the dev default, which
-   is published in this repo and would be a working admin login for anyone on the wifi.
+4. **First deploy against a fresh volume** — a brand-new database has no household and no
+   users, and until one exists **neither door opens**: Cloudflare Access vouches for a
+   Google address that matches no row, and the LAN break-glass login has no account to
+   check a password against. Set both of these in the stack environment:
 
-   Then, in the app: rename or deactivate the placeholder kids and add the real ones by
-   Google address, and check the admin's own address (the `ADMIN_EMAIL` migration only
-   stamps emails onto users that already exist, so it matters when upgrading an existing
-   dev database, not on a fresh install). Every kid also needs their address on the Access
-   policy — [remote-access.md](remote-access.md) §5h.
+   ```sh
+   ADMIN_EMAIL=you@example.com   # the Google address Access will present
+   ADMIN_PASSWORD=<12+ chars>    # the break-glass password
+   ```
+
+   The api container bootstraps itself on first start — `alembic upgrade head` then
+   `python -m app.bootstrap --if-empty` — so signing in needs no shell at all. It creates
+   the household and the parent-admin and **nothing else**: no chores, no kids, no invented
+   history. Kids are added in the app afterwards, by Google address, and must also go on
+   the Access policy ([remote-access.md](remote-access.md) §5h).
+
+   Run it by hand any time to check or correct it:
+
+   ```sh
+   docker compose -f docker-compose.prod.yml exec api python -m app.bootstrap
+   ```
+
+   A re-run **re-points the admin** at the current `ADMIN_EMAIL` and `ADMIN_PASSWORD`. That
+   is the fix if the address was wrong — the symptom is Access turning you away with
+   *"…is signed in to Google but is not an active member of this household"*. Once you are
+   in, the same change is available under **Settings → Sign-in** without a shell.
+
+   `python -m app.seed` is **development data** — demo chores, placeholder kids, a month of
+   backdated occurrences — and refuses to run under `ENVIRONMENT=prod`.
 
 5. **Upgrading a stack built before the non-root change** — the app image now runs as uid
    `10001`, and an **existing** media volume is still owned by root, so photo uploads will

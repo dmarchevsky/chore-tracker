@@ -617,6 +617,9 @@ GET    /admin/settings                    admin — effective vision-LLM config 
 PATCH  /admin/settings                    admin — DB overrides over the env defaults; the API key
                                           is write-only and reads report `api_key_set`
 GET    /admin/llm/models                  admin — probe an endpoint's /v1/models
+GET    /admin/profile                     admin — one's own username / display name / address
+PATCH  /admin/profile                     admin — change one's own display name or Google
+                                          address; an address change revokes the session
 POST   /admin/break-glass-password        admin — set one's own local password (min 12 chars)
 GET    /admin/export                      admin — whole household as one JSON bundle
 POST   /admin/import                      admin — restore a bundle; `dry_run` reports without writing
@@ -666,9 +669,17 @@ here, not a loss.
 - `[D]` **One local admin password survives as break-glass**, for when Cloudflare or Google is
   unavailable. It is admin-only, minimum 12 characters, and rate limited as before (10/min/IP,
   exponential backoff per account). It has **no default value**: on a brand-new production
-  database the bootstrap seed takes it from `ADMIN_PASSWORD` and refuses to run without one,
-  rather than planting a password that lives in the repo on a door every device on the LAN
-  can reach.
+  database the first-run bootstrap takes it from `ADMIN_PASSWORD` and refuses to run without
+  one, rather than planting a password that lives in the repo on a door every device on the
+  LAN can reach.
+- `[D]` **A new database bootstraps itself into one that can be signed in to.** Nothing else
+  creates the first household and admin, and without them Access authenticates a visitor the
+  app has never heard of while break-glass has no account to check — a deployment that is up,
+  healthy and impossible to enter. `app/bootstrap.py` runs before uvicorn on every start and
+  is a no-op unless the `users` table is empty; it creates the household and the parent-admin
+  from `ADMIN_EMAIL` / `ADMIN_PASSWORD` and **nothing else**, because demo data does not
+  belong in a household's real books. Re-running it re-points the admin, which is the
+  recovery path when the configured address is not the one Google presents.
 - `[D]` **Break-glass has its own LAN door** — a second Caddy site on `:81`, published to the home
   network and unreachable from the tunnel, since cloudflared's ingress names `proxy:80` and nothing
   else. The Access check is skipped there wholesale. Without that it is theatre: the login succeeds
@@ -783,8 +794,9 @@ LLM_TIMEOUT_S=120
 LLM_MAX_RETRIES=1
 VAPID_PUBLIC_KEY= / VAPID_PRIVATE_KEY=
 SESSION_SECRET=              # prod refuses to start on the default (main.create_app)
-ADMIN_EMAIL=                 # parent-admin's Google address; read once by the auth migration
-ADMIN_PASSWORD=              # read once by the bootstrap seed; prod refuses to seed without it
+ADMIN_EMAIL=                 # parent-admin's Google address, for the first-run bootstrap
+ADMIN_PASSWORD=              # their break-glass password; prod refuses to bootstrap without it
+HOUSEHOLD_NAME=Home          # first-run bootstrap only
 ADMIN_SESSION_HOURS=12
 CHILD_SESSION_DAYS=90
 COOKIE_SECURE=false

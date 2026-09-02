@@ -90,10 +90,12 @@ class Settings(BaseSettings):
     # mutually exclusive with Access and create_app() refuses to start a prod app with it on
     # (spec §12.1).
     dev_auth: bool = Field(default=False, alias="DEV_AUTH")
-    # Read once, by the bootstrap seed, to set the first admin's break-glass password on a
-    # brand-new production database. It is never read by the running app — the password is
-    # changed from admin Settings afterwards — and a prod seed refuses to run without it
-    # rather than planting a value that lives in this repo (spec §12.1).
+    # Read by the first-run bootstrap (app/bootstrap.py) to create the parent-admin on a
+    # brand-new database: ADMIN_EMAIL is the Google address Cloudflare Access will present,
+    # ADMIN_PASSWORD the break-glass password. Neither is read by the running app — both are
+    # changed from admin Settings afterwards — and a prod bootstrap refuses without them
+    # rather than leaving a database nobody can sign in to (spec §12.1).
+    admin_email: str = Field(default="", alias="ADMIN_EMAIL")
     admin_password: str = Field(default="", alias="ADMIN_PASSWORD")
 
     @property

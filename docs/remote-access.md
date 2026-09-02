@@ -295,9 +295,14 @@ docker compose logs api | grep cf_access.rejected | tail -1
 `CF_ACCESS_ISSUER` accepts a comma-separated list, so you can keep both the old and the new
 name accepted and not get caught again if Cloudflare ever switches.
 
-#### 5h. Adding or removing a kid
+#### 5h. Adding or removing a household member
 
-Two places, both required, in this order:
+The parent-admin comes from `ADMIN_EMAIL` at first boot (deploy-dockhand.md step 4) and
+still needs to be on the Access policy — the app is only ever the second half of that pair.
+If the two disagree, Access lets you to the door and the app turns you away by name; fix it
+under **Settings → Sign-in**, or re-run `python -m app.bootstrap`.
+
+For a kid, two places, both required, in this order:
 
 1. Cloudflare → App A's `Household` policy → add their Google address.
 2. ChoreKeeper → **Kids** → *Add kid* → same address.
@@ -430,6 +435,10 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8088/api/v1/au
   redirects to Google, the Bypass application (5e) is missing.
 - External port scan of the host's public IP → only Cloudflare's 443; `5432` / `8088`
   refused. Those ports answer from the host itself only.
+- On a brand-new deployment, the very first page load signs the parent straight in — the
+  api bootstrapped the household and the admin from `ADMIN_EMAIL` before serving anything.
+  If it instead names your address and says you are not a member, `ADMIN_EMAIL` did not
+  match; re-run `python -m app.bootstrap` with the right one.
 - The LAN door, from a laptop on the home network: `http://<home-ip>:5173/` serves the app
   and offers the break-glass sign-in, and the same URL is unreachable from cell data with
   wifi off. If break-glass 404s here too, Caddy is serving the tunnel site on `:5173` —

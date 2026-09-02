@@ -23,22 +23,26 @@ down_revision: str | None = '563533ab7236'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-# The household this deployment belongs to. Overridable so a fresh install can point the
-# admin account at its own Google address before the first sign-in.
-_ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "dmitriy.marchevsky@gmail.com")
+# The address to stamp onto an admin that already exists — this matters when converting a
+# database that predates Google sign-in. No default: a hardcoded one binds somebody's real
+# account on any deploy that leaves ADMIN_EMAIL unset. A fresh install has no users here at
+# all (this runs before anything creates them), and app/bootstrap.py does that job instead.
+_ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "").strip().lower()
 
 
 def upgrade() -> None:
     op.add_column('users', sa.Column('email', sa.String(length=320), nullable=True))
     op.create_unique_constraint('uq_user_email', 'users', ['household_id', 'email'])
 
-    # Give the existing parent an identity to sign in with; without this the migration
-    # locks the only admin out of the app it just converted.
-    op.execute(
-        sa.text("UPDATE users SET email = :email WHERE role = 'admin' AND email IS NULL").bindparams(
-            email=_ADMIN_EMAIL.strip().lower()
+    # Give an existing parent an identity to sign in with; without this the migration locks
+    # the only admin out of the app it just converted. Skipped when unset — there is nothing
+    # safe to guess, and on a new database there is no row to update anyway.
+    if _ADMIN_EMAIL:
+        op.execute(
+            sa.text(
+                "UPDATE users SET email = :email WHERE role = 'admin' AND email IS NULL"
+            ).bindparams(email=_ADMIN_EMAIL)
         )
-    )
 
     op.alter_column('users', 'password_hash', existing_type=sa.String(length=255), nullable=True)
     # Children authenticate through Access only — leaving a hash behind would leave a

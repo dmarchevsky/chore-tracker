@@ -80,9 +80,12 @@ Interactive docs at `/docs` when `ENVIRONMENT=dev`.
   row and mints the session, so there is no sign-in form. A parent adds a kid by entering
   their Google address under Kids — and in the Access policy, which is the half that
   actually lets them through the door.
+- **First run:** a new database has no users, so the api bootstraps one on first start from
+  `ADMIN_EMAIL` + `ADMIN_PASSWORD` (`python -m app.bootstrap`) — the household and the
+  parent-admin, nothing else. Re-running it re-points the admin, which is the way back from
+  a wrong `ADMIN_EMAIL`. `just seed` is dev-only demo data and refuses to run in prod.
 - **Break-glass:** one local admin password (`POST /api/v1/auth/login`) for when Cloudflare
-  or Google is unavailable. On a fresh production database the bootstrap seed takes it from
-  `ADMIN_PASSWORD` and refuses to run without one. In the tunnel deployment it lives on a **LAN door** —
+  or Google is unavailable. In the tunnel deployment it lives on a **LAN door** —
   `http://<home-ip>:5173`, a second Caddy site the tunnel has no route to — while the public
   hostname answers 404 for that path. Set the password from admin Settings.
 - **Dev sign-in:** the dev stack sets `DEV_AUTH`, which adds `/auth/dev/users` +

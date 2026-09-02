@@ -1,4 +1,5 @@
-"""Runtime household settings — vision-LLM connection + verification banding (spec §7.2).
+"""Runtime household settings — vision-LLM connection, verification banding, and the
+parent's own sign-in details (spec §7.2, §12.1).
 
 Values are stored on ``household_settings`` and override the ``.env`` defaults. The API key
 is write-only: reads report ``api_key_set`` but never the value.
@@ -8,13 +9,14 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.auth.deps import AdminUser, DbDep
 from app.auth.passwords import hash_password
+from app.auth.sessions import revoke_user_sessions
 from app.config import get_settings
-from app.schemas.auth import BreakGlassPasswordRequest
+from app.schemas.auth import AdminProfileRequest, BreakGlassPasswordRequest
 from app.services import audit
 from app.services.llm_config import (
     LlmConfigError,
@@ -24,6 +26,7 @@ from app.services.llm_config import (
     probe_models,
     validate_base_url,
 )
+from app.services.users import email_taken
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -138,3 +141,57 @@ async def set_break_glass_password(
         entity_type="user",
         entity_id=admin.id,
     )
+
+
+@router.get("/profile")
+async def get_profile(admin: AdminUser) -> dict:
+    return {"username": admin.username, "display_name": admin.display_name, "email": admin.email}
+
+
+@router.patch("/profile")
+async def update_profile(payload: AdminProfileRequest, db: DbDep, admin: AdminUser) -> dict:
+    """Change one's own display name and Google address (spec §12.1).
+
+    A parent's address is the only one no other endpoint can touch — ``PATCH /children/{id}``
+    is scoped to children — and until this existed, a wrong ``ADMIN_EMAIL`` meant Access
+    vouched for someone the app had never heard of, with no way out but SQL on the host.
+
+    Changing the address **signs you out**, exactly as it does for a kid: the session was
+    minted for the old identity and Access is authoritative about who is at the keyboard. It
+    cannot lock you out — the break-glass password is untouched, so the LAN door still opens
+    — but sign back in as the new address, and put it on the Access policy first.
+    """
+    before = {"display_name": admin.display_name, "email": admin.email}
+    if payload.display_name is not None:
+        admin.display_name = payload.display_name
+
+    signed_out = False
+    if payload.email is not None:
+        email = payload.email.strip().lower()
+        if email != admin.email:
+            if await email_taken(db, email, excluding=admin.id):
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT, "that Google address is already in use"
+                )
+            admin.email = email
+            signed_out = True
+
+    await audit.record(
+        db,
+        actor=admin,
+        action="admin.profile.update",
+        entity_type="user",
+        entity_id=admin.id,
+        before=before,
+        after={"display_name": admin.display_name, "email": admin.email},
+    )
+    # Revoked last: the audit row above is written as this admin, and revoking first would
+    # leave the trail attributed to a session that no longer exists.
+    if signed_out:
+        await revoke_user_sessions(db, admin.id)
+    return {
+        "username": admin.username,
+        "display_name": admin.display_name,
+        "email": admin.email,
+        "signed_out": signed_out,
+    }

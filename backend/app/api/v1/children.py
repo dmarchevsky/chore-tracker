@@ -27,15 +27,11 @@ from app.schemas.ledger import BalanceOut, LedgerEntryOut
 from app.schemas.user import CheckinTokenOut, UserCreate, UserOut, UserUpdate
 from app.services import audit, checkin
 from app.services.ledger import balance_cents
+from app.services.users import email_taken
 
 router = APIRouter(prefix="/children", tags=["children"])
 
 SelfOrAdmin = Annotated[User, Depends(require_self_or_admin("child_id"))]
-
-
-async def _email_taken(db: DbDep, email: str) -> bool:
-    row = await db.execute(select(User.id).where(User.email == email))
-    return row.first() is not None
 
 
 async def _get_child(db: DbDep, child_id: uuid.UUID) -> User:
@@ -64,7 +60,7 @@ async def create_child(payload: UserCreate, db: DbDep, admin: AdminUser) -> User
     if exists is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "username taken")
     email = payload.email.strip().lower()
-    if await _email_taken(db, email):
+    if await email_taken(db, email):
         raise HTTPException(status.HTTP_409_CONFLICT, "that Google address is already in use")
     user = User(
         household_id=household.id,
@@ -106,7 +102,7 @@ async def update_child(
     if payload.email is not None:
         email = payload.email.strip().lower()
         if email != user.email:
-            if await _email_taken(db, email):
+            if await email_taken(db, email):
                 raise HTTPException(
                     status.HTTP_409_CONFLICT, "that Google address is already in use"
                 )

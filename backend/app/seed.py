@@ -4,10 +4,10 @@ One household, one admin (with a break-glass password for the prod stack), three
 and the four example chores from the brief. Phase 3 adds 30 days of backdated occurrences in
 mixed states so the UI is never empty.
 
-This is also how a brand-new **production** database is bootstrapped, which is why the admin
-password is not a literal: under ``ENVIRONMENT=prod`` the seed refuses to run unless the
-operator supplies ``ADMIN_PASSWORD``. A known password on the LAN break-glass door is a
-password everyone on the wifi already has (spec §12.1).
+This is **development data**. A production database is bootstrapped by ``app/bootstrap.py``,
+which creates the household and the parent-admin and nothing else — none of the demo chores,
+kids or backdated occurrences below belong in a family's real books. The household + admin
+here come from that same module, so the two cannot drift apart.
 
 Run:  uv run python -m app.seed        (idempotent — safe to re-run)
 """
@@ -15,12 +15,14 @@ Run:  uv run python -m app.seed        (idempotent — safe to re-run)
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
 from app.auth.passwords import hash_password
+from app.bootstrap import BootstrapConfig, config_from_env, ensure_admin, ensure_household
 from app.config import Settings, get_settings
 from app.db import SessionLocal
 from app.models import (
@@ -34,7 +36,6 @@ from app.models import (
     Verdict,
     Verification,
 )
-from app.schemas.auth import BREAK_GLASS_MIN_LENGTH
 from app.services import ledger
 from app.services.cadence import due_datetimes
 from app.services.scheduler import resolve_assignees
@@ -76,49 +77,43 @@ DEV_ADMIN_PASSWORD = "parent-dev-pass"
 
 
 class SeedRefused(RuntimeError):
-    """The seed will not plant a credential this database should not have."""
+    """The seed will not plant demo data in a database that is not a development one."""
 
 
-def _admin_password(settings: Settings | None = None) -> str:
-    """The break-glass password to give the first admin.
+def _bootstrap_config(settings: Settings | None = None) -> BootstrapConfig:
+    """The household + admin inputs, with the dev password filled in for a dev database.
 
-    On a production database it must come from the operator. The alternative — the literal
-    below — is published in this repository, and the LAN door offers that login to everyone
-    on the home network, so seeding it would hand out the admin account with the wifi
-    password (spec §12.1). It is read once, here; the password is changed afterwards from
-    admin Settings, which is the only other write path.
+    A production database is bootstrapped by ``app/bootstrap.py`` and refuses without a real
+    ``ADMIN_PASSWORD``; here the literal above is fine and useful, because the dev stack
+    404s the break-glass route entirely and signs you in with the picker.
     """
     s = settings or get_settings()
-    if not s.is_prod:
-        return DEV_ADMIN_PASSWORD
-    password = s.admin_password
-    if not password:
+    if s.is_prod:
         raise SeedRefused(
-            "ENVIRONMENT=prod with no ADMIN_PASSWORD set. Seeding would give the admin a "
-            "break-glass password that is published in this repo, on a door every device "
-            "on the LAN can reach. Set ADMIN_PASSWORD in env.production and re-run."
+            "ENVIRONMENT=prod: this is development data — demo chores, placeholder kids and "
+            "a month of invented history — and it does not belong in a household's real "
+            "books. Use `python -m app.bootstrap` instead; it creates the household and the "
+            "admin and nothing else."
         )
-    if len(password) < BREAK_GLASS_MIN_LENGTH:
-        raise SeedRefused(
-            f"ADMIN_PASSWORD is shorter than the {BREAK_GLASS_MIN_LENGTH}-character minimum "
-            "the API enforces on this same password (spec §12.1)."
-        )
-    return password
+    cfg = config_from_env(s)
+    return replace(cfg, password=cfg.password or DEV_ADMIN_PASSWORD)
 
 
 async def seed() -> None:
     # Before anything is written: a refusal after the household exists is a half-seeded
     # database the operator then has to reason about.
-    admin_password = _admin_password()
+    cfg = _bootstrap_config()
 
     async with SessionLocal() as db:
-        household = (await db.execute(select(Household).limit(1))).scalar_one_or_none()
-        if household is None:
-            household = Household(name="Home", timezone="America/Los_Angeles", currency="USD")
-            db.add(household)
-            await db.flush()
+        # The household and the admin are the bootstrap's job, and it is idempotent.
+        admin, _ = await ensure_admin(db, cfg)
+        household = await ensure_household(db, cfg)
+        # ADMIN_EMAIL is usually unset in development, and an admin with no address cannot
+        # be signed in as from the picker, so fall back to the placeholder.
+        admin.email = admin.email or ADMIN["email"]
+        await db.flush()
+        admin_username, admin_email = admin.username, admin.email
 
-        await _upsert_user(db, household.id, {**ADMIN, "password": admin_password}, UserRole.admin)
         kids = {
             child["username"]: await _upsert_user(db, household.id, child, UserRole.child)
             for child in CHILDREN
@@ -136,18 +131,15 @@ async def seed() -> None:
     print("Seed complete.")
     print(f"  chores:   {n_chores}")
     print(f"  occurrences: {n_occ}")
-    print(f"  admin:    {ADMIN['username']} / {ADMIN['email']}")
+    print(f"  admin:    {admin_username} / {admin_email}")
     for child in CHILDREN:
         print(f"  child:    {child['username']} / {child['email']}")
     # Naming the door that actually works here: on the dev stack break-glass is 404, so
     # printing a password would send the reader to the one page that cannot let them in.
     if get_settings().dev_auth:
         print("\n  Sign in at http://localhost:5173 — pick a user, no password.")
-    elif get_settings().is_prod:
-        # The operator chose this password; echoing it would only copy it into a log.
-        print(f"\n  Break-glass: {ADMIN['username']} / the ADMIN_PASSWORD you set (LAN door only)")
     else:
-        print(f"\n  Break-glass: {ADMIN['username']} / {admin_password} (LAN door only)")
+        print(f"\n  Break-glass: {admin_username} / {cfg.password} (LAN door only)")
 
 
 async def _seed_chores(db, household_id, kids: list[User]) -> None:

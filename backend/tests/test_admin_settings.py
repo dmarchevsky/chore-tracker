@@ -107,3 +107,57 @@ async def test_probing_a_non_http_url_is_data_not_a_request(client, admin_user):
     assert r.status_code == 200
     assert r.json()["reachable"] is False
     assert r.json()["models"] == []
+
+
+# --- a parent's own sign-in details (spec §12.1) ---------------------------------------
+
+
+async def test_admin_can_change_their_own_google_address(client, db_session, admin_user):
+    """No other endpoint can: PATCH /children/{id} 404s on an admin row. Until this existed,
+    a wrong ADMIN_EMAIL meant Access vouched for someone the app had never heard of and the
+    only fix was SQL on the host."""
+    h = await _admin(client)
+    r = await client.patch(
+        "/api/v1/admin/profile", json={"email": "New.Parent@Example.com"}, headers=h
+    )
+    assert r.status_code == 200
+    assert r.json()["email"] == "new.parent@example.com"  # stored lowercased
+    assert r.json()["signed_out"] is True
+
+
+async def test_changing_the_address_revokes_the_session(client, admin_user):
+    """Access is authoritative about who is at the keyboard, so a session minted for the old
+    identity must not outlive it — the same rule the kid path already follows."""
+    h = await _admin(client)
+    await client.patch("/api/v1/admin/profile", json={"email": "moved@example.com"}, headers=h)
+
+    assert (await client.get("/api/v1/admin/settings", headers=h)).status_code == 401
+
+
+async def test_renaming_without_touching_the_address_keeps_you_signed_in(client, admin_user):
+    h = await _admin(client)
+    r = await client.patch("/api/v1/admin/profile", json={"display_name": "Mum"}, headers=h)
+    assert r.status_code == 200
+    assert r.json()["signed_out"] is False
+    assert (await client.get("/api/v1/admin/settings", headers=h)).status_code == 200
+
+
+async def test_resaving_the_same_address_is_not_a_conflict_with_itself(client, admin_user):
+    h = await _admin(client)
+    r = await client.patch("/api/v1/admin/profile", json={"email": admin_user.email}, headers=h)
+    assert r.status_code == 200
+    assert r.json()["signed_out"] is False
+
+
+async def test_an_address_a_kid_already_uses_is_refused(client, admin_user, child_user):
+    h = await _admin(client)
+    r = await client.patch("/api/v1/admin/profile", json={"email": child_user.email}, headers=h)
+    assert r.status_code == 409
+
+
+async def test_a_child_cannot_reach_the_profile_endpoint(client, child_user):
+    r = await sign_in(client, "alice@example.com")
+    h = {"X-CSRF-Token": r.json()["csrf_token"]}
+    assert (
+        await client.patch("/api/v1/admin/profile", json={"display_name": "x"}, headers=h)
+    ).status_code == 403

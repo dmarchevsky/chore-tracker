@@ -4,6 +4,7 @@ import {
   useLlmModels,
   useSetBreakGlassPassword,
   useSettings,
+  useUpdateProfile,
   useUpdateSettings,
 } from './api';
 import type { SettingsPatch } from './api';
@@ -168,9 +169,28 @@ export function Settings() {
 }
 
 function SignIn() {
-  const { me } = useAuth();
+  const { me, refresh } = useAuth();
   const setPassword = useSetBreakGlassPassword();
+  const updateProfile = useUpdateProfile();
   const [msg, setMsg] = useState<string | null>(null);
+
+  async function changeAddress() {
+    const email = window.prompt(
+      'Your Google address. Add it to the Cloudflare Access policy first — changing it here signs you out.',
+      me?.email ?? '',
+    );
+    if (!email || email === me?.email) return;
+    setMsg(null);
+    try {
+      const r = await updateProfile.mutateAsync({ email });
+      // The session was just revoked server-side; re-probing shows the real state rather
+      // than leaving a dead cookie behind a screen that still looks signed in.
+      if (r.signed_out) await refresh();
+      else setMsg('Address updated.');
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  }
 
   async function changeBreakGlass() {
     const pw = window.prompt('New break-glass password (at least 12 characters)');
@@ -197,14 +217,24 @@ function SignIn() {
         only from inside the house, on the server{"'"}s own port — the front door refuses that path
         over the internet.
       </p>
-      <Button
-        className="min-h-0 self-start px-3 py-2 text-sm"
-        variant="ghost"
-        onClick={changeBreakGlass}
-        disabled={setPassword.isPending}
-      >
-        Change break-glass password
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          className="min-h-0 px-3 py-2 text-sm"
+          variant="ghost"
+          onClick={changeAddress}
+          disabled={updateProfile.isPending}
+        >
+          Change my Google address
+        </Button>
+        <Button
+          className="min-h-0 px-3 py-2 text-sm"
+          variant="ghost"
+          onClick={changeBreakGlass}
+          disabled={setPassword.isPending}
+        >
+          Change break-glass password
+        </Button>
+      </div>
       {msg && <p className="text-sm text-slate-300">{msg}</p>}
     </Card>
   );

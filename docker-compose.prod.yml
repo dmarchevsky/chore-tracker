@@ -62,11 +62,12 @@ services:
       CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:-}
       CF_ACCESS_AUD: ${CF_ACCESS_AUD:-}
       CF_ACCESS_ISSUER: ${CF_ACCESS_ISSUER:-}
-      # --- first boot seeds the admin identity from this (read ONCE by the auth migration) ---
+      # --- first boot: the parent-admin's Google address, and their break-glass password ---
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
-      # Read ONCE by the bootstrap seed (`exec api python -m app.seed`) on an empty database,
-      # which refuses to run in prod without it. Nothing at runtime reads it.
+      # Read by the first-run bootstrap below, on an empty database only. Nothing at
+      # runtime reads either one; both are changed from admin Settings afterwards.
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      HOUSEHOLD_NAME: ${HOUSEHOLD_NAME:-Home}
       # --- general / storage ---
       TZ: ${TZ:-America/Los_Angeles}
       MEDIA_ROOT: /data/media
@@ -93,8 +94,12 @@ services:
       db:
         condition: service_healthy
     # Migrations run here, before uvicorn; worker waits on api: service_healthy.
+    # The bootstrap creates the household + parent-admin on a brand-new database from
+    # ADMIN_EMAIL/ADMIN_PASSWORD, so a fresh deploy is signed-in-able without a shell. It is
+    # a no-op once any user exists, and never blocks the boot.
     command: >
       sh -c "alembic upgrade head &&
+             python -m app.bootstrap --if-empty &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000
              --proxy-headers --forwarded-allow-ips='*'"
     ports:

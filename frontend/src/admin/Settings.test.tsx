@@ -54,6 +54,8 @@ function setup() {
         }),
       );
     }
+    if (url.includes('/admin/profile'))
+      return Promise.resolve(json({ email: 'moved@example.com', signed_out: true }));
     if (url.includes('/auth/me')) return Promise.resolve(json(ME));
     if (method === 'PATCH') return Promise.resolve(json(SETTINGS));
     if (url.includes('/admin/llm/models'))
@@ -145,6 +147,26 @@ describe('admin Settings', () => {
     // The parent is told what they are about to erase, in their own terms.
     expect(String(prompt.mock.calls[0][0])).toContain('12 money entries');
     await waitFor(() => expect(reload).toHaveBeenCalled());
+    prompt.mockRestore();
+  });
+
+  it('lets a parent re-point their own Google address', async () => {
+    // The only way to fix a wrong ADMIN_EMAIL without a shell on the host: no other
+    // endpoint can touch an admin's address.
+    const calls = setup();
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('moved@example.com');
+    await screen.findByRole('button', { name: /change my google address/i });
+
+    fireEvent.click(screen.getByRole('button', { name: /change my google address/i }));
+
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url.includes('/admin/profile'))).toHaveLength(1),
+    );
+    const [call] = calls.filter((c) => c.url.includes('/admin/profile'));
+    expect(call.method).toBe('PATCH');
+    expect(call.body).toEqual({ email: 'moved@example.com' });
+    // The parent is warned before they commit to it, because it signs them out.
+    expect(String(prompt.mock.calls[0][0])).toContain('signs you out');
     prompt.mockRestore();
   });
 });

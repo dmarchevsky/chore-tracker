@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models import UserRole
 
@@ -31,6 +31,15 @@ class MeResponse(BaseModel):
 class LogoutResponse(BaseModel):
     # None when the app is not behind Access (LAN/dev); the SPA then just reloads.
     access_logout_url: str | None = None
+
+
+class AdminProfileRequest(BaseModel):
+    """A parent editing their own sign-in details. Both fields optional; omit to leave."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = Field(default=None, min_length=1, max_length=120)
+    email: EmailStr | None = None
 
 
 class BreakGlassPasswordRequest(BaseModel):

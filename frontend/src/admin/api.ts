@@ -374,6 +374,15 @@ export function useSetBreakGlassPassword() {
   });
 }
 
+/** A parent's own sign-in details. Changing the address signs you out — the session was
+ *  minted for the old identity and Access decides who is at the keyboard. */
+export function useUpdateProfile() {
+  return useMutation({
+    mutationFn: (body: { display_name?: string; email?: string }) =>
+      api.patch<{ email: string | null; signed_out: boolean }>('/admin/profile', body),
+  });
+}
+
 export const useCheckinToken = (childId: string) =>
   useQuery({
     enabled: !!childId,
