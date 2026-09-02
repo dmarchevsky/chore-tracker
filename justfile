@@ -8,6 +8,11 @@
 # volumes, so `just up` can never disturb the household's live stack — but they do both
 # bind :5173 and :8088, so stop one before starting the other.
 #
+# Each checkout gets its own test database, named after its directory (see
+# backend/tests/conftest.py) — the suite rebuilds the schema and truncates every table, so a
+# shared one meant two worktrees running `just test` at once destroyed each other's data and
+# reported failures that were pure noise. `just test-db-prune` drops them when worktrees go.
+#
 # No `set dotenv-load` on purpose: it exported the repo's .env into every recipe, so a
 # recipe run inside .worktrees/<branch> silently picked up the MAIN checkout's .env —
 # `just test` in particular. The dev compose file pins its own values as literals and the
@@ -61,6 +66,14 @@ db-up:
 # Stop Postgres
 db-down:
     {{compose}} stop db
+
+# Drop every per-worktree test database — run after `git worktree remove`
+test-db-prune:
+    @{{compose}} exec -T db psql -U chore -d postgres -tAc \
+        "SELECT datname FROM pg_database WHERE datname LIKE 'chore\_test%'" \
+      | tee /dev/stderr \
+      | xargs -r -I{} {{compose}} exec -T db psql -U chore -d postgres -q \
+        -c 'DROP DATABASE IF EXISTS "{}" WITH (FORCE)'
 
 # Apply migrations to the database in DATABASE_URL
 migrate:

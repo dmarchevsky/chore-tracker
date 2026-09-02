@@ -49,6 +49,7 @@ Prerequisites: `docker` + `docker compose`, `uv`, and [`just`](https://github.co
 | **Lint gate (backend)** | `just lint` (ruff check + `ruff format --check`) |
 | Autofix | `just fmt` |
 | **Test gate (backend)** | `just test` (pytest; needs Postgres reachable on `:5432`) |
+| Drop stale test databases | `just test-db-prune` (after removing worktrees) |
 | PWA deps | `just web-install` (once per worktree — `node_modules` is not shared) |
 | **Lint gate (PWA)** | `just web-lint` (eslint + `prettier --check` + `tsc --noEmit`) |
 | **Test gate (PWA)** | `just web-test` (vitest) |
@@ -70,6 +71,10 @@ append-only by design (spec §9), and a seeded household looks exactly like a re
 the terminal. There is no undo — `chorekeeper_db_data` holds the family's real chores and
 money, and the only reason a wipe has been safe so far is that it happened to hit
 `chorekeeper_dev_db_data` instead.
+
+`just test` gives each checkout its own test database, named after its directory, so two
+worktrees can run the gate at the same time without truncating each other's tables — a shared
+one produced dozens of failures that were pure noise. `just test-db-prune` drops them.
 
 `just up` builds `db` `api` `worker` `proxy` but does **not** rebuild the PWA bundle — see
 step 9. Sign in to the dev stack at `http://localhost:5173` by picking a user; there is no

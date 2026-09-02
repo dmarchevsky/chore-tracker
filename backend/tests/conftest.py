@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import tempfile
+from pathlib import Path
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 os.environ.setdefault("ENVIRONMENT", "test")
@@ -18,10 +22,30 @@ from app.db import Base, get_session
 from app.main import app
 from app.models import Household, User, UserRole
 
-ADMIN_BASE = "postgresql+asyncpg://chore:chore@localhost:5432/chore"
-TEST_DB_URL = os.environ.get(
-    "TEST_DATABASE_URL", "postgresql+asyncpg://chore:chore@localhost:5432/chore_test"
-)
+DEFAULT_SERVER = "postgresql+asyncpg://chore:chore@localhost:5432/"
+
+
+def _default_test_db_name() -> str:
+    """A database per checkout, so worktrees running `just test` at once can't drop and
+    truncate each other's tables — the `engine` fixture rebuilds the schema and `db_session`
+    truncates every table, so a shared database means concurrent suites destroy each other.
+
+    The directory name keeps it recognisable in `psql -l`; the path hash keeps two worktrees
+    that happen to share a basename apart."""
+    root = Path(__file__).resolve().parents[2]  # <worktree>/backend/tests/ -> <worktree>
+    slug = re.sub(r"[^a-z0-9]+", "_", root.name.lower()).strip("_")[:30]
+    digest = hashlib.sha1(str(root).encode()).hexdigest()[:8]
+    return f"chore_test_{slug}_{digest}"  # <= 63 bytes, Postgres' identifier cap
+
+
+# `str(URL)` masks the password as `***`, so render explicitly or nothing can connect.
+TEST_DB_URL = os.environ.get("TEST_DATABASE_URL") or make_url(DEFAULT_SERVER).set(
+    database=_default_test_db_name()
+).render_as_string(hide_password=False)
+# CREATE DATABASE has to run from another database on the same server — `postgres` is the
+# maintenance one that is always there. Derived from TEST_DB_URL rather than hardcoded, so
+# pointing TEST_DATABASE_URL at another host creates the database on that host.
+ADMIN_BASE = make_url(TEST_DB_URL).set(database="postgres").render_as_string(hide_password=False)
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
