@@ -360,16 +360,25 @@ Work items:
 3. Rate limits across auth + `/checkin` + submission endpoints (Postgres-backed counters).
 4. Retention jobs (worker cron-style ticks): photos → after `MEDIA_RETENTION_DAYS` (180)
    delete original, keep 256px thumbnail + verdict (Q2 default); geo points → 30 days.
-5. Backup: nightly `pg_dump` + `MEDIA_ROOT` rsync to TrueNAS; `just backup` / `just restore`;
-   **tested** restore procedure documented in `docs/restore.md`.
+5. ✅ **Backup + tested restore** — `just backup` (pg_dump `-Fc` + `MEDIA_ROOT` archive +
+   a manifest of row counts and per-child balances), `just restore-verify` (throwaway
+   Postgres, balances compared, touches nothing) and `just restore` (typed confirmation).
+   Documented in [docs/restore.md](restore.md).
+   ⬜ **Off-box shipping is NOT done:** backups are local and manual, so the spec §5 wording
+   ("nightly ... rsync to TrueNAS") is not yet satisfied. restore.md names the two ways to
+   close it.
 6. `GET /admin/jobs` dashboard — queue depth, failures, last tick; alert when the scheduler
    has not ticked (staleness check + push to admin).
 7. Structured JSON logging with actor / timestamp / before-after on every admin override,
    ledger entry, and model call (§5 auditability).
 8. Startup reconciliation flags occurrences that expired during a known outage window
    (admin bulk-excuse affordance).
-9. Tests: backup→restore balance-equality integration test; an endpoint-inventory test that
-   asserts every route requires auth except the two allowed.
+9. Tests: ✅ endpoint-inventory test asserting every route requires auth except the
+   documented exceptions (`backend/tests/test_endpoint_inventory.py`).
+   ✅ backup→restore balance equality — implemented as `just restore-verify` rather than a
+   pytest case: the check is only meaningful against a real `pg_dump`/`pg_restore` pair, and
+   pinning CI to a Postgres client matching the server major buys a brittle test for a
+   guarantee the recipe already makes on demand, against real backups.
 
 **Accept when:** the two acceptance criteria above pass.
 

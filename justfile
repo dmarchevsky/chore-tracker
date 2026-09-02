@@ -130,3 +130,21 @@ web-test *args:
 # Rebuild the bundle into the proxy image — `just up` does NOT do this
 web-serve:
     {{compose}} up -d --build proxy
+
+# --- Backup & restore (docs/restore.md) ----------------------------------
+
+# Back up a stack (default prod) to backups/ — database, media and a checked manifest
+backup stack="prod":
+    ./scripts/backup.sh {{stack}}
+
+# List the backups taken so far, newest last
+backup-list:
+    @ls -1dt {{env_var_or_default("CK_BACKUP_DIR", "backups")}}/chorekeeper-* 2>/dev/null | tac || echo "no backups yet — run: just backup"
+
+# Prove a backup restores: throwaway Postgres, every balance compared. Touches nothing.
+restore-verify dir:
+    ./scripts/restore.sh verify {{dir}}
+
+# DESTRUCTIVE: replace a stack's data with a backup. Needs confirm=overwrite-production
+restore dir stack="prod" confirm="":
+    ./scripts/restore.sh apply {{dir}} {{stack}} {{confirm}}

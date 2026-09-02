@@ -33,6 +33,13 @@ no remote operator path. Full setup + the security tradeoffs:
 [docs/remote-access.md](docs/remote-access.md). Deploying the prod file under an
 orchestrator, plus the readiness audit: [docs/deploy-dockhand.md](docs/deploy-dockhand.md).
 
+## Backups
+
+`just backup` writes the database, the media volume and a manifest of row counts and per-child
+balances to `backups/`. `just restore-verify <dir>` proves a backup restores into a clean
+Postgres reproducing every balance to the cent — an untested backup is a rumour. Backups are
+currently local and manual: [docs/restore.md](docs/restore.md).
+
 ## Status
 
 **Phases 1–5 done; Phase 6 (hardening & operations) in progress.** See

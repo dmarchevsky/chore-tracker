@@ -66,14 +66,12 @@ deploy loudly instead of booting with a default.
 Findings from preparing this bundle (fixed items are fixed *in the prod compose*; dev
 files are left as they are):
 
-1. **Backups — open, high.** Nothing dumps the database or the media volume anywhere;
-   `just backup`/`just restore` are still placeholders. A dead disk loses the ledger and
-   every photo. Until Phase 6 automates it, run a host cron like:
-   ```sh
-   docker exec chorekeeper-prod-db-1 pg_dump -U chore -Fc chore > /backup/chore-$(date +%F).dump
-   # + rsync the chorekeeper-prod_media_data volume (docker run --rm -v ... alpine tar)
-   ```
-   Test a restore once — an untested backup is a rumour.
+1. **Backups — partly closed.** `just backup` dumps the database and the media volume, and
+   `just restore-verify` proves a backup restores into a clean Postgres reproducing every
+   balance to the cent. Full procedure: [restore.md](restore.md).
+   **Still open:** the copies never leave this machine — `just backup` is local and manual,
+   so a dead disk still loses everything. Point `CK_BACKUP_DIR` at a directory under `/home`
+   (already rsynced to TrueNAS nightly) or add a timer; see the last section of restore.md.
 2. **Hardcoded dev credentials** (`chore`/`chore`, `dev-insecure-change-me`) and the DB
    secret repeated in three places — fine locally, fixed in the prod file with
    `${DB_PASSWORD:?}`-derived config and a single source for each secret.

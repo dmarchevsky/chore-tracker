@@ -54,6 +54,9 @@ Prerequisites: `docker` + `docker compose`, `uv`, and [`just`](https://github.co
 | **Lint gate (PWA)** | `just web-lint` (eslint + `prettier --check` + `tsc --noEmit`) |
 | **Test gate (PWA)** | `just web-test` (vitest) |
 | **Rebuild + serve the PWA** | `just web-serve` (rebuilds the `proxy` image, serves on `:5173`) |
+| Backup | `just backup [prod\|dev]` · `just backup-list` ([docs/restore.md](docs/restore.md)) |
+| **Verify a backup** | `just restore-verify <dir>` (throwaway Postgres, balances compared — safe) |
+| Restore over a stack | `just restore <dir> <stack> overwrite-production` — **destructive, ask first** |
 
 ### Seeding and wiping data — ASK FIRST, EVERY TIME
 
@@ -65,6 +68,9 @@ and not by approval given for an earlier run.
 
 Ask with the specifics: which database, which volume by name, and what is in it right now
 (row counts of `users` / `chores` / `chore_occurrences` / `ledger_entries`). Then wait.
+
+`just restore` already does exactly this before it will touch anything — it refuses without
+`overwrite-production` and prints the counts first. Take a `just backup` before any of it.
 
 **Why:** the dev and prod stacks are one letter apart in the volume name, the ledger is
 append-only by design (spec §9), and a seeded household looks exactly like a real one from

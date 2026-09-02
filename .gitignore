@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 .env
 env.production
+backups/
 .ruff_cache/
 .pytest_cache/
 .coverage
