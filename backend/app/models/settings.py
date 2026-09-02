@@ -8,8 +8,9 @@ vision endpoint / model can be re-pointed without editing ``.env`` and restartin
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,6 +36,16 @@ class HouseholdSettings(TimestampMixin, Base):
     # --- verification banding defaults (overrides AUTO_*_THRESHOLD env) -----
     auto_pass_threshold: Mapped[float | None] = mapped_column(Numeric(3, 2), default=None)
     auto_fail_threshold: Mapped[float | None] = mapped_column(Numeric(3, 2), default=None)
+
+    # --- worker heartbeat ---------------------------------------------------
+    # When the scheduler loop last completed a pass. Not a setting, but this is the one
+    # per-household row that already exists, and a table for a single timestamp is worse.
+    # Without it a stopped worker is indistinguishable from a quiet one: chores silently
+    # stop being generated, misses stop being detected, and nothing says so
+    # (implementation-plan Phase 6 items 6 and 8).
+    last_scheduler_tick_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
 
     updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         PgUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), default=None

@@ -13,6 +13,7 @@ import logging
 
 from app.db import SessionLocal
 from app.services import retention
+from app.services.heartbeat import record_tick
 from app.services.scheduler import detect_missed, open_due_windows, reconcile
 from app.services.settlement import settle_missed
 from app.worker import verify
@@ -35,6 +36,7 @@ async def scheduler_tick(*, full: bool) -> None:
                 settled = await settle_missed(db)
                 if opened or missed or settled:
                     log.info("tick: opened=%d missed=%d settled=%d", opened, missed, settled)
+            await record_tick(db)
             await db.commit()
         except Exception:
             await db.rollback()

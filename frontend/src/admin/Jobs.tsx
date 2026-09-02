@@ -11,6 +11,16 @@ export function Jobs() {
       <h1 className="text-lg font-bold">Ops</h1>
 
       <Card>
+        <p className="text-sm font-semibold">Scheduler</p>
+        <p className={`text-sm ${d.data.scheduler.stale ? 'text-amber-400' : 'text-slate-400'}`}>
+          {d.data.scheduler.last_tick_at
+            ? `last tick ${new Date(d.data.scheduler.last_tick_at).toLocaleString()}`
+            : 'has never ticked'}
+          {d.data.scheduler.stale && ' — the worker looks stopped; chores are not being generated'}
+        </p>
+      </Card>
+
+      <Card>
         <p className="text-sm font-semibold">Verification queue</p>
         <p className="text-sm text-slate-400">
           {Object.entries(d.data.queue)

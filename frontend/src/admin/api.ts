@@ -307,6 +307,7 @@ export function usePayout() {
 export interface JobsDashboard {
   queue: Record<string, number>;
   stuck_jobs: number;
+  scheduler: { last_tick_at: string | null; stale: boolean };
   recent_failures: { id: string; occurrence_id: string; error: string | null }[];
   checkins: { child: string; last_seen: string | null; stale: boolean }[];
 }

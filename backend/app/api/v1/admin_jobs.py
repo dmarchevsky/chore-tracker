@@ -1,8 +1,8 @@
 """Operator dashboard data (spec §10 `GET /admin/jobs`).
 
-Full dashboard (structured logs, alerting) is Phase 6; this exposes what already exists:
-verification-queue depth, stuck jobs, recent failures, and check-in staleness so a broken
-geofence automation surfaces as a config problem, not a penalised kid (spec §6.2).
+Verification-queue depth, stuck jobs, recent failures, scheduler liveness, and check-in
+staleness — so a broken geofence automation surfaces as a config problem rather than a
+penalised kid (spec §6.2), and a stopped worker surfaces at all.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 
 from app.auth.deps import AdminUser, DbDep
 from app.models import CheckinToken, JobState, User, VerificationJob
+from app.services.heartbeat import is_stale, last_tick
 from app.worker.queue import STUCK_AFTER_S, depth
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -56,9 +57,18 @@ async def jobs_dashboard(db: DbDep, _: AdminUser) -> dict:
         )
     ).all()
 
+    ticked_at = await last_tick(db)
+
     return {
         "queue": queue,
         "stuck_jobs": int(stuck),
+        # The worker generates chores, opens windows, detects misses and settles money. If
+        # it has stopped, every one of those silently stops with it and the app still looks
+        # healthy — so this is the first thing the Ops screen shows.
+        "scheduler": {
+            "last_tick_at": ticked_at.isoformat() if ticked_at else None,
+            "stale": is_stale(ticked_at, now=now),
+        },
         "recent_failures": [
             {"id": str(j.id), "occurrence_id": str(j.occurrence_id), "error": j.last_error}
             for j in failures

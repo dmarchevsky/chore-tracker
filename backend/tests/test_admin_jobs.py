@@ -38,7 +38,7 @@ async def test_admin_jobs_shape(client, admin_user, child_user):
     r = await client.get("/api/v1/admin/jobs", headers=h)
     assert r.status_code == 200
     body = r.json()
-    assert set(body) == {"queue", "stuck_jobs", "recent_failures", "checkins"}
+    assert set(body) == {"queue", "stuck_jobs", "scheduler", "recent_failures", "checkins"}
     assert body["checkins"] and body["checkins"][0]["stale"] is True
 
 
@@ -91,3 +91,55 @@ async def test_occurrence_submissions_returns_signed_media(
     client.cookies.clear()
     media = await client.get(subs[0]["media"][0]["url"])
     assert media.status_code == 200 and media.headers["content-type"] == "image/jpeg"
+
+
+# --- scheduler liveness (implementation-plan Phase 6 items 6, 8) -----------------------
+
+
+async def test_a_worker_that_has_never_ticked_reads_as_stale(client, admin_user):
+    """The failure this exists for is silent: no worker means no chores generated, no misses
+    detected and no money settled, while every screen still renders."""
+    h = await _admin(client)
+    body = (await client.get("/api/v1/admin/jobs", headers=h)).json()
+    assert body["scheduler"] == {"last_tick_at": None, "stale": True}
+
+
+async def test_a_recent_tick_reads_as_live(client, db_session, admin_user, household):
+    from app.services.heartbeat import record_tick
+
+    await record_tick(db_session)
+    await db_session.commit()
+
+    h = await _admin(client)
+    body = (await client.get("/api/v1/admin/jobs", headers=h)).json()
+    assert body["scheduler"]["stale"] is False
+    assert body["scheduler"]["last_tick_at"] is not None
+
+
+async def test_an_old_tick_reads_as_stale(client, db_session, admin_user, household):
+    from datetime import timedelta
+
+    from app.services.heartbeat import STALE_AFTER_S, record_tick
+
+    await record_tick(db_session, now=datetime.now(UTC) - timedelta(seconds=STALE_AFTER_S + 60))
+    await db_session.commit()
+
+    h = await _admin(client)
+    assert (await client.get("/api/v1/admin/jobs", headers=h)).json()["scheduler"]["stale"] is True
+
+
+async def test_recording_a_tick_before_the_household_exists_is_a_no_op(db_session):
+    """A fresh production volume has no household until the bootstrap seed runs, and the
+    worker ticks throughout — it must not raise there."""
+    from sqlalchemy import delete
+
+    from app.models import Household, HouseholdSettings
+    from app.services.heartbeat import last_tick, record_tick
+
+    await db_session.execute(delete(HouseholdSettings))
+    await db_session.execute(delete(Household))
+    await db_session.commit()
+
+    await record_tick(db_session)
+    await db_session.commit()
+    assert await last_tick(db_session) is None
