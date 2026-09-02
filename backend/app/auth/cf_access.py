@@ -12,8 +12,16 @@ Three paths are exempt, each for a reason that has to survive a re-read:
 * ``/api/v1/checkin/{token}`` — the iOS Shortcuts geofence webhook. A Shortcut cannot
   carry an Access session, so this path gets a Cloudflare *Bypass* policy; it is
   authenticated by the per-kid token and rate-limited instead (spec §6.2).
-* ``/api/v1/auth/login`` — the break-glass admin password. Reachable only on the host's
-  loopback port because the Caddy front door 404s it, so it never rides the tunnel.
+* ``/api/v1/auth/login`` — the break-glass admin password. The tunnel's Caddy site answers
+  404 for it; only the LAN site carries it.
+
+The **LAN door** is exempt wholesale. Without that, break-glass would be theatre: the login
+succeeds and then every other endpoint refuses the session it just issued, so the documented
+way back in when Cloudflare or Google is down does not actually lead anywhere. Caddy stamps
+every proxied request with ``X-CK-Door``, overwriting whatever the client sent; the api is
+reachable from nothing but those two Caddy sites and the host's own loopback, so an internet
+request always arrives stamped ``tunnel``. Enforcement is the default and only an explicit
+``lan`` skips it, so a missing or unrecognised value fails closed.
 
 Never trust ``CF-Access-Authenticated-User-Email``: it is a plain header that anything
 able to reach the origin can set. Only the signature-verified ``email`` claim counts.
@@ -38,6 +46,9 @@ _HEADER = "cf-access-jwt-assertion"
 
 _EXEMPT_EXACT = {"/api/v1/health", "/api/v1/auth/login"}
 _EXEMPT_PREFIX = ("/api/v1/checkin/",)
+
+_DOOR_HEADER = "x-ck-door"
+_LAN_DOOR = "lan"
 
 
 def _guarded(path: str) -> bool:
@@ -104,6 +115,11 @@ class CfAccessMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next) -> Response:
         if not _guarded(request.url.path):
+            return await call_next(request)
+        if request.headers.get(_DOOR_HEADER) == _LAN_DOOR:
+            # The LAN door. Cloudflare is not in front of it and cannot be, which is the
+            # whole point of it existing (spec §12.1). App auth still applies to every
+            # route behind this — the session cookie and CSRF checks are untouched.
             return await call_next(request)
         token = request.headers.get(_HEADER)
         if not token:

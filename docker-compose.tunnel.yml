@@ -23,7 +23,11 @@ services:
   # Bring the front door up by default in this deployment (no profile).
   proxy:
     profiles: !override []
-    ports: !override []          # reachable only via cloudflared on the compose net
+    # :80 is the tunnel door and stays unpublished — cloudflared reaches it on the compose
+    # network. :81 is the LAN door, published to the home network so a parent can reach the
+    # break-glass sign-in when Cloudflare or Google is down (spec §12.1). cloudflared has no
+    # route to it: its ingress names proxy:80 and nothing else.
+    ports: !override ["5173:81"]
     depends_on:
       - api
 

@@ -1,6 +1,17 @@
-# ChoreKeeper front door (spec §12.2). Sits behind cloudflared; terminates nothing
-# itself — Cloudflare does TLS. Serves the built PWA, proxies /api, and sets the
-# strict security-header + cache-control set the app assumes when internet-facing.
+# ChoreKeeper front doors (spec §12.2). Terminates nothing itself — Cloudflare does TLS.
+# Serves the built PWA, proxies /api, and sets the strict security-header + cache-control
+# set the app assumes when internet-facing.
+#
+# TWO doors, separated by port, because they carry different trust:
+#
+#   :80  the tunnel door.  cloudflared's ingress points here. Everything on it is
+#        internet-reachable, so the break-glass password path is answered 404.
+#   :81  the LAN door.     Published to the home network only, never to cloudflared.
+#        Carries /api/v1/auth/login so a parent can get back in from a laptop when
+#        Cloudflare or Google is down (spec §12.1).
+#
+# The separation is a network fact, not a header the app has to trust: cloudflared is
+# configured with one origin, `proxy:80`, and has no route to :81 at all.
 {
 	admin off
 	servers {
@@ -9,13 +20,12 @@
 	}
 }
 
-:80 {
+(app) {
 	encode gzip zstd
 
 	# The one third-party host in the whole policy: OpenStreetMap tiles for the admin
 	# geofence picker (spec §6.2). Scripts, fetches and everything else stay 'self'.
 	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 		Referrer-Policy "no-referrer"
@@ -25,22 +35,17 @@
 		-Server
 	}
 
-	# The break-glass admin password must never ride the tunnel: the front door refuses
-	# to carry it at all, so that path exists only on the host's loopback port
-	# (spec §12.1, docs/remote-access.md). This is one of the two independent layers
-	# keeping it off the internet — the other is the app exempting it from Access, which
-	# is exactly why it needs blocking here. Do not delete without reading both.
-	@breakglass path /api/v1/auth/login
-	handle @breakglass {
-		respond 404
-	}
-
 	# API + signed media — proxied to the app, never cached at any layer
 	# (a cached signed media URL served to the wrong session is the failure mode).
 	@api path /api/*
 	handle @api {
 		header Cache-Control "private, no-store"
-		reverse_proxy api:8000
+		reverse_proxy api:8000 {
+			# Which door this request came through. Set unconditionally, so a client-supplied
+			# value is always overwritten — the app trusts it only because the api is
+			# reachable from nothing but these two sites and the host's own loopback.
+			header_up X-CK-Door {vars.door}
+		}
 	}
 
 	# Static PWA
@@ -56,4 +61,30 @@
 		try_files {path} /index.html
 		file_server
 	}
+}
+
+# ---- the tunnel door -------------------------------------------------------
+:80 {
+	vars door "tunnel"
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+
+	# The break-glass admin password must never ride the tunnel: this door refuses to
+	# carry it at all, so the path exists only on the LAN door below (spec §12.1,
+	# docs/remote-access.md). One of two independent layers — the other is the app
+	# exempting this path from the Access check, which is exactly why it needs blocking
+	# here. Do not delete without reading both.
+	@breakglass path /api/v1/auth/login
+	handle @breakglass {
+		respond 404
+	}
+
+	import app
+}
+
+# ---- the LAN door ----------------------------------------------------------
+# No HSTS: this is plain HTTP on a private address, and pinning HTTPS for the host would
+# break it. Nothing here is reachable from the internet — see the header comment.
+:81 {
+	vars door "lan"
+	import app
 }

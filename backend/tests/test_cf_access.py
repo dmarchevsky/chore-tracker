@@ -206,3 +206,22 @@ async def test_a_token_with_no_issuer_is_rejected(client):
     async with client as c:
         r = await c.get("/api/v1/occurrences", headers={"Cf-Access-Jwt-Assertion": token})
     assert r.status_code == 403
+
+
+async def test_the_lan_door_is_exempt_and_the_tunnel_door_is_not(client):
+    """Break-glass would be theatre without this: the login succeeds on the LAN and then
+    every other endpoint refuses the session it just issued (spec §12.1)."""
+    async with client as c:
+        lan = await c.get("/api/v1/occurrences", headers={"X-CK-Door": "lan"})
+        tunnel = await c.get("/api/v1/occurrences", headers={"X-CK-Door": "tunnel"})
+    assert lan.status_code == 200
+    assert tunnel.status_code == 403
+
+
+async def test_an_unrecognised_door_fails_closed(client):
+    """Enforcement is the default: only an explicit "lan" skips it, so a stripped or
+    misspelled header keeps Access in force rather than opening the app up."""
+    async with client as c:
+        for value in ("LAN", "lan ", "", "yes", "trusted"):
+            r = await c.get("/api/v1/occurrences", headers={"X-CK-Door": value})
+            assert r.status_code == 403, value

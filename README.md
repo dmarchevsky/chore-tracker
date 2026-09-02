@@ -58,8 +58,9 @@ Interactive docs at `/docs` when `ENVIRONMENT=dev`.
   their Google address under Kids — and in the Access policy, which is the half that
   actually lets them through the door.
 - **Break-glass:** one local admin password (`POST /api/v1/auth/login`) for when Cloudflare
-  or Google is unavailable. It is reachable only on the host's own port — the Caddy front
-  door answers 404 for that path, so it never rides the tunnel. Set it from admin Settings.
+  or Google is unavailable. In the tunnel deployment it lives on a **LAN door** —
+  `http://<home-ip>:5173`, a second Caddy site the tunnel has no route to — while the public
+  hostname answers 404 for that path. Set the password from admin Settings.
 - On the LAN stack (`just up`, no `CF_ACCESS_*`), break-glass is the only way in.
 - Mutations require the `X-CSRF-Token` header echoing `csrf_token` from the login / `me`
   response. Session is an HTTP-only cookie (`ck_session`).

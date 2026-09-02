@@ -572,10 +572,18 @@ here, not a loss.
   and the Access assertion names another, the cookie is revoked and the assertion wins — otherwise a
   shared family tablet hands one child the previous child's screen.
 - `[D]` **One local admin password survives as break-glass**, for when Cloudflare or Google is
-  unavailable. It is admin-only, minimum 12 characters, and kept off the internet by two independent
-  layers: the app exempts `/api/v1/auth/login` from the Access check so it works on the loopback port,
-  and the Caddy front door answers `404` for that path so the tunnel never carries it. Rate limiting
-  on it is unchanged (10/min/IP, exponential backoff per account).
+  unavailable. It is admin-only, minimum 12 characters, and rate limited as before (10/min/IP,
+  exponential backoff per account).
+- `[D]` **Break-glass has its own LAN door** — a second Caddy site on `:81`, published to the home
+  network and unreachable from the tunnel, since cloudflared's ingress names `proxy:80` and nothing
+  else. The Access check is skipped there wholesale. Without that it is theatre: the login succeeds
+  and then the gate refuses the session it just issued, so the documented way back in leads nowhere.
+  Two independent layers keep it off the internet — the tunnel site answers `404` for
+  `/api/v1/auth/login`, and Caddy stamps every proxied request with `X-CK-Door`, which the app
+  honours only on an explicit `lan`, so a stripped or unrecognised value fails closed. App auth,
+  CSRF and the rate limits are unchanged behind it; what the door grants is the chance to type the
+  admin password, so everyone on the wifi gets to try. Kids cannot use it — their identity is
+  Google, and Google is not in front of it.
 - ~~`[Q4]`~~ **RESOLVED** — there is no kid password to reset. A parent changes the Google address
   from the admin panel, which revokes that kid's live sessions.
 

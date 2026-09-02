@@ -326,12 +326,41 @@ would break the geofence automations.
 HSTS to the origin header (Caddy sends it) or enable it here with the same `max-age`.
 Turn *Development Mode* off.
 
+### 9b. The LAN door (break-glass)
+
+The tunnel deployment publishes a **second Caddy site on `:81`**, mapped to the host's
+`:5173`, reachable only from the home network. cloudflared has no route to it — its ingress
+names `proxy:80` and nothing else — so nothing here is exposed to the internet.
+
+It exists for one reason: when Cloudflare or Google is unavailable, nobody can sign in
+through the tunnel, and the break-glass password path is deliberately 404ed there. Without a
+LAN door the only way back in is a shell on the host.
+
+```
+http://<home-ip>:5173/            → the app, with the break-glass sign-in available
+https://chores.example.com/       → the app, Google via Access, break-glass 404ed
+```
+
+Two things make this safe rather than a bypass:
+
+- **Network separation.** :80 and :81 are different listeners; only :80 is wired to the
+  tunnel. This is a fact about the topology, not a header the app has to believe.
+- **Fail-closed labelling.** Caddy stamps every proxied request with `X-CK-Door`
+  (`tunnel` or `lan`), overwriting anything the client sent. The app skips the Access check
+  only on an explicit `lan`; a stripped, misspelled or absent value keeps Access in force.
+
+App auth is unchanged behind the LAN door — session cookie, CSRF, and the same rate limits.
+What it grants is the *chance* to enter the admin password, so treat anyone on your wifi as
+someone who gets to try. Kids cannot sign in there at all: their identity is Google, and
+Google is not in front of this door.
+
 ### 10. Operator path — LAN and console only
 
 There is nothing to set up, and that is the decision (spec §12.2 `[D]`). The overlay binds
-the API to `127.0.0.1:8088` and Postgres to `127.0.0.1:5432`, so `ssh`, `psql`,
-`llama-server` and the break-glass login are reachable from the host itself or the LAN and
-from nowhere else. No VPN mesh is maintained for them.
+the API to `127.0.0.1:8088` and Postgres to `127.0.0.1:5432`, so `ssh`, `psql` and
+`llama-server` are reachable from the host itself and from nowhere else. No VPN mesh is
+maintained for them. The app's own break-glass sign-in is the exception: it has a LAN door
+(step 9b), because "get back in when the edge is down" is useless if it needs a shell.
 
 `/admin/jobs` and `/health/llm` remain reachable through the tunnel, gated by the
 parent-only Access application and the app's own JWT verification.
