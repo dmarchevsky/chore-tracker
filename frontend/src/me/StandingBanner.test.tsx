@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StandingBanner } from './StandingBanner';
 import { useChores } from '../api/hooks';
 
-let viewer = 'nika';
+let viewer = 'kid-a';
 vi.mock('../auth/AuthContext', () => ({ useAuth: () => ({ me: { id: viewer } }) }));
 
 function json(body: unknown) {
@@ -28,7 +28,7 @@ const STANDING = {
   id: 'c1',
   chore_kind: 'standing',
   assignment_mode: 'fixed',
-  fixed_assignee_id: 'nika',
+  fixed_assignee_id: 'kid-a',
   assignee_ids: [],
   standing_on: true,
   standing_tier_id: 1,
@@ -65,7 +65,7 @@ const loaded = () => screen.findByText('loaded');
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-  viewer = 'nika';
+  viewer = 'kid-a';
 });
 
 describe('StandingBanner', () => {
@@ -94,7 +94,7 @@ describe('StandingBanner', () => {
     // The banner narrows to the viewer itself rather than trusting the list: a cached
     // response, or an `anyone` pool chore, must never show as this kid's own state
     // (spec §15 Q1, own data only).
-    viewer = 'kira';
+    viewer = 'kid-b';
     setup([STANDING]);
 
     await loaded();
@@ -103,13 +103,13 @@ describe('StandingBanner', () => {
   });
 
   it('shows an all-mode standing chore to each kid it names', async () => {
-    viewer = 'kira';
+    viewer = 'kid-b';
     setup([
       {
         ...STANDING,
         assignment_mode: 'all',
         fixed_assignee_id: null,
-        assignee_ids: ['nika', 'kira'],
+        assignee_ids: ['kid-a', 'kid-b'],
       },
     ]);
 

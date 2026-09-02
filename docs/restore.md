@@ -65,7 +65,7 @@ safe to run at any time, against production backups, while production is serving
 Expected output ends with:
 
 ```
-  PASS  balance kira      expected -9.00, got -9.00
+  PASS  balance kid1      expected -9.00, got -9.00
   every row count and every balance matches the manifest
   VERIFIED — this backup restores into a clean environment and reproduces every balance
 ```

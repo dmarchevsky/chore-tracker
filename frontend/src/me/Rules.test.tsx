@@ -3,7 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Rules } from './Rules';
 
-let viewer = 'nika';
+let viewer = 'kid-a';
 vi.mock('../auth/AuthContext', () => ({ useAuth: () => ({ me: { id: viewer } }) }));
 
 function json(body: unknown) {
@@ -16,7 +16,7 @@ function json(body: unknown) {
 const BASE = {
   chore_kind: 'scheduled',
   assignment_mode: 'fixed',
-  fixed_assignee_id: 'nika',
+  fixed_assignee_id: 'kid-a',
   assignee_ids: [],
   outcome_tiers: null,
   reward_cents: 100,
@@ -36,7 +36,7 @@ const POOL = {
   assignment_mode: 'anyone',
   fixed_assignee_id: null,
 };
-const SIBLING = { ...BASE, id: 'c3', title: 'Beas job', fixed_assignee_id: 'kira' };
+const SIBLING = { ...BASE, id: 'c3', title: 'Beas job', fixed_assignee_id: 'kid-b' };
 const PENALTY = {
   ...BASE,
   id: 'c4',
@@ -69,7 +69,7 @@ function setup(chores: unknown[]) {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-  viewer = 'nika';
+  viewer = 'kid-a';
 });
 
 describe('Rules', () => {
@@ -101,7 +101,7 @@ describe('Rules', () => {
   });
 
   it("does not show a sibling's penalty rule", async () => {
-    setup([{ ...PENALTY, fixed_assignee_id: 'kira' }]);
+    setup([{ ...PENALTY, fixed_assignee_id: 'kid-b' }]);
 
     await screen.findByText('The rules');
     expect(screen.queryByText('Bike left out')).not.toBeInTheDocument();
@@ -109,8 +109,8 @@ describe('Rules', () => {
   });
 
   it('shows an all-mode chore to each kid it names', async () => {
-    viewer = 'kira';
-    setup([{ ...MINE, assignment_mode: 'all', fixed_assignee_id: null, assignee_ids: ['kira'] }]);
+    viewer = 'kid-b';
+    setup([{ ...MINE, assignment_mode: 'all', fixed_assignee_id: null, assignee_ids: ['kid-b'] }]);
 
     expect(await screen.findByText('Dishes')).toBeInTheDocument();
   });

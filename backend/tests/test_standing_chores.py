@@ -581,8 +581,8 @@ async def test_every_assignee_of_an_all_mode_chore_is_told(
 ):
     second = User(
         household_id=household.id,
-        username="kira",
-        display_name="Kira",
+        username="kid2",
+        display_name="Kid Two",
         role=UserRole.child,
     )
     db_session.add(second)

@@ -1,8 +1,13 @@
 """Development seed data (spec §13.3).
 
-One household, one admin (with a break-glass password for the prod stack), two children, and
-the four example chores from the brief. Phase 3 adds 30 days of backdated occurrences in
+One household, one admin (with a break-glass password for the prod stack), three children,
+and the four example chores from the brief. Phase 3 adds 30 days of backdated occurrences in
 mixed states so the UI is never empty.
+
+This is also how a brand-new **production** database is bootstrapped, which is why the admin
+password is not a literal: under ``ENVIRONMENT=prod`` the seed refuses to run unless the
+operator supplies ``ADMIN_PASSWORD``. A known password on the LAN break-glass door is a
+password everyone on the wifi already has (spec §12.1).
 
 Run:  uv run python -m app.seed        (idempotent — safe to re-run)
 """
@@ -16,7 +21,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from app.auth.passwords import hash_password
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.db import SessionLocal
 from app.models import (
     Chore,
@@ -29,6 +34,7 @@ from app.models import (
     Verdict,
     Verification,
 )
+from app.schemas.auth import BREAK_GLASS_MIN_LENGTH
 from app.services import ledger
 from app.services.cadence import due_datetimes
 from app.services.scheduler import resolve_assignees
@@ -46,26 +52,65 @@ _STATUS_CYCLE = [
 ]
 
 # Sign-in is Google via Cloudflare Access in production and the DEV_AUTH picker locally
-# (spec §12.1), so what a seeded account needs is an email. The admin also gets the
-# break-glass password — unusable on the dev stack, which 404s that route, but a seeded
-# database is also what a production stack is bootstrapped from.
+# (spec §12.1), so what a seeded account needs is an email. The admin also gets a break-glass
+# password — see _admin_password() for where it comes from.
 ADMIN = {
     "username": "parent",
     "display_name": "Parent",
     "email": "parent@example.com",
-    "password": "parent-dev-pass",
 }
-# The household's actual kids, so the dev picker offers the names you expect. The addresses
-# stay @example.com on purpose: dev sign-in is by user id and never touches Google, so a real
-# Google address here would buy nothing and put the family's addresses in the repo.
+# Placeholder household members, not anybody's real family: a production bootstrap renames
+# them (or deactivates them and adds the real kids under Kids, which is where the Google
+# address that actually signs a kid in has to be entered anyway). The addresses stay
+# @example.com on purpose — dev sign-in is by user id and never touches Google, so a real
+# address here would buy nothing and put the family's addresses in the repo.
 CHILDREN = [
-    {"username": "kira", "display_name": "Kira", "email": "kira@example.com"},
-    {"username": "nika", "display_name": "Nika", "email": "nika@example.com"},
-    {"username": "dmytro", "display_name": "Dmytro", "email": "dmytro@example.com"},
+    {"username": "kid1", "display_name": "Kid One", "email": "kid1@example.com"},
+    {"username": "kid2", "display_name": "Kid Two", "email": "kid2@example.com"},
+    {"username": "kid3", "display_name": "Kid Three", "email": "kid3@example.com"},
 ]
+
+# Used only when this is not a production database. Printed on completion, so it is a
+# convenience and never a secret.
+DEV_ADMIN_PASSWORD = "parent-dev-pass"
+
+
+class SeedRefused(RuntimeError):
+    """The seed will not plant a credential this database should not have."""
+
+
+def _admin_password(settings: Settings | None = None) -> str:
+    """The break-glass password to give the first admin.
+
+    On a production database it must come from the operator. The alternative — the literal
+    below — is published in this repository, and the LAN door offers that login to everyone
+    on the home network, so seeding it would hand out the admin account with the wifi
+    password (spec §12.1). It is read once, here; the password is changed afterwards from
+    admin Settings, which is the only other write path.
+    """
+    s = settings or get_settings()
+    if not s.is_prod:
+        return DEV_ADMIN_PASSWORD
+    password = s.admin_password
+    if not password:
+        raise SeedRefused(
+            "ENVIRONMENT=prod with no ADMIN_PASSWORD set. Seeding would give the admin a "
+            "break-glass password that is published in this repo, on a door every device "
+            "on the LAN can reach. Set ADMIN_PASSWORD in env.production and re-run."
+        )
+    if len(password) < BREAK_GLASS_MIN_LENGTH:
+        raise SeedRefused(
+            f"ADMIN_PASSWORD is shorter than the {BREAK_GLASS_MIN_LENGTH}-character minimum "
+            "the API enforces on this same password (spec §12.1)."
+        )
+    return password
 
 
 async def seed() -> None:
+    # Before anything is written: a refusal after the household exists is a half-seeded
+    # database the operator then has to reason about.
+    admin_password = _admin_password()
+
     async with SessionLocal() as db:
         household = (await db.execute(select(Household).limit(1))).scalar_one_or_none()
         if household is None:
@@ -73,7 +118,7 @@ async def seed() -> None:
             db.add(household)
             await db.flush()
 
-        await _upsert_user(db, household.id, ADMIN, UserRole.admin)
+        await _upsert_user(db, household.id, {**ADMIN, "password": admin_password}, UserRole.admin)
         kids = {
             child["username"]: await _upsert_user(db, household.id, child, UserRole.child)
             for child in CHILDREN
@@ -98,8 +143,11 @@ async def seed() -> None:
     # printing a password would send the reader to the one page that cannot let them in.
     if get_settings().dev_auth:
         print("\n  Sign in at http://localhost:5173 — pick a user, no password.")
+    elif get_settings().is_prod:
+        # The operator chose this password; echoing it would only copy it into a log.
+        print(f"\n  Break-glass: {ADMIN['username']} / the ADMIN_PASSWORD you set (LAN door only)")
     else:
-        print(f"\n  Break-glass: {ADMIN['username']} / {ADMIN['password']} (LAN door only)")
+        print(f"\n  Break-glass: {ADMIN['username']} / {admin_password} (LAN door only)")
 
 
 async def _seed_chores(db, household_id, kids: list[User]) -> None:
@@ -315,5 +363,12 @@ async def _upsert_user(db, household_id, spec, role: UserRole):
     return user
 
 
+def main() -> None:
+    try:
+        asyncio.run(seed())
+    except SeedRefused as exc:
+        raise SystemExit(f"seed refused: {exc}") from exc
+
+
 if __name__ == "__main__":
-    asyncio.run(seed())
+    main()

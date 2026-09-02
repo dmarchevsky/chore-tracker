@@ -64,6 +64,9 @@ services:
       CF_ACCESS_ISSUER: ${CF_ACCESS_ISSUER:-}
       # --- first boot seeds the admin identity from this (read ONCE by the auth migration) ---
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      # Read ONCE by the bootstrap seed (`exec api python -m app.seed`) on an empty database,
+      # which refuses to run in prod without it. Nothing at runtime reads it.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       # --- general / storage ---
       TZ: ${TZ:-America/Los_Angeles}
       MEDIA_ROOT: /data/media

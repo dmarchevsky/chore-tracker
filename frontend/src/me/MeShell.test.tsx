@@ -8,7 +8,7 @@ import { pushState } from '../pwa/push';
 vi.mock('../pwa/push', () => ({ pushState: vi.fn() }));
 vi.mock('../pwa/offlineQueue', () => ({ startAutoFlush: () => () => {} }));
 vi.mock('../auth/AuthContext', () => ({
-  useAuth: () => ({ me: { id: 'k1', display_name: 'Nika' } }),
+  useAuth: () => ({ me: { id: 'k1', display_name: 'Kid A' } }),
 }));
 
 function show() {
@@ -65,7 +65,7 @@ describe('MeShell', () => {
     show();
 
     const gear = await screen.findByLabelText('Settings');
-    await waitFor(() => expect(screen.getByText('Nika', { exact: false })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Kid A', { exact: false })).toBeInTheDocument());
     expect(gear.querySelector('span[aria-hidden]')).toBeNull();
   });
 });

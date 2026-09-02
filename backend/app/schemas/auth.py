@@ -6,6 +6,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import UserRole
 
+# The break-glass password is the one credential that survives an outage of both
+# Cloudflare and Google, and everyone on the wifi gets to try it (spec §12.1). The
+# minimum lives here so the API and the bootstrap seed cannot drift apart on it.
+BREAK_GLASS_MIN_LENGTH = 12
+
 
 class BreakGlassLoginRequest(BaseModel):
     """The local admin password path — everyone else arrives via Cloudflare Access."""
@@ -29,7 +34,7 @@ class LogoutResponse(BaseModel):
 
 
 class BreakGlassPasswordRequest(BaseModel):
-    new_password: str = Field(min_length=12, max_length=256)
+    new_password: str = Field(min_length=BREAK_GLASS_MIN_LENGTH, max_length=256)
 
 
 class DevUser(BaseModel):

@@ -86,6 +86,11 @@ class Settings(BaseSettings):
     # mutually exclusive with Access and create_app() refuses to start a prod app with it on
     # (spec §12.1).
     dev_auth: bool = Field(default=False, alias="DEV_AUTH")
+    # Read once, by the bootstrap seed, to set the first admin's break-glass password on a
+    # brand-new production database. It is never read by the running app — the password is
+    # changed from admin Settings afterwards — and a prod seed refuses to run without it
+    # rather than planting a value that lives in this repo (spec §12.1).
+    admin_password: str = Field(default="", alias="ADMIN_PASSWORD")
 
     @property
     def is_prod(self) -> bool:
