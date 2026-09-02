@@ -14,8 +14,7 @@
 //   Worth      outcome tiers                 always; text-only when K=standing
 //              reward / penalty              only when there are no tiers
 //
-// The buttons act on this chore: Save, Deactivate/Reactivate, and Duplicate — which copies
-// it as *stored*, so the form warns when there are unsaved edits.
+// The buttons act on this chore: Save, Deactivate/Reactivate, and Duplicate.
 //
 // Flipping a standing chore on/off is NOT here — that is an operational act, so it lives in
 // the review inbox (admin/StandingDetail.tsx) alongside everything else a parent acts on.
@@ -70,11 +69,6 @@ export function ChoreForm({
       {f.editing && (
         <p className="text-xs text-slate-500">
           Saving regenerates upcoming occurrences; completed ones are left alone.
-        </p>
-      )}
-      {f.dirty && (
-        <p className="text-xs text-amber-400">
-          Duplicate copies the chore as saved — save first to carry your edits into the copy.
         </p>
       )}
 

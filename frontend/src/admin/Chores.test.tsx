@@ -333,17 +333,6 @@ describe('admin Chores', () => {
     expect(await screen.findByDisplayValue('Empty the sink (copy)')).toBeInTheDocument();
   });
 
-  it('warns that unsaved edits will not be in the copy', async () => {
-    setup();
-
-    fireEvent.click(await screen.findByText('Empty the sink'));
-    const title = await screen.findByDisplayValue('Empty the sink');
-    expect(screen.queryByText(/save first to carry your edits/i)).not.toBeInTheDocument();
-
-    fireEvent.change(title, { target: { value: 'Empty the sink twice' } });
-    expect(await screen.findByText(/save first to carry your edits/i)).toBeInTheDocument();
-  });
-
   it('turns a chore into a one-off and PATCHes a once(...) cadence', async () => {
     const calls = setup();
 

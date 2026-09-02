@@ -201,8 +201,7 @@ export function useChoreForm(
     }
   }
 
-  /** The backend copies the chore **as stored**, so anything typed but not saved is not in
-   *  the copy. Say so rather than silently dropping it — see `dirty` below. */
+  /** The backend copies the chore as stored, so unsaved edits are not in the copy. */
   async function duplicateChore() {
     setError(null);
     try {
@@ -220,19 +219,9 @@ export function useChoreForm(
       .catch((e) => setError((e as Error).message));
   }
 
-  // Unsaved edits, measured over the fields a PATCH would actually send.
-  const dirty =
-    editing &&
-    EDITABLE.some(
-      (k) =>
-        JSON.stringify(form[k] ?? null) !==
-        JSON.stringify((chore as unknown as Record<string, unknown>)[k] ?? null),
-    );
-
   return {
     chore,
     editing,
-    dirty,
     form,
     set,
     setPhotoCount,
