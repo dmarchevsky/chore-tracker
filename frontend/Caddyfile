@@ -45,6 +45,12 @@
 			# value is always overwritten — the app trusts it only because the api is
 			# reachable from nothing but these two sites and the host's own loopback.
 			header_up X-CK-Door {vars.door}
+			# ALLOWED_HOSTS names the public hostname, and TrustedHostMiddleware runs
+			# outermost, so the LAN door presents "localhost" — which that middleware always
+			# allows — instead of the machine's address, which it would reject and which
+			# changes whenever DHCP feels like it. The tunnel door passes the real Host
+			# through untouched, so the allow-list still does its job where it matters.
+			header_up Host {vars.upstream_host}
 		}
 	}
 
