@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlencode
+
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlalchemy import select
 
@@ -122,9 +124,17 @@ async def logout(request: Request, response: Response, db: DbDep) -> LogoutRespo
     # Dropping our own cookie is not a logout while the Access session stands — the next
     # page load would sign the same Google account straight back in. The SPA sends the
     # browser here to end the edge session too.
-    team = get_settings().cf_access_team_domain
+    #
+    # It must be the TEAM domain with ?returnTo=, not the app host's /cdn-cgi/access/logout:
+    # the latter answers 200 with a bare Cloudflare page, clears no cookie and offers no way
+    # back, so the visitor is stranded and still signed in. The team-domain form 302s home
+    # after expiring CF_Authorization, CF_Binding and CF_Device.
+    s = get_settings()
+    if not s.cf_access_team_domain:
+        return LogoutResponse(access_logout_url=None)
+    return_to = urlencode({"returnTo": s.public_base_url.rstrip("/") + "/"})
     return LogoutResponse(
-        access_logout_url=f"https://{team}/cdn-cgi/access/logout" if team else None
+        access_logout_url=(f"https://{s.cf_access_team_domain}/cdn-cgi/access/logout?{return_to}")
     )
 
 

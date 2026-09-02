@@ -63,6 +63,27 @@ async def test_logout_revokes_the_session_and_points_at_access(client, admin_use
     assert (await client.get("/api/v1/auth/me")).status_code == 401
 
 
+async def test_logout_returns_the_team_domain_url_that_actually_ends_the_session(
+    client, admin_user, monkeypatch
+):
+    """The app host's /cdn-cgi/access/logout answers 200 with a bare Cloudflare page: it
+    clears no cookie and offers no way back, stranding the visitor still signed in. Only
+    the team-domain form with ?returnTo= expires CF_Authorization and redirects home."""
+    from app.config import get_settings
+
+    monkeypatch.setenv("CF_ACCESS_TEAM_DOMAIN", "acme.cloudflareaccess.com")
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://chores.example.com")
+    get_settings.cache_clear()
+    try:
+        await sign_in(client, "parent@example.com")
+        url = (await client.post("/api/v1/auth/logout")).json()["access_logout_url"]
+    finally:
+        get_settings.cache_clear()
+
+    assert url.startswith("https://acme.cloudflareaccess.com/cdn-cgi/access/logout?")
+    assert "returnTo=https%3A%2F%2Fchores.example.com%2F" in url
+
+
 async def test_break_glass_admin_password_works(client, admin_user):
     r = await client.post(
         "/api/v1/auth/login", json={"username": "parent", "password": "parent-pass"}

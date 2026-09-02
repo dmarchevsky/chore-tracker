@@ -7,7 +7,7 @@ import { Button, Card } from '../shared/ui';
  *  In the normal case Cloudflare Access has already signed the visitor in and the app
  *  goes straight to their screens — nobody sees this page. */
 export function Login() {
-  const { error, refresh } = useAuth();
+  const { error, refresh, logout } = useAuth();
   const [breakGlass, setBreakGlass] = useState(false);
 
   if (breakGlass) return <BreakGlassForm onCancel={() => setBreakGlass(false)} />;
@@ -28,9 +28,27 @@ export function Login() {
           <p className="text-sm text-slate-400">You are not signed in.</p>
         )}
         <Button onClick={() => void refresh()}>Try again</Button>
-        <a className="text-center text-sm text-slate-400 underline" href="/cdn-cgi/access/logout">
-          Sign in as someone else
-        </a>
+        {/* Only offered when Cloudflare did sign someone in (the 403 above). With no Access
+            session there is nothing to switch away from, and the request would just fail. */}
+        {error && (
+          <>
+            <button
+              type="button"
+              className="text-center text-sm text-slate-400 underline"
+              onClick={() => void logout()}
+            >
+              Sign in as a different Google account
+            </button>
+            <p className="text-xs text-slate-500">
+              Google reuses the account you are already signed in to, so if it brings you straight
+              back here,{' '}
+              <a className="underline" href="https://accounts.google.com/Logout">
+                sign out of Google
+              </a>{' '}
+              first, then try again.
+            </p>
+          </>
+        )}
         <button
           type="button"
           className="text-center text-xs text-slate-600 underline"
