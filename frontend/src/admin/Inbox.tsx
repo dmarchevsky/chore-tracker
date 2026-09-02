@@ -4,15 +4,17 @@ import { useInbox, useDecision } from './api';
 import { useAdminChores, useChildren, useOpenDisputes } from './api';
 import { ReviewDetail } from './ReviewDetail';
 import { StandingDetail } from './StandingDetail';
+import { PenaltyDetail } from './PenaltyDetail';
 import { Button, Card, Spinner } from '../shared/ui';
 import { StatusBadge } from '../shared/StatusBadge';
 import { standingEntry, TONE_CLASS } from '../shared/status';
 import { occurrenceWorth } from '../shared/outcome';
+import { tierOutcome } from '../shared/format';
 
 /** The right pane serves two kinds of thing now, so the selection has to say which.
  *  /admin/review/:id always means an occurrence — keeping the route the only untagged input
  *  is what stops the push deep-link breaking. */
-type Selection = { kind: 'occurrence' | 'standing'; id: string };
+type Selection = { kind: 'occurrence' | 'standing' | 'penalty'; id: string };
 
 export function Inbox() {
   const inbox = useInbox();
@@ -53,6 +55,12 @@ export function Inbox() {
         a.title.localeCompare(b.title),
     );
   const inForce = standing.filter((c) => c.standing_on).length;
+  // Deactivated rules are filtered out for the same reason standing ones are: the underlying
+  // query passes include_inactive=true, and a rule that can't be charged (services/penalties.py
+  // 409s) has no business offering a Charge button.
+  const penalties = (chores.data ?? [])
+    .filter((c) => c.chore_kind === 'penalty' && c.active)
+    .sort((a, b) => a.title.localeCompare(b.title));
 
   function toggle(id: string) {
     setChecked((prev) => {
@@ -145,6 +153,42 @@ export function Inbox() {
             })}
           </div>
         )}
+        {penalties.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <h2 className="text-sm font-semibold text-slate-400">Penalties</h2>
+            {penalties.map((c) => (
+              <Card
+                key={c.id}
+                className={
+                  selected?.kind === 'penalty' && selected.id === c.id ? 'border-sky-600' : ''
+                }
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold">{c.title}</p>
+                    <p className="text-xs text-slate-400">
+                      {c.assignment_mode === 'fixed'
+                        ? (kidById.get(c.fixed_assignee_id ?? '')?.display_name ?? 'Unassigned')
+                        : 'Everyone'}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {(c.outcome_tiers ?? [])
+                        .map((t) => `${t.condition} ${tierOutcome(t)}`)
+                        .join(' · ')}
+                    </p>
+                  </div>
+                  <Button
+                    className="min-h-0 shrink-0 px-3 py-1 text-sm"
+                    variant="danger"
+                    onClick={() => select({ kind: 'penalty', id: c.id })}
+                  >
+                    Charge
+                  </Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
         {rows.length === 0 && <p className="text-slate-500">Nothing waiting. 🎉</p>}
         {rows.map((o) => (
           <Card
@@ -189,6 +233,8 @@ export function Inbox() {
       <div>
         {selected?.kind === 'standing' ? (
           <StandingDetail id={selected.id} onDone={clearSelection} />
+        ) : selected?.kind === 'penalty' ? (
+          <PenaltyDetail id={selected.id} onDone={clearSelection} />
         ) : selected ? (
           <ReviewDetail id={selected.id} onDone={clearSelection} />
         ) : (

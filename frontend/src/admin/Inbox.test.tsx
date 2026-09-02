@@ -101,6 +101,27 @@ const standingOff = {
 };
 const standingRetired = { ...standingOn, id: 'c7', title: 'Old rule', active: false };
 
+const penalty = {
+  id: 'p1',
+  title: 'Missed curfew',
+  description: '',
+  chore_kind: 'penalty',
+  active: true,
+  standing_on: false,
+  standing_tier_id: null,
+  standing_since: null,
+  outcome_tiers: [
+    { id: 1, condition: 'first time', outcome_kind: 'money', amount_cents: -200, text: null },
+    { id: 2, condition: 'again this week', outcome_kind: 'money', amount_cents: -500, text: null },
+  ],
+  assignment_mode: 'all',
+  fixed_assignee_id: null,
+  // Ana is a kid but not on this rule — the select must not offer her, because the backend
+  // 409s on anyone the rule does not target (services/penalties.py).
+  assignee_ids: ['k1'],
+};
+const penaltyRetired = { ...penalty, id: 'p2', title: 'Old fine', active: false };
+
 function renderInbox(chores: unknown[] = [], route = '/admin') {
   vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
     const url = String(input);
@@ -120,11 +141,19 @@ function renderInbox(chores: unknown[] = [], route = '/admin') {
           },
         ]),
       );
+    if (url.includes('/penalties'))
+      return Promise.resolve(json({ id: 'l1', amount_cents: -500, kind: 'penalty' }));
     if (url.includes('/chores'))
       // The bare stub has no chore_kind, so it is not a standing chore and the section
       // filters it out — do not "tidy" it into a full Chore or the queue tests shift.
       return Promise.resolve(json([{ id: 'c1', title: 'Empty the sink' }, ...chores]));
-    if (url.endsWith('/children')) return Promise.resolve(json([{ id: 'k1', display_name: 'Mo' }]));
+    if (url.endsWith('/children'))
+      return Promise.resolve(
+        json([
+          { id: 'k1', display_name: 'Mo' },
+          { id: 'k2', display_name: 'Ana' },
+        ]),
+      );
     if (url.endsWith('/occurrences/o1')) return Promise.resolve(json(occurrence));
     if (url.includes('/disputes')) return Promise.resolve(json([dispute]));
     if (url.includes('/submissions')) return Promise.resolve(json([submission]));
@@ -263,6 +292,85 @@ describe('admin Inbox', () => {
     renderInbox([standingOn], '/admin/review/o1');
 
     expect(await screen.findByRole('button', { name: /^approve$/i })).toBeInTheDocument();
+  });
+
+  it('lists the active penalty rules with what each condition costs', async () => {
+    cleanup();
+    vi.restoreAllMocks();
+    renderInbox([penalty]);
+
+    expect(await screen.findByText('Penalties')).toBeInTheDocument();
+    expect(screen.getByText('Missed curfew')).toBeInTheDocument();
+    expect(screen.getByText(/first time -\$2\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/again this week -\$5\.00/)).toBeInTheDocument();
+  });
+
+  it('leaves a deactivated penalty rule out — it cannot be charged', async () => {
+    cleanup();
+    vi.restoreAllMocks();
+    renderInbox([penaltyRetired]);
+
+    await waitFor(() => expect(screen.getAllByText('Empty the sink').length).toBeGreaterThan(0));
+    expect(screen.queryByText('Old fine')).not.toBeInTheDocument();
+    expect(screen.queryByText('Penalties')).not.toBeInTheDocument();
+  });
+
+  it('opens the charge form, offering only the kids the rule targets', async () => {
+    cleanup();
+    vi.restoreAllMocks();
+    renderInbox([penalty]);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Charge' }));
+
+    expect(await screen.findByText('Charge this')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Mo' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Ana' })).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'again this week' })).toBeInTheDocument();
+    // the penalty pane, not the review pane
+    expect(screen.queryByRole('button', { name: /^approve$/i })).not.toBeInTheDocument();
+  });
+
+  it('charges the kid with the override and note, but only after a second tap', async () => {
+    cleanup();
+    vi.restoreAllMocks();
+    renderInbox([penalty]);
+    // renderInbox already spies on fetch; read the charge back off its calls rather than
+    // wrapping the mock, which loses the stub's own routing.
+    const charges = () =>
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.filter(
+          ([input, init]) =>
+            String(input).includes('/penalties') && (init?.method ?? 'GET') === 'POST',
+        )
+        .map(([, init]) => JSON.parse(String(init!.body)));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Charge' }));
+    fireEvent.change(await screen.findByRole('combobox'), { target: { value: 'k1' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'again this week' }));
+    fireEvent.change(screen.getByLabelText(/Different amount this time/), {
+      target: { value: '3.50' },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/Why\? Your kid reads this\./), {
+      target: { value: 'home at 1am' },
+    });
+
+    // nothing is charged on the first tap — it only asks
+    fireEvent.click(screen.getByRole('button', { name: 'Charge…' }));
+    expect(charges()).toHaveLength(0);
+    expect(screen.getByText(/Take/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, charge it' }));
+
+    await waitFor(() => expect(charges()).toHaveLength(1));
+    expect(charges()[0]).toEqual({
+      chore_id: 'p1',
+      child_id: 'k1',
+      tier_id: 2,
+      // a positive magnitude — the sign is the backend's
+      amount_override_cents: 350,
+      note: 'home at 1am',
+    });
   });
 
   it('keeps the pane open and repaints when a flip lands', async () => {
