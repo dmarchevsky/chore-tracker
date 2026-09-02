@@ -55,9 +55,13 @@ ADMIN = {
     "email": "parent@example.com",
     "password": "parent-dev-pass",
 }
+# The household's actual kids, so the dev picker offers the names you expect. The addresses
+# stay @example.com on purpose: dev sign-in is by user id and never touches Google, so a real
+# Google address here would buy nothing and put the family's addresses in the repo.
 CHILDREN = [
-    {"username": "alice", "display_name": "Alice", "email": "alice@example.com"},
-    {"username": "bea", "display_name": "Bea", "email": "bea@example.com"},
+    {"username": "kira", "display_name": "Kira", "email": "kira@example.com"},
+    {"username": "nika", "display_name": "Nika", "email": "nika@example.com"},
+    {"username": "dmytro", "display_name": "Dmytro", "email": "dmytro@example.com"},
 ]
 
 
@@ -75,7 +79,7 @@ async def seed() -> None:
             for child in CHILDREN
         }
 
-        await _seed_chores(db, household.id, kids["alice"], kids["bea"])
+        await _seed_chores(db, household.id, [kids[c["username"]] for c in CHILDREN])
         await db.flush()
         await _seed_occurrences(db, household)
         await db.commit()
@@ -98,9 +102,14 @@ async def seed() -> None:
         print(f"\n  Break-glass: {ADMIN['username']} / {ADMIN['password']} (LAN door only)")
 
 
-async def _seed_chores(db, household_id, alice: User, bea: User) -> None:
+async def _seed_chores(db, household_id, kids: list[User]) -> None:
+    """Four example chores spread over the kids, so every one of them has something to do
+    and no screen comes up empty (spec §13.3)."""
     if (await db.execute(select(Chore.id).limit(1))).first() is not None:
         return
+
+    # Cycled rather than indexed, so this keeps working whoever CHILDREN lists.
+    first, second, third = (kids[i % len(kids)] for i in range(3))
 
     anchor = date(2025, 1, 6)  # a Monday
     start = date(2025, 1, 1)
@@ -111,7 +120,7 @@ async def _seed_chores(db, household_id, alice: User, bea: User) -> None:
                 title="Kitchen: empty the sink",
                 description="Sink empty, counters clear of dirty dishes.",
                 assignment_mode="rotating",
-                assignee_ids=[alice.id, bea.id],
+                assignee_ids=[k.id for k in kids],
                 rotation_period="biweekly",
                 rotation_anchor_date=anchor,
                 cadence="daily",
@@ -145,7 +154,7 @@ async def _seed_chores(db, household_id, alice: User, bea: User) -> None:
                 title="Tidy your bedroom",
                 description="Floor clear, bed made, clothes put away.",
                 assignment_mode="fixed",
-                fixed_assignee_id=alice.id,
+                fixed_assignee_id=first.id,
                 cadence="weekly(on=[SAT])",
                 due_time=time(10, 0),
                 start_date=start,
@@ -168,7 +177,7 @@ async def _seed_chores(db, household_id, alice: User, bea: User) -> None:
                 title="Walk the dog",
                 description="A real walk around the block, not just the backyard.",
                 assignment_mode="fixed",
-                fixed_assignee_id=bea.id,
+                fixed_assignee_id=second.id,
                 cadence="daily",
                 due_time=time(17, 0),
                 grace_period_s=45 * 60,
@@ -184,7 +193,7 @@ async def _seed_chores(db, household_id, alice: User, bea: User) -> None:
                 title="Check in at school",
                 description="Tap 'I'm at school' when you arrive.",
                 assignment_mode="fixed",
-                fixed_assignee_id=alice.id,
+                fixed_assignee_id=third.id,
                 cadence="weekdays",
                 due_time=time(8, 5),
                 window_open_offset_s=-35 * 60,
