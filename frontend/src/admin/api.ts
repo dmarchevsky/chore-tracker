@@ -192,6 +192,42 @@ export function useDeactivateChore() {
   });
 }
 
+export interface PenaltyApply {
+  chore_id: string;
+  child_id: string;
+  tier_id: number;
+  /** Positive magnitude; the backend applies the sign, like a payout. */
+  amount_override_cents?: number;
+  note?: string;
+}
+
+/** Charge a kid against a penalty rule (spec §4.8). Invalidated wide: the statement and the
+ *  balance both move, and MeShell reads the balance in its header. */
+export function useApplyPenalty() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: PenaltyApply) => api.post<LedgerEntry>('/penalties', body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['ledger'] });
+      void qc.invalidateQueries({ queryKey: ['balance'] });
+    },
+  });
+}
+
+/** Undo an applied penalty with a compensating entry — the charge stays on the statement
+ *  with its undo beside it (spec §9, append-only). */
+export function useReversePenalty() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.post<LedgerEntry>(`/penalties/${id}/reverse`, { reason }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['ledger'] });
+      void qc.invalidateQueries({ queryKey: ['balance'] });
+    },
+  });
+}
+
 export const useChildren = () =>
   useQuery({ queryKey: ['children'], queryFn: () => api.get<Child[]>('/children') });
 

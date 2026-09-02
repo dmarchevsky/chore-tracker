@@ -1,5 +1,5 @@
 import { Field } from '../../../shared/ui';
-import { isStanding, isTiered, LLM_MODES } from '../choreFields';
+import { isPenalty, isStanding, isTiered, LLM_MODES } from '../choreFields';
 import { TierField } from '../TierField';
 import type { OutcomeTier } from '../../../api/types';
 import type { ChoreFormApi } from '../useChoreForm';
@@ -7,7 +7,8 @@ import type { ChoreFormApi } from '../useChoreForm';
 export function WorthSection({ f }: { f: ChoreFormApi }) {
   const form = f.form;
 
-  const tiered = isTiered(form) || isStanding(form);
+  const penalty = isPenalty(form);
+  const tiered = isTiered(form) || isStanding(form) || penalty;
 
   return (
     <>
@@ -15,6 +16,14 @@ export function WorthSection({ f }: { f: ChoreFormApi }) {
         value={(form.outcome_tiers as OutcomeTier[] | null) ?? null}
         onChange={(v) => f.set('outcome_tiers', v)}
         textOnly={isStanding(form)}
+        costOnly={penalty}
+        label={penalty ? 'What it costs' : 'Outcomes'}
+        hint={
+          penalty
+            ? 'The kid reads this list before anything happens — that is the point. You pick the one that applies when you charge it.'
+            : undefined
+        }
+        conditionPlaceholder={penalty ? 'bike left in the driveway' : 'all A grades'}
       />
 
       {!tiered && (

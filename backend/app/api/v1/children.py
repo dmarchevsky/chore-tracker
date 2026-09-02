@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.auth.deps import AdminUser, DbDep, require_self_or_admin
 from app.auth.sessions import revoke_user_sessions
@@ -157,11 +157,15 @@ async def _ledger_rows(
 ) -> list[LedgerEntryOut]:
     """The statement, with the chore each entry was for. Outer-joined: a payout or a
     hand-entered adjustment has no occurrence, and an occurrence whose chore was hard-deleted
-    still has to show its money (spec §9, append-only)."""
+    still has to show its money (spec §9, append-only).
+
+    A chore-backed entry reaches its chore one of two ways — through its occurrence, or, for a
+    manually applied penalty, through ``LedgerEntry.chore_id`` directly (spec §4.8). Hence the
+    coalesce: one join covers both, and a manual penalty names its rule like any other row."""
     stmt = (
         select(LedgerEntry, Chore.title, ChoreOccurrence.due_at)
         .outerjoin(ChoreOccurrence, ChoreOccurrence.id == LedgerEntry.occurrence_id)
-        .outerjoin(Chore, Chore.id == ChoreOccurrence.chore_id)
+        .outerjoin(Chore, Chore.id == func.coalesce(ChoreOccurrence.chore_id, LedgerEntry.chore_id))
         .where(LedgerEntry.child_id == child_id)
         .order_by(LedgerEntry.created_at)
     )

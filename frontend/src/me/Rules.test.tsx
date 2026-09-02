@@ -37,6 +37,24 @@ const POOL = {
   fixed_assignee_id: null,
 };
 const SIBLING = { ...BASE, id: 'c3', title: 'Beas job', fixed_assignee_id: 'kira' };
+const PENALTY = {
+  ...BASE,
+  id: 'c4',
+  title: 'Bike left out',
+  chore_kind: 'penalty',
+  cadence: 'penalty',
+  proof_type: 'none',
+  reward_cents: 0,
+  outcome_tiers: [
+    {
+      id: 1,
+      condition: 'left in the driveway',
+      outcome_kind: 'money',
+      amount_cents: -200,
+      text: null,
+    },
+  ],
+};
 
 function setup(chores: unknown[]) {
   vi.spyOn(globalThis, 'fetch').mockImplementation(() => Promise.resolve(json(chores)));
@@ -69,6 +87,25 @@ describe('Rules', () => {
 
     expect(await screen.findByText('Dishes')).toBeInTheDocument();
     expect(screen.queryByText('Beas job')).not.toBeInTheDocument();
+  });
+
+  it('shows a penalty rule with what it costs', async () => {
+    // Published in advance on purpose: the kid reads the price before it is ever charged
+    // (spec §4.8, §15 Q8).
+    setup([MINE, PENALTY]);
+
+    expect(await screen.findByText('Costs you money')).toBeInTheDocument();
+    expect(screen.getByText('Bike left out')).toBeInTheDocument();
+    expect(screen.getByText(/left in the driveway/)).toBeInTheDocument();
+    expect(screen.getByText('-$2.00')).toBeInTheDocument();
+  });
+
+  it("does not show a sibling's penalty rule", async () => {
+    setup([{ ...PENALTY, fixed_assignee_id: 'kira' }]);
+
+    await screen.findByText('The rules');
+    expect(screen.queryByText('Bike left out')).not.toBeInTheDocument();
+    expect(screen.queryByText('Costs you money')).not.toBeInTheDocument();
   });
 
   it('shows an all-mode chore to each kid it names', async () => {

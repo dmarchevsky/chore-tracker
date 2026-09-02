@@ -6,9 +6,11 @@ import {
   useChildren,
   useDecision,
   usePayout,
+  useReversePenalty,
 } from './api';
 import { Button, Card, Spinner } from '../shared/ui';
 import { money } from '../shared/format';
+import { entryLabel, isManualPenalty } from '../shared/status';
 import type { LedgerEntry } from '../api/types';
 
 export function Money() {
@@ -137,19 +139,27 @@ function ChildPanel({ childId }: { childId: string }) {
  * a charge that shouldn't have happened — so the line names the chore and the day it was
  * due, and offers the fix on the spot. Excusing is the ordinary decision path
  * (spec §4.2): it writes a reversing entry rather than deleting the charge (spec §9).
+ *
+ * A manually applied penalty (spec §4.8) has no occurrence to excuse, so it gets its own
+ * undo, which lands on the same append-only reversal. Two affordances rather than one
+ * because they are genuinely different acts: excusing forgives a missed chore and clears its
+ * state, undoing says the charge itself shouldn't have happened.
  */
 function StatementRow({ entry: e }: { entry: LedgerEntry }) {
   const decide = useDecision();
+  const undo = useReversePenalty();
   const [asking, setAsking] = useState(false);
   const [reason, setReason] = useState('');
   const reversed = e.reversed_by_entry_id !== null;
   const excusable = !!e.occurrence_id && e.kind === 'penalty' && !reversed;
+  const undoable = isManualPenalty(e) && !reversed;
+  const pending = decide.isPending || undo.isPending;
 
   return (
     <div className="border-b border-slate-800 py-1 text-sm">
       <div className="flex justify-between gap-3">
         <span>
-          {new Date(e.created_at).toLocaleDateString()} · {e.reason || e.kind}
+          {new Date(e.created_at).toLocaleDateString()} · {e.reason || entryLabel(e)}
           {e.chore_title && (
             <span className="text-slate-400">
               {' — '}
@@ -163,9 +173,9 @@ function StatementRow({ entry: e }: { entry: LedgerEntry }) {
           {money(e.amount_cents)}
         </span>
       </div>
-      {excusable && !asking && (
+      {(excusable || undoable) && !asking && (
         <button className="text-xs text-sky-400 underline" onClick={() => setAsking(true)}>
-          Excuse this
+          {excusable ? 'Excuse this' : 'Undo this'}
         </button>
       )}
       {asking && (
@@ -179,19 +189,22 @@ function StatementRow({ entry: e }: { entry: LedgerEntry }) {
           <Button
             className="min-h-0 shrink-0 px-3 py-2 text-sm"
             variant="ghost"
-            disabled={!reason.trim() || decide.isPending}
+            disabled={!reason.trim() || pending}
             onClick={() =>
-              decide.mutate(
-                { id: e.occurrence_id as string, body: { action: 'excuse', reason } },
-                { onSuccess: () => setAsking(false) },
-              )
+              excusable
+                ? decide.mutate(
+                    { id: e.occurrence_id as string, body: { action: 'excuse', reason } },
+                    { onSuccess: () => setAsking(false) },
+                  )
+                : undo.mutate({ id: e.id, reason }, { onSuccess: () => setAsking(false) })
             }
           >
-            Excuse
+            {excusable ? 'Excuse' : 'Undo'}
           </Button>
         </div>
       )}
       {decide.isError && <p className="text-xs text-rose-400">Couldn’t excuse that one.</p>}
+      {undo.isError && <p className="text-xs text-rose-400">Couldn’t undo that one.</p>}
     </div>
   );
 }

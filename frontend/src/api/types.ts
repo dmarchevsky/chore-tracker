@@ -62,7 +62,7 @@ export interface OutcomeTier {
   text: string | null;
 }
 
-export type ChoreKind = 'scheduled' | 'standing';
+export type ChoreKind = 'scheduled' | 'standing' | 'penalty';
 
 export interface Chore {
   id: string;
@@ -144,6 +144,10 @@ export interface LedgerEntry {
   created_at: string;
   occurrence_id: string | null;
   reversed_by_entry_id: string | null;
+  /** The penalty rule a parent charged this against; null for everything else. With no
+   *  occurrence_id it is what separates a manual penalty from a missed chore — both are
+   *  `penalty` kind, but only one is undone from the statement. */
+  chore_id: string | null;
   /** The chore this entry was for; null for payouts and hand-entered adjustments. */
   chore_title: string | null;
   occurrence_due_at: string | null;

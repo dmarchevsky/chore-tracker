@@ -243,3 +243,31 @@ async def notify_standing_flip(
             body=body,
             url="/me",
         )
+
+
+async def notify_penalty_applied(
+    db: AsyncSession,
+    chore: Chore,
+    *,
+    child_id: uuid.UUID,
+    tier: dict | None,
+    amount_cents: int,
+    note: str | None,
+) -> None:
+    """Tell the kid a parent charged them against a penalty rule (spec §4.8).
+
+    The kid, and only the kid: a sibling's money is not their business (spec §15 Q1), and the
+    parent who applied it already knows. Says the condition and the cost in plain words — the
+    rule was published in advance precisely so this is never a surprise. The url is ``/me``;
+    the charge itself reads in full on the money screen.
+    """
+    cost = f"-{abs(amount_cents) / 100:.2f}"
+    condition = (tier or {}).get("condition") or chore.title
+    await notify(
+        db,
+        user_id=child_id,
+        kind="penalty.applied",
+        title=f"{chore.title}: {cost}"[:140],
+        body=" — ".join(x for x in [condition, note] if x)[:140],
+        url="/me",
+    )

@@ -122,7 +122,7 @@ Admin MUST be able to define a chore with:
 | `verification_checklist` | Optional array of atomic boolean checks. The model answers each; the verdict is derived. Much more reliable than one fuzzy prompt (see §7.3). |
 | `auto_pass_threshold` / `auto_fail_threshold` | Confidence bands. Between them → `NEEDS_REVIEW`. Defaults 0.85 / 0.35. |
 | `geofence` | For location proof: lat, lon, radius_m, plus `arrive_before` time. |
-| `chore_kind` | `scheduled` (a recurring rule) or `standing` (a state a parent flips, §4.7). Immutable after save — duplicate to change it. |
+| `chore_kind` | `scheduled` (a recurring rule), `standing` (a state a parent flips, §4.7) or `penalty` (a price list a parent charges against, §4.8). Immutable after save — duplicate to change it. |
 | `outcome_tiers` | Optional ordered condition→outcome list for a chore a person grades (§4.6). Replaces `reward_amount`/`penalty_amount` for that chore; never mixed with them. |
 | `reward_amount` | $ credited on pass. Unsigned magnitude. |
 | `penalty_amount` | $ debited on miss/fail. Default 0 — penalties are opt-in per chore. `[D]` An **unsigned magnitude**, not a signed amount: the API rejects a negative and `debit_penalty` applies the sign. (A tier's `amount_cents` is the opposite — signed — because one tier list carries both rewards and penalties; see §4.6.) |
@@ -237,6 +237,42 @@ force, plus `standing_on` / `standing_tier_id` / `standing_since`.
   omits them. Absent keys only, so a PATCH round-trip can never drift them.
 - The child sees current state through the existing `GET /chores` (§15 Q8) — no new kid
   endpoint — rendered as a banner on their home screen.
+
+### 4.8 Penalty rules
+
+Not every consequence is a chore that went unfinished. "Bike left in the driveway" is a rule
+the household already agreed on, broken at a moment nobody scheduled, and the parent charges
+for it there and then.
+
+`chore_kind: penalty` is that rule. It carries `outcome_tiers` (money only, all negative)
+listing each condition and what it costs. Applying one writes a single negative `penalty`
+ledger entry against the rule.
+
+- `[D]` **No occurrences and no submissions**, exactly as §4.7 — occurrence generation filters
+  on `chore_kind = scheduled`, and the cadence grammar accepts an inert `penalty` token that
+  returns no dates, so the rule generates nothing even if a future code path forgets the
+  filter.
+- `[D]` **Every tier is a cost.** `outcome_kind: money` with `amount_cents < 0`, and
+  `reward_amount` / `penalty_amount` / `late_multiplier` MUST be 0/0/1.0. A rule that could
+  pay out is a chore, not a penalty. The admin form pins the reward/penalty toggle and applies
+  the minus itself — a parent never types one, matching §4.6.
+- `[D]` **Assigned `fixed` or `all` only.** A penalty is charged to one named kid; there are no
+  occurrences to rotate through, and an `anyone` pool would leave the charge with nobody to
+  land on.
+- `[D]` **Applying is not idempotent.** A rule can genuinely be broken twice in one day, and
+  with no occurrence there is nothing for "the same charge" to be the same as. The
+  `(occurrence_id, kind)` index does not apply: `occurrence_id` is NULL and Postgres treats
+  NULLs as distinct.
+- `[D]` **The ledger entry is the record.** No separate application table — the entry carries
+  the actor, the amount, a kid-readable reason (`rule: condition — note`) and a snapshot of the
+  tier in `meta`, and it is what shows on both the parent's statement and the kid's money
+  screen. Charging also writes an audit row and notifies the kid, and only the kid (§15 Q1).
+- `[D]` **Undone by reversal, not deletion.** A compensating `adjustment` with a required
+  reason, per §9. Distinct from excusing a missed chore, which also clears the occurrence's
+  state — a manual penalty has no occurrence, so it gets its own control on the statement.
+- The child reads the whole price list through the existing `GET /chores` (§15 Q8), rendered as
+  its own section under their rules. Publishing it in advance is the point: a charge should
+  never be the first time a kid hears the price.
 
 ## 5. Non-functional requirements
 
@@ -474,9 +510,15 @@ re-grade pays again. A text tier writes no ledger entry at all.
 
 ```
 LedgerEntry:
-  id, household_id, child_id, occurrence_id (nullable), kind, amount_cents (signed),
-  currency, reason, created_by (user|system), created_at, reversed_by_entry_id (nullable)
+  id, household_id, child_id, occurrence_id (nullable), chore_id (nullable), kind,
+  amount_cents (signed), currency, reason, created_by (user|system), created_at,
+  reversed_by_entry_id (nullable)
 ```
+
+`[D]` **Manual penalties** (§4.8) are `penalty` entries with no `occurrence_id` and a
+`chore_id` naming the rule charged. That pairing is the whole difference from a miss penalty,
+and it is what lets the statement name the rule for an entry that has no occurrence to reach a
+chore through — the statement join resolves the chore through either one.
 
 - Correcting a mistake = insert a reversing `adjustment` entry and set `reversed_by_entry_id` on the original. History stays intact.
 - Balance = `SELECT SUM(amount_cents) WHERE child_id = ?`. Cache it if it ever matters (it won't at this scale).
@@ -521,6 +563,9 @@ POST   /occurrences/{id}/dispute          child {message}
 
 GET    /submissions/{id}/media/{n}        signed, short-TTL, authz-checked
 GET    /verifications/{id}                admin — full raw model I/O
+
+POST   /penalties                         admin {chore_id, child_id, tier_id, amount_override_cents?, note?} (§4.8)
+POST   /penalties/{entry_id}/reverse      admin {reason} — compensating entry; manual penalties only
 
 POST   /payouts                           admin {child_id, amount_cents, method, note, covers_through}
 GET    /payouts

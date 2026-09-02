@@ -123,6 +123,15 @@ export const isTiered = (form: Record<string, unknown>): boolean =>
 export const isStanding = (form: Record<string, unknown>): boolean =>
   form.chore_kind === 'standing';
 
+/** A penalty rule has no schedule and no proof either — it is a published price list a
+ *  parent charges against, and its tiers are the conditions and what each one costs. */
+export const isPenalty = (form: Record<string, unknown>): boolean => form.chore_kind === 'penalty';
+
+/** Neither kind is materialised into occurrences, so both hide the whole schedule/proof
+ *  half of the form and are limited to the assignment modes that name a kid. */
+export const isUnscheduled = (form: Record<string, unknown>): boolean =>
+  isStanding(form) || isPenalty(form);
+
 /** 1-based ids of outcome rows the backend will reject.
  *
  * "Add an outcome" seeds a blank row, and the backend rejects a blank condition with a field
@@ -133,5 +142,13 @@ export function incompleteTiers(tiers: OutcomeTier[] | null | undefined): number
     .filter(
       (t) => !t.condition.trim() || (t.outcome_kind === 'text' ? !t.text?.trim() : !t.amount_cents),
     )
+    .map((t) => t.id);
+}
+
+/** 1-based ids of penalty-rule outcomes the backend will reject on top of the above: a
+ *  penalty rule only takes money away, so every tier must be money and negative. */
+export function nonPenaltyTiers(tiers: OutcomeTier[] | null | undefined): number[] {
+  return (tiers ?? [])
+    .filter((t) => t.outcome_kind !== 'money' || (t.amount_cents ?? 0) >= 0)
     .map((t) => t.id);
 }

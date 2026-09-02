@@ -1,10 +1,14 @@
 import { Field } from '../../../shared/ui';
 import type { Child } from '../../../api/types';
+import { isUnscheduled } from '../choreFields';
 import type { ChoreFormApi } from '../useChoreForm';
 
 export function WhoSection({ f, kids }: { f: ChoreFormApi; kids: Child[] }) {
   const form = f.form;
   const idsSelected = (form.assignee_ids as string[]) ?? [];
+  // Neither kind has occurrences, so there is nothing to rotate through and nothing for an
+  // unclaimed pool to land on — the backend rejects both modes (app/schemas/chore.py).
+  const named = isUnscheduled(form);
 
   return (
     <>
@@ -15,9 +19,9 @@ export function WhoSection({ f, kids }: { f: ChoreFormApi; kids: Child[] }) {
           onChange={(e) => f.setAssignmentMode(e.target.value)}
         >
           <option value="fixed">fixed — one kid</option>
-          <option value="rotating">rotating — take turns</option>
+          {!named && <option value="rotating">rotating — take turns</option>}
           <option value="all">all — everyone does it</option>
-          <option value="anyone">anyone — unassigned pool</option>
+          {!named && <option value="anyone">anyone — unassigned pool</option>}
         </select>
       </Field>
 

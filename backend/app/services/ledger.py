@@ -209,6 +209,42 @@ async def record_adjustment(
     return entry
 
 
+async def record_manual_penalty(
+    db: AsyncSession,
+    *,
+    child_id: uuid.UUID,
+    household_id: uuid.UUID,
+    chore_id: uuid.UUID,
+    amount_cents: int,
+    actor: User | None,
+    reason: str,
+    meta: dict | None = None,
+) -> LedgerEntry:
+    """A penalty a parent applied by hand, against a penalty rule (spec §4.8, §9).
+
+    Deliberately *not* exactly-once, unlike ``_insert_earn_kind``: a rule can genuinely be
+    broken twice in one day, and swallowing the second charge would be wrong. The
+    ``(occurrence_id, kind)`` partial unique index does not bite here — ``occurrence_id`` is
+    NULL and Postgres treats NULLs as distinct — so the guard the occurrence path needs is
+    simply absent from this one.
+    """
+    entry = LedgerEntry(
+        household_id=household_id,
+        child_id=child_id,
+        chore_id=chore_id,
+        kind=LedgerKind.penalty,
+        amount_cents=-abs(amount_cents),
+        reason=reason,
+        created_by="user" if actor else "system",
+        actor_user_id=actor.id if actor else None,
+        meta=meta,
+    )
+    db.add(entry)
+    await db.flush()
+    obs.log_ledger_entry(entry)
+    return entry
+
+
 async def record_payout(
     db: AsyncSession,
     *,

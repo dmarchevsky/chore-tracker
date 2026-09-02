@@ -486,6 +486,62 @@ describe('admin Chores', () => {
     });
   });
 
+  it('posts a penalty rule whose every outcome is a cost', async () => {
+    const calls = setup();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New chore' }));
+    fireEvent.change(screen.getByLabelText('Kind'), { target: { value: 'penalty' } });
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Bike left out' } });
+    fireEvent.change(screen.getByLabelText('Assignee'), { target: { value: 'k1' } });
+
+    // Like a standing chore, there is no schedule and no proof to describe.
+    expect(screen.queryByLabelText(/^Cadence/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Proof / verification')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add a condition' }));
+    // Neither the money/text switch nor the reward/penalty toggle: a penalty rule only
+    // ever takes money away, so both would offer a choice the backend rejects.
+    expect(screen.queryByLabelText('Outcome type 1')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Reward or penalty 1')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Condition 1'), {
+      target: { value: 'left in the driveway' },
+    });
+    fireEvent.change(screen.getByLabelText('Amount 1'), { target: { value: '2' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+
+    const body = calls.find((c) => c.method === 'POST')!.body as Record<string, unknown>;
+    expect(body.chore_kind).toBe('penalty');
+    expect(body.cadence).toBe('penalty');
+    expect(body.proof_type).toBe('none');
+    expect(body.reward_cents).toBe(0);
+    // The parent typed 2, not -2 — the minus is ours to apply.
+    expect((body.outcome_tiers as Record<string, unknown>[])[0]).toEqual({
+      id: 1,
+      condition: 'left in the driveway',
+      outcome_kind: 'money',
+      amount_cents: -200,
+      text: null,
+    });
+  });
+
+  it('refuses to save a penalty rule with no conditions', async () => {
+    const calls = setup();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New chore' }));
+    fireEvent.change(screen.getByLabelText('Kind'), { target: { value: 'penalty' } });
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Bike left out' } });
+    fireEvent.change(screen.getByLabelText('Assignee'), { target: { value: 'k1' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText(/list of what it costs/i)).toBeInTheDocument();
+    expect(calls.some((c) => c.method === 'POST')).toBe(false);
+  });
+
   it('round-trips the grace period and end date the form used to drop', async () => {
     const calls = setup();
 

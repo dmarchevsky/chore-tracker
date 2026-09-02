@@ -15,6 +15,7 @@ export function IdentitySection({ f }: { f: ChoreFormApi }) {
           >
             <option value="scheduled">scheduled — recurs on a cadence</option>
             <option value="standing">standing — a state you flip on and off</option>
+            <option value="penalty">penalty — a rule you charge for when it’s broken</option>
           </select>
         </Field>
       )}

@@ -32,10 +32,12 @@ from app.models.base import TimestampMixin, uuid_pk
 
 
 class ChoreKind(enum.StrEnum):
-    """A chore is either a recurring rule or a state a parent flips (spec §4.7)."""
+    """A recurring rule, a state a parent flips (spec §4.7), or a price list a parent
+    charges against (spec §4.8)."""
 
     scheduled = "scheduled"
     standing = "standing"
+    penalty = "penalty"
 
 
 class AssignmentMode(enum.StrEnum):

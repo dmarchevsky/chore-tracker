@@ -9,6 +9,7 @@ const MONEY_TIER: Omit<OutcomeTier, 'id'> = {
   amount_cents: 100,
   text: null,
 };
+const COST_TIER: Omit<OutcomeTier, 'id'> = { ...MONEY_TIER, amount_cents: -100 };
 const TEXT_TIER: Omit<OutcomeTier, 'id'> = {
   condition: '',
   outcome_kind: 'text',
@@ -25,11 +26,21 @@ export function TierField({
   value,
   onChange,
   textOnly = false,
+  costOnly = false,
+  label = 'Outcomes',
+  hint,
+  conditionPlaceholder = 'all A grades',
 }: {
   value: OutcomeTier[] | null;
   onChange: (v: OutcomeTier[] | null) => void;
   /** A standing chore writes no ledger entries, so its outcomes are sentences only. */
   textOnly?: boolean;
+  /** A penalty rule only takes money away, so the kind and the reward/penalty toggle are
+   *  both settled — showing either would offer a choice the backend rejects. */
+  costOnly?: boolean;
+  label?: string;
+  hint?: string;
+  conditionPlaceholder?: string;
 }) {
   const items = value ?? [];
 
@@ -55,10 +66,10 @@ export function TierField({
 
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-slate-800 p-3">
-      <span className="text-sm font-semibold text-slate-300">Outcomes</span>
+      <span className="text-sm font-semibold text-slate-300">{label}</span>
       <p className="text-xs text-slate-500">
-        You decide which one happened when you review it. Exactly one applies. Leave this empty for
-        an ordinary chore with a single reward.
+        {hint ??
+          'You decide which one happened when you review it. Exactly one applies. Leave this empty for an ordinary chore with a single reward.'}
       </p>
 
       {items.map((it, i) => {
@@ -70,13 +81,13 @@ export function TierField({
             <span className="w-4 text-xs text-slate-500">{it.id}</span>
             <input
               className={`inp min-w-[8rem] flex-1${ring(!it.condition.trim())}`}
-              placeholder="all A grades"
+              placeholder={conditionPlaceholder}
               aria-label={`Condition ${it.id}`}
               value={it.condition}
               onChange={(e) => edit(i, { condition: e.target.value })}
             />
             <span className="text-xs text-slate-500">→</span>
-            {!textOnly && (
+            {!textOnly && !costOnly && (
               <select
                 className="inp w-24"
                 aria-label={`Outcome type ${it.id}`}
@@ -90,21 +101,25 @@ export function TierField({
 
             {!textOnly && it.outcome_kind === 'money' ? (
               <>
-                {/* The parent picks reward or penalty; the minus sign is ours to apply. */}
-                <select
-                  className="inp w-24"
-                  aria-label={`Reward or penalty ${it.id}`}
-                  value={penalty ? 'penalty' : 'reward'}
-                  onChange={(e) =>
-                    edit(i, {
-                      amount_cents:
-                        Math.abs(it.amount_cents ?? 0) * (e.target.value === 'penalty' ? -1 : 1),
-                    })
-                  }
-                >
-                  <option value="reward">reward</option>
-                  <option value="penalty">penalty</option>
-                </select>
+                {/* The parent picks reward or penalty; the minus sign is ours to apply. On a
+                    penalty rule there is nothing to pick — every row is a cost. */}
+                {!costOnly && (
+                  <select
+                    className="inp w-24"
+                    aria-label={`Reward or penalty ${it.id}`}
+                    value={penalty ? 'penalty' : 'reward'}
+                    onChange={(e) =>
+                      edit(i, {
+                        amount_cents:
+                          Math.abs(it.amount_cents ?? 0) * (e.target.value === 'penalty' ? -1 : 1),
+                      })
+                    }
+                  >
+                    <option value="reward">reward</option>
+                    <option value="penalty">penalty</option>
+                  </select>
+                )}
+                {costOnly && <span className="text-xs text-rose-400">costs</span>}
                 <input
                   className={`inp w-24${ring(!it.amount_cents)}`}
                   type="number"
@@ -116,7 +131,7 @@ export function TierField({
                     edit(i, {
                       amount_cents:
                         Math.round(Math.abs(parseFloat(e.target.value || '0')) * 100) *
-                        (penalty ? -1 : 1),
+                        (penalty || costOnly ? -1 : 1),
                     })
                   }
                 />
@@ -147,10 +162,15 @@ export function TierField({
         variant="ghost"
         className="min-h-0 self-start px-3 py-1 text-xs"
         onClick={() =>
-          onChange(renumber([...items, { ...(textOnly ? TEXT_TIER : MONEY_TIER), id: 0 }]))
+          onChange(
+            renumber([
+              ...items,
+              { ...(textOnly ? TEXT_TIER : costOnly ? COST_TIER : MONEY_TIER), id: 0 },
+            ]),
+          )
         }
       >
-        Add an outcome
+        {costOnly ? 'Add a condition' : 'Add an outcome'}
       </Button>
     </div>
   );

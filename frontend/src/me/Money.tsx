@@ -2,14 +2,7 @@ import { useAuth } from '../auth/AuthContext';
 import { useBalance, useLedger } from '../api/hooks';
 import { Card, Spinner } from '../shared/ui';
 import { money } from '../shared/format';
-
-const KIND_LABEL: Record<string, string> = {
-  earning: 'Chore done',
-  bonus: 'Bonus',
-  penalty: 'Missed chore',
-  payout: 'Paid out',
-  adjustment: 'Adjustment',
-};
+import { entryLabel } from '../shared/status';
 
 export function Money() {
   const { me } = useAuth();
@@ -36,7 +29,7 @@ export function Money() {
         {[...(ledger.data ?? [])].reverse().map((e) => (
           <div key={e.id} className="flex justify-between border-b border-slate-800 py-2 text-sm">
             <div>
-              <p>{e.reason || KIND_LABEL[e.kind] || e.kind}</p>
+              <p>{e.reason || entryLabel(e)}</p>
               <p className="text-xs text-slate-500">
                 {new Date(e.created_at).toLocaleDateString()}
               </p>

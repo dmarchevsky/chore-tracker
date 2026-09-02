@@ -113,17 +113,20 @@ class ChoreBase(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _standing_defaults(cls, data: Any) -> Any:
-        """Fill the schedule/proof columns a standing chore has no use for.
+    def _unscheduled_defaults(cls, data: Any) -> Any:
+        """Fill the schedule/proof columns a standing chore or penalty rule has no use for.
 
-        They are all NOT NULL, and a parent never sees them for a standing chore. Filling
+        They are all NOT NULL, and a parent never sees them for either kind. Filling
         only *absent* keys means PATCH re-validation (which passes the stored values back
         in) can never drift them.
         """
-        if not isinstance(data, dict) or data.get("chore_kind") != ChoreKind.standing:
+        if not isinstance(data, dict):
+            return data
+        kind = data.get("chore_kind")
+        if kind not in (ChoreKind.standing, ChoreKind.penalty):
             return data
         return {
-            "cadence": "standing",
+            "cadence": str(kind),
             "due_time": time(0, 0),
             "start_date": date.today(),
             "proof_type": ProofType.none,
@@ -135,6 +138,8 @@ class ChoreBase(BaseModel):
     def _check(self) -> ChoreBase:
         if self.chore_kind is ChoreKind.standing:
             return self._check_standing()
+        if self.chore_kind is ChoreKind.penalty:
+            return self._check_penalty()
         try:
             cadence_dates(self.cadence, self.start_date, self.start_date)
         except CadenceError as exc:
@@ -249,6 +254,51 @@ class ChoreBase(BaseModel):
             raise ValueError("a standing chore's outcomes are text only — it moves no money")
         if [t.id for t in self.outcome_tiers] != list(range(1, len(self.outcome_tiers) + 1)):
             raise ValueError("outcome_tiers ids must be 1..N in order")
+        return self
+
+    def _check_penalty(self) -> ChoreBase:
+        """A penalty rule is a price list, not a schedule (spec §4.8): no occurrences, no
+        proof, charged to a named kid by a parent. Its tiers are the conditions and what
+        each one costs — the kid reads them in advance, which is the point."""
+        if self.cadence != "penalty":
+            raise ValueError("a penalty rule has no schedule — its cadence is 'penalty'")
+        if self.end_date is not None:
+            raise ValueError("a penalty rule has no end_date — deactivate it instead")
+        if self.assignment_mode not in {AssignmentMode.fixed, AssignmentMode.all}:
+            # A penalty is charged to one named kid. There are no occurrences to rotate
+            # through, and "anyone" would leave the charge with nobody to land on.
+            raise ValueError("a penalty rule must be assigned fixed or to all")
+        if self.assignment_mode == AssignmentMode.fixed and not self.fixed_assignee_id:
+            raise ValueError("fixed assignment_mode requires fixed_assignee_id")
+        if self.assignment_mode == AssignmentMode.all and not self.assignee_ids:
+            raise ValueError("all assignment_mode needs assignee_ids")
+        if self.proof_type is not ProofType.none:
+            raise ValueError("a penalty rule takes no proof — its proof_type is none")
+        if self.verification_mode is not VerificationMode.manual:
+            raise ValueError("a penalty rule is applied by a person — verification_mode=manual")
+        if self.reward_cents or self.penalty_cents or self.late_multiplier != 1.0:
+            raise ValueError(
+                "a penalty rule's money comes from its tiers — set reward_cents and "
+                "penalty_cents to 0 and leave late_multiplier at 1.0"
+            )
+        if not self.outcome_tiers:
+            raise ValueError(
+                "a penalty rule needs at least one condition -> cost to say what it charges for"
+            )
+        if len(self.outcome_tiers) > _MAX_TIERS:
+            raise ValueError(f"at most {_MAX_TIERS} outcome tiers")
+        if [t.id for t in self.outcome_tiers] != list(range(1, len(self.outcome_tiers) + 1)):
+            raise ValueError("outcome_tiers ids must be 1..N in order")
+        for tier in self.outcome_tiers:
+            if tier.outcome_kind is not OutcomeKind.money:
+                raise ValueError("a penalty rule's outcomes are money — each one has a cost")
+            if (tier.amount_cents or 0) >= 0:
+                # The sign is what makes it a penalty (spec §4.6). The admin form pins the
+                # toggle to Penalty and applies the minus itself; a parent never types one.
+                raise ValueError(
+                    "a penalty rule only takes money away — every tier's amount_cents must "
+                    "be negative. Use a chore's reward to give money."
+                )
         return self
 
 

@@ -15,6 +15,7 @@ Supported grammar (case-insensitive, whitespace-insensitive):
     monthly(day=15)              1..31; clamped to the last day of shorter months
     once(2026-09-14)             fires on that one date and never again
     standing                     never fires — the cadence of a standing chore
+    penalty                      never fires — the cadence of a penalty rule
     custom_rule                  not implemented in v1 (see TODO(decision))
 """
 
@@ -134,9 +135,10 @@ def cadence_dates(cadence: str, start: date, end: date) -> list[date]:
             raise CadenceError(f"once(...) needs a real date, got {m.group(1)!r}") from exc
         return [d] if start <= d <= end else []
 
-    if norm == "standing":
-        # A standing chore is a state a parent flips, not a schedule (spec §4.7). This is a
-        # *correct* value rather than a dummy one: it provably generates nothing even if some
+    if norm in ("standing", "penalty"):
+        # A standing chore is a state a parent flips (spec §4.7) and a penalty rule is a price
+        # list a parent charges against (spec §4.8) — neither is a schedule. These are
+        # *correct* values rather than dummy ones: they provably generate nothing even if some
         # future code path forgets to filter on chore_kind. Defence in depth, same price.
         return []
 

@@ -1,7 +1,7 @@
 // One vocabulary for occurrence status and anti-cheat flags, so the parent and kid views
 // can't drift and neither one ever shows a raw enum value.
 
-import type { OccurrenceStatus } from '../api/types';
+import type { LedgerEntry, OccurrenceStatus } from '../api/types';
 
 export type Tone = 'go' | 'wait' | 'good' | 'bad' | 'idle';
 
@@ -85,3 +85,27 @@ export const verdictLabel = (verdict: string): string => VERDICT_LABEL[verdict] 
  *  me/StandingBanner and me/Rules. */
 export const standingEntry = (on: boolean): Label =>
   on ? { label: 'In force', tone: 'bad' } : { label: 'Off', tone: 'idle' };
+
+// Ledger kinds in the words the money screens use. Kept here with the rest of the shared
+// vocabulary so the parent's statement and the kid's money screen can't drift.
+const KIND_LABEL: Record<string, string> = {
+  earning: 'Chore done',
+  bonus: 'Bonus',
+  penalty: 'Missed chore',
+  payout: 'Paid out',
+  adjustment: 'Adjustment',
+};
+
+/** Is this a penalty a parent applied by hand, rather than a charge for a missed chore?
+ *
+ * Both are `penalty` kind — the difference is what they hang off. A miss is charged against
+ * its occurrence; a rule is charged against the rule itself (spec §4.8). Only the second one
+ * is undone from the statement, so this is a real fork, not cosmetics. */
+export const isManualPenalty = (e: Pick<LedgerEntry, 'kind' | 'occurrence_id' | 'chore_id'>) =>
+  e.kind === 'penalty' && !e.occurrence_id && !!e.chore_id;
+
+/** What kind of entry this is, when there is no reason text to show instead. */
+export function entryLabel(e: Pick<LedgerEntry, 'kind' | 'occurrence_id' | 'chore_id'>): string {
+  if (isManualPenalty(e)) return 'Penalty';
+  return KIND_LABEL[e.kind] ?? e.kind;
+}

@@ -12,8 +12,10 @@ import {
   EDITABLE,
   FENCED,
   incompleteTiers,
+  isPenalty,
   isTiered,
   LLM_MODES,
+  nonPenaltyTiers,
   PHOTO_PROOFS,
   type PreviewItem,
 } from './choreFields';
@@ -81,15 +83,16 @@ export function useChoreForm(
     });
   }
 
-  /** A standing chore's schedule/proof/money fields are meaningless and the backend rejects
-   *  them, so switching kind resets them to what the standing branch expects. */
+  /** A standing chore's and a penalty rule's schedule/proof/money fields are meaningless and
+   *  the backend rejects them, so switching kind resets them to what that branch expects.
+   *  Both use their own kind as the cadence — there is no schedule to describe. */
   function setChoreKind(kind: string) {
     setForm((f) =>
-      kind === 'standing'
+      kind === 'standing' || kind === 'penalty'
         ? {
             ...f,
             chore_kind: kind,
-            cadence: 'standing',
+            cadence: kind,
             due_time: '00:00:00',
             proof_type: 'none',
             verification_mode: 'manual',
@@ -98,6 +101,9 @@ export function useChoreForm(
             reward_cents: 0,
             penalty_cents: 0,
             assignment_mode: f.assignment_mode === 'all' ? 'all' : 'fixed',
+            // A standing chore's outcomes are sentences and a penalty rule's are costs, so
+            // rows carried over from the other kind would be rejected on save.
+            outcome_tiers: null,
           }
         : { ...f, chore_kind: kind, cadence: 'daily', due_time: '08:00:00', proof_type: 'photo' },
     );
@@ -118,10 +124,26 @@ export function useChoreForm(
   /** A half-filled outcome row is rejected by the backend as a field error the parent can do
    *  nothing with, so stop it here and name the row. */
   function blockedByIncompleteTiers(): boolean {
-    const bad = incompleteTiers(form.outcome_tiers as OutcomeTier[] | null);
-    if (!bad.length) return false;
-    setError(`Finish outcome ${bad.join(', ')} — every outcome needs a condition and a result.`);
-    return true;
+    const tiers = form.outcome_tiers as OutcomeTier[] | null;
+    const bad = incompleteTiers(tiers);
+    if (bad.length) {
+      setError(`Finish outcome ${bad.join(', ')} — every outcome needs a condition and a result.`);
+      return true;
+    }
+    if (isPenalty(form)) {
+      if (!tiers?.length) {
+        setError('Add at least one condition — a penalty rule is the list of what it costs.');
+        return true;
+      }
+      const notCosts = nonPenaltyTiers(tiers);
+      if (notCosts.length) {
+        setError(
+          `Outcome ${notCosts.join(', ')} has to cost money — a penalty rule only takes money away.`,
+        );
+        return true;
+      }
+    }
+    return false;
   }
 
   async function doPreview() {

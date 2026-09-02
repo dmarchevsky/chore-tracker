@@ -14,6 +14,10 @@ class LedgerEntryOut(BaseModel):
     id: uuid.UUID
     child_id: uuid.UUID
     occurrence_id: uuid.UUID | None
+    # Set only by a manually applied penalty (spec §4.8). With occurrence_id NULL it is what
+    # tells the UI this was a parent charging a rule, not a missed chore — the two share the
+    # `penalty` kind but offer different affordances (excuse vs undo).
+    chore_id: uuid.UUID | None = None
     kind: str
     amount_cents: int
     currency: str
@@ -49,3 +53,29 @@ class PayoutCreate(BaseModel):
 class PayoutOut(LedgerEntryOut):
     method: str | None = None
     note: str | None = None
+
+
+class PenaltyApplyRequest(BaseModel):
+    """Body for ``POST /penalties`` — charge a kid against a penalty rule (spec §4.8)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chore_id: uuid.UUID
+    child_id: uuid.UUID
+    tier_id: int = Field(ge=1)
+    amount_override_cents: int | None = Field(
+        default=None, gt=0, description="positive magnitude; the service applies the sign"
+    )
+    note: str | None = Field(default=None, max_length=500)
+
+
+class PenaltyReverseRequest(BaseModel):
+    """Body for ``POST /penalties/{entry_id}/reverse``.
+
+    The reason is required and not optional flavour: it lands on the kid's statement as the
+    line that undoes the charge, so "why" is the whole content of the row.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=1, max_length=500)

@@ -8,8 +8,12 @@
 - **Phase 3 — Submissions & manual verification:** ✅ done
 - **Phase 4 — LLM verification:** ✅ done
 - **Phase 5 — Kid PWA:** ✅ built (device sign-off pending — see docs/device-checklist.md)
-- **Phase 6 — Hardening & operations:** not started
+- **Phase 6 — Hardening & operations:** in progress (Access/tunnel, retention, LLM config landed)
 - **Phase 7 — Nice-to-haves:** backlog
+
+Shipped after the numbered phases above, each in its own migration and not planned here:
+disputes (`phase7_disputes`), missed-chore settlement (`phase8_missed_settlement`), and
+manual penalties (`phase9_manual_penalties`, below).
 
 ## Context
 
@@ -368,6 +372,31 @@ Work items:
    asserts every route requires auth except the two allowed.
 
 **Accept when:** the two acceptance criteria above pass.
+
+---
+
+## Phase 9 — Manual penalties  ✅ done
+
+Not every consequence is an unfinished chore. A parent needs to charge for a house rule that
+was broken at a moment nobody scheduled — and the kid needs to have read the price first.
+
+1. `ChoreKind.penalty`: a chore that is a published price list, validated by `_check_penalty`
+   in `app/schemas/chore.py` — money tiers only, all negative, `fixed`/`all` assignment, no
+   schedule and no proof. Occurrence generation already filters on `chore_kind = scheduled`,
+   and the cadence grammar gained an inert `penalty` token as defence in depth.
+2. `ledger_entries.chore_id` (nullable, SET NULL): what lets an entry with no occurrence name
+   the rule it came from, so the statement join resolves a chore through either path.
+3. `app/services/penalties.py` — `apply()` writes one negative `penalty` entry (append-only,
+   deliberately not idempotent), plus an audit row and a notification to the kid alone;
+   `reverse()` undoes one through the existing `ledger.reverse_entry`.
+4. `POST /penalties` and `POST /penalties/{entry_id}/reverse`, both admin.
+5. PWA: a penalty kind in the chore form with a cost-only tier editor, a `PenaltyApply` panel
+   behind a confirm, "Undo this" on manual penalty rows in the parent's statement, and a
+   "Costs you money" section on the kid's rules screen.
+
+**Accept when:** a parent creates a rule, charges it, and the kid's balance and statement both
+move; the kid sees the rule and its price before it is ever charged; a sibling sees neither;
+undoing restores the balance with the original charge still on the statement. See spec §4.8.
 
 ---
 

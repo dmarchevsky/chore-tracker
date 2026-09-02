@@ -66,6 +66,17 @@ class LedgerEntry(TimestampMixin, Base):
         index=True,
     )
 
+    # The penalty rule this entry was charged against (spec §4.8). An occurrence-backed entry
+    # reaches its chore through the occurrence; a manually applied penalty has no occurrence,
+    # so without this the statement line could not name the rule it came from. SET NULL, like
+    # occurrence_id: deleting a rule must never delete the money it moved (spec §9).
+    chore_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("chores.id", ondelete="SET NULL"),
+        default=None,
+        index=True,
+    )
+
     kind: Mapped[LedgerKind] = mapped_column(String(16))
     amount_cents: Mapped[int] = mapped_column(BigInteger)  # signed
     currency: Mapped[str] = mapped_column(String(3), default="USD")
