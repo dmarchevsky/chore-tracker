@@ -45,7 +45,7 @@ Prerequisites: `docker` + `docker compose`, `uv`, and [`just`](https://github.co
 | Full dev stack | `just up` (builds + starts `db` `api` `worker` `proxy`) / `just down` |
 | Production stack | `just prod-up` / `just prod-down` / `just prod-ps` (needs `env.production`) |
 | Migrations | `just migrate` · `just makemigration "message"` |
-| Seed dev data | `just seed` |
+| Seed dev data | `just seed` — **ASK FIRST, every time** (see below) |
 | **Lint gate (backend)** | `just lint` (ruff check + `ruff format --check`) |
 | Autofix | `just fmt` |
 | **Test gate (backend)** | `just test` (pytest; needs Postgres reachable on `:5432`) |
@@ -53,6 +53,23 @@ Prerequisites: `docker` + `docker compose`, `uv`, and [`just`](https://github.co
 | **Lint gate (PWA)** | `just web-lint` (eslint + `prettier --check` + `tsc --noEmit`) |
 | **Test gate (PWA)** | `just web-test` (vitest) |
 | **Rebuild + serve the PWA** | `just web-serve` (rebuilds the `proxy` image, serves on `:5173`) |
+
+### Seeding and wiping data — ASK FIRST, EVERY TIME
+
+**Never run `just seed` without the user's explicit approval for that specific run.** The same
+goes for anything that destroys or replaces data: `docker volume rm`, `docker compose down -v`,
+`DROP`/`TRUNCATE`/`DELETE` against any database, or restoring a dump over an existing one.
+Blanket permission is never implied — not by "set up dev", not by an empty-looking database,
+and not by approval given for an earlier run.
+
+Ask with the specifics: which database, which volume by name, and what is in it right now
+(row counts of `users` / `chores` / `chore_occurrences` / `ledger_entries`). Then wait.
+
+**Why:** the dev and prod stacks are one letter apart in the volume name, the ledger is
+append-only by design (spec §9), and a seeded household looks exactly like a real one from
+the terminal. There is no undo — `chorekeeper_db_data` holds the family's real chores and
+money, and the only reason a wipe has been safe so far is that it happened to hit
+`chorekeeper_dev_db_data` instead.
 
 `just up` builds `db` `api` `worker` `proxy` but does **not** rebuild the PWA bundle — see
 step 9. Sign in to the dev stack at `http://localhost:5173` by picking a user; there is no
@@ -116,7 +133,8 @@ History on `main` is **linear** (rebase + fast-forward, no merge commits).
     ([.github/workflows/ci.yml](.github/workflows/ci.yml): ruff + `alembic upgrade head` +
     pytest) is the remote safety net, not a replacement for the local gates.
 
-**Never:** push without explicit confirmation · commit on `main` directly · merge with a
+**Never:** push without explicit confirmation · **seed, wipe a volume, or drop/restore a
+database without explicit per-run approval** · commit on `main` directly · merge with a
 failing gate or an un-rebased branch · bypass `--ff-only` · run `just up` with worktrees
 still present.
 
