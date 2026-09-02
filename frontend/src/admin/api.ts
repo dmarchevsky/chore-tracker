@@ -382,3 +382,25 @@ export const useCheckinToken = (childId: string) =>
         `/children/${childId}/checkin-token`,
       ),
   });
+
+// --- household backup ------------------------------------------------------
+
+export interface ImportResult {
+  counts: Record<string, number>;
+  warnings: string[];
+  dry_run: boolean;
+  csrf_token: string | null;
+}
+
+/** Restore a backup bundle. `dry_run` reports what would happen and changes nothing. */
+export function useImportBundle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { bundle: unknown; dry_run?: boolean }) =>
+      api.post<ImportResult>('/admin/import', body),
+    onSuccess: (result) => {
+      // A real restore replaced every row; nothing already cached is still true.
+      if (!result.dry_run) qc.clear();
+    },
+  });
+}

@@ -43,6 +43,17 @@ function setup() {
 
     if (url.includes('/admin/break-glass-password'))
       return Promise.resolve(new Response(null, { status: 204 }));
+    if (url.includes('/admin/import')) {
+      const body = JSON.parse(String(init?.body)) as { dry_run?: boolean };
+      return Promise.resolve(
+        json({
+          counts: { users: 2, chores: 3, chore_occurrences: 40, ledger_entries: 12 },
+          warnings: [],
+          dry_run: !!body.dry_run,
+          csrf_token: body.dry_run ? null : 'fresh',
+        }),
+      );
+    }
     if (url.includes('/auth/me')) return Promise.resolve(json(ME));
     if (method === 'PATCH') return Promise.resolve(json(SETTINGS));
     if (url.includes('/admin/llm/models'))
@@ -98,6 +109,42 @@ describe('admin Settings', () => {
     );
     const post = calls.find((c) => c.url.includes('/admin/break-glass-password'))!;
     expect(post.body).toEqual({ new_password: 'a-much-longer-passphrase' });
+    prompt.mockRestore();
+  });
+
+  it('points the export link at the chosen sections', async () => {
+    setup();
+    const href = () => screen.getByRole('link', { name: /export/i }).getAttribute('href');
+    await waitFor(() => expect(href()).toBe('/api/v1/admin/export?history=true&money=true'));
+
+    fireEvent.click(screen.getByLabelText(/include money transactions/i));
+    expect(href()).toBe('/api/v1/admin/export?history=true&money=false');
+
+    fireEvent.click(screen.getByLabelText(/include chore history/i));
+    expect(href()).toBe('/api/v1/admin/export?history=false&money=false');
+  });
+
+  it('previews a backup file, confirms, then restores and reloads', async () => {
+    const calls = setup();
+    const reload = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, reload },
+    });
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('REPLACE');
+
+    const bundle = { version: 1, tables: { households: [] } };
+    const file = new File([JSON.stringify(bundle)], 'backup.json', { type: 'application/json' });
+    fireEvent.change(await screen.findByLabelText('Backup file'), { target: { files: [file] } });
+
+    const imports = () => calls.filter((c) => c.url.includes('/admin/import'));
+    await waitFor(() => expect(imports()).toHaveLength(2));
+    const [dry, real] = imports();
+    expect((dry.body as Record<string, unknown>).dry_run).toBe(true);
+    expect((real.body as Record<string, unknown>).bundle).toEqual(bundle);
+    // The parent is told what they are about to erase, in their own terms.
+    expect(String(prompt.mock.calls[0][0])).toContain('12 money entries');
+    await waitFor(() => expect(reload).toHaveBeenCalled());
     prompt.mockRestore();
   });
 });

@@ -1,6 +1,13 @@
-import { useEffect, useState } from 'react';
-import { useLlmModels, useSetBreakGlassPassword, useSettings, useUpdateSettings } from './api';
+import { useEffect, useRef, useState } from 'react';
+import {
+  useImportBundle,
+  useLlmModels,
+  useSetBreakGlassPassword,
+  useSettings,
+  useUpdateSettings,
+} from './api';
 import type { SettingsPatch } from './api';
+import { setCsrfToken } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { Button, Card, Spinner } from '../shared/ui';
 
@@ -142,8 +149,6 @@ export function Settings() {
         </div>
       </Card>
 
-      <SignIn />
-
       <div className="flex items-center gap-3">
         <Button className="min-h-0 px-4 py-2 text-sm" onClick={submit} disabled={save.isPending}>
           Save
@@ -154,6 +159,10 @@ export function Settings() {
           </span>
         )}
       </div>
+
+      <SignIn />
+
+      <Backup />
     </div>
   );
 }
@@ -196,6 +205,125 @@ function SignIn() {
       >
         Change break-glass password
       </Button>
+      {msg && <p className="text-sm text-slate-300">{msg}</p>}
+    </Card>
+  );
+}
+
+/** Rows worth naming in the confirmation prompt, in the order a parent thinks about them. */
+const SUMMARY: [string, string][] = [
+  ['users', 'people'],
+  ['chores', 'chores'],
+  ['chore_occurrences', 'chore history rows'],
+  ['ledger_entries', 'money entries'],
+];
+
+function summarise(counts: Record<string, number>): string {
+  return SUMMARY.map(([key, label]) => `  ${counts[key] ?? 0} ${label}`).join('\n');
+}
+
+/** `Blob.text` in every real browser; FileReader where it is missing — the same fallback
+ *  shape `blobToBuffer` uses in pwa/offlineQueue.ts. */
+function readText(file: File): Promise<string> {
+  if (typeof file.text === 'function') return file.text();
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result));
+    fr.onerror = () => reject(fr.error);
+    fr.readAsText(file);
+  });
+}
+
+function Backup() {
+  const [history, setHistory] = useState(true);
+  const [money, setMoney] = useState(true);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const importBundle = useImportBundle();
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const href = `/api/v1/admin/export?history=${history}&money=${money}`;
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // so the same file can be picked again after a cancel
+    if (!file) return;
+    setMsg(null);
+    setBusy(true);
+    try {
+      let bundle: unknown;
+      try {
+        bundle = JSON.parse(await readText(file));
+      } catch {
+        setMsg(`${file.name} is not a ChoreKeeper backup.`);
+        return;
+      }
+      // Ask the server what this file holds before offering to erase anything.
+      const preview = await importBundle.mutateAsync({ bundle, dry_run: true });
+      const typed = window.prompt(
+        `Restoring ${file.name} ERASES everything in ChoreKeeper and replaces it with:\n` +
+          `${summarise(preview.counts)}\n\nType REPLACE to confirm.`,
+      );
+      if (typed !== 'REPLACE') {
+        setMsg('Import cancelled — nothing was changed.');
+        return;
+      }
+      const result = await importBundle.mutateAsync({ bundle });
+      // The restore deleted every session, including this one. The server minted a
+      // replacement; adopt its CSRF token, then reload so nothing stale survives.
+      if (result.csrf_token) setCsrfToken(result.csrf_token);
+      setMsg('Restored. Reloading…');
+      window.location.reload();
+    } catch (err) {
+      setMsg((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className="flex flex-col gap-3">
+      <h2 className="font-bold">Backup &amp; restore</h2>
+      <p className="text-sm text-slate-400">
+        Export downloads the whole household as one file you can keep somewhere safe. Photos are not
+        in it — they stay on the server. Importing a file <b>replaces</b> everything here with what
+        the file holds.
+      </p>
+
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={history} onChange={(e) => setHistory(e.target.checked)} />
+        Include chore history
+      </label>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={money} onChange={(e) => setMoney(e.target.checked)} />
+        Include money transactions
+      </label>
+
+      <div className="flex items-center gap-3">
+        <a
+          className="inline-block rounded-lg bg-sky-600 px-4 py-2 text-sm text-white"
+          href={href}
+          download
+        >
+          Export
+        </a>
+        <Button
+          className="min-h-0 px-4 py-2 text-sm"
+          variant="ghost"
+          disabled={busy}
+          onClick={() => fileRef.current?.click()}
+        >
+          Import…
+        </Button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          aria-label="Backup file"
+          onChange={onFile}
+        />
+      </div>
       {msg && <p className="text-sm text-slate-300">{msg}</p>}
     </Card>
   );

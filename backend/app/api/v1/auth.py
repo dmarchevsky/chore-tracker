@@ -40,7 +40,7 @@ def _set_session_cookie(
     )
 
 
-async def _start_session(user: User, request: Request, response: Response, db: DbDep) -> MeResponse:
+async def start_session(user: User, request: Request, response: Response, db: DbDep) -> MeResponse:
     session = await create_session(
         db, user, user_agent=request.headers.get("user-agent"), ip=client_ip(request)
     )
@@ -81,7 +81,7 @@ async def me(request: Request, response: Response, db: DbDep) -> MeResponse:
             status.HTTP_403_FORBIDDEN,
             f"{email} is signed in to Google but is not an active member of this household",
         )
-    return await _start_session(user, request, response, db)
+    return await start_session(user, request, response, db)
 
 
 @router.post("/login", response_model=MeResponse)
@@ -119,7 +119,7 @@ async def break_glass_login(
         user.password_hash = hash_password(payload.password)
 
     ratelimit.record_success(payload.username)
-    return await _start_session(user, request, response, db)
+    return await start_session(user, request, response, db)
 
 
 @router.post("/logout", response_model=LogoutResponse)
