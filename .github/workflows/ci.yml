@@ -13,7 +13,9 @@ jobs:
         working-directory: backend
     services:
       postgres:
-        image: postgres:17
+        # Matches the pin in docker-compose.prod.yml — CI should not be the only place
+        # a different Postgres major has ever been tried.
+        image: postgres:17.6
         env:
           POSTGRES_USER: chore
           POSTGRES_PASSWORD: chore

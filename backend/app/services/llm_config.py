@@ -8,6 +8,7 @@ row is created lazily so a fresh install just uses the environment.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 import httpx
 from sqlalchemy import select
@@ -15,6 +16,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.models import Household, HouseholdSettings
+
+
+class LlmConfigError(ValueError):
+    """A vision endpoint the app will not call."""
+
+
+def validate_base_url(base_url: str) -> str:
+    """Reject anything that is not a plain http(s) URL with a host.
+
+    The endpoint is admin-writable (settings screen, and the `base_url` query on
+    `/admin/llm/models`), so it is a request the *server* makes on a caller's say-so. This
+    keeps that to the shape it is meant to have — a `file://` or a scheme-less string would
+    otherwise reach httpx and turn a misconfiguration into a way to probe the host. It does
+    not, and cannot, stop an admin naming an internal address: the whole point of this
+    setting is to reach a llama-server elsewhere on the LAN (spec §7.2).
+    """
+    parts = urlsplit(base_url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise LlmConfigError("vision base URL must be an http(s) URL with a host")
+    return base_url
 
 
 @dataclass(frozen=True)
@@ -78,6 +99,10 @@ async def probe_models(base_url: str, api_key: str, *, timeout_s: float = 5.0) -
     Used by the admin settings screen to populate the model picker and by
     ``GET /health/llm``. Never raises — an unreachable endpoint is data, not an error.
     """
+    try:
+        validate_base_url(base_url)
+    except LlmConfigError as exc:
+        return {"reachable": False, "error": str(exc), "models": []}
     url = base_url.rstrip("/") + "/models"
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:

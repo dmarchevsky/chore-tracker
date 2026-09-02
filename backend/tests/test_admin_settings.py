@@ -77,3 +77,33 @@ async def test_models_proxy_parses_openai_list(client, admin_user, household):
 async def test_settings_are_admin_only(client, child_user):
     await sign_in(client, "alice@example.com")
     assert (await client.get("/api/v1/admin/settings")).status_code == 403
+
+
+# --- the vision endpoint is admin-writable, so its shape is checked (spec §7.2) ---------
+
+
+async def test_settings_rejects_a_base_url_that_is_not_http(client, admin_user):
+    """A typo here is a 422 the parent can read, rather than a verification that fails open
+    to NEEDS_REVIEW hours later with an error nobody connects to this screen."""
+    h = await _admin(client)
+    for bad in ("file:///etc/passwd", "llm-vision:8081/v1", "gopher://box/"):
+        r = await client.patch("/api/v1/admin/settings", json={"llm_base_url": bad}, headers=h)
+        assert r.status_code == 422, bad
+
+
+async def test_settings_accepts_a_lan_endpoint(client, admin_user):
+    """An internal address is the *point* of this setting — a llama-server on the LAN."""
+    h = await _admin(client)
+    r = await client.patch(
+        "/api/v1/admin/settings", json={"llm_base_url": "http://llm-box.lan:8081/v1"}, headers=h
+    )
+    assert r.status_code == 200
+    assert r.json()["llm"]["base_url"] == "http://llm-box.lan:8081/v1"
+
+
+async def test_probing_a_non_http_url_is_data_not_a_request(client, admin_user):
+    h = await _admin(client)
+    r = await client.get("/api/v1/admin/llm/models?base_url=file:///etc/passwd", headers=h)
+    assert r.status_code == 200
+    assert r.json()["reachable"] is False
+    assert r.json()["models"] == []

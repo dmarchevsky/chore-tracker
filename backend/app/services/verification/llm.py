@@ -15,7 +15,7 @@ import httpx
 from pydantic import BaseModel, Field, ValidationError
 
 from app.config import Settings, get_settings
-from app.services.llm_config import LlmConfig
+from app.services.llm_config import LlmConfig, LlmConfigError, validate_base_url
 from app.services.verification.prompts import RESPONSE_SCHEMA, SYSTEM_PROMPT
 
 TEMPERATURE = 0.1
@@ -86,6 +86,12 @@ async def run_vision(
         {"role": "user", "content": user_content},
     ]
     body = _payload(cfg.model, messages)
+    try:
+        validate_base_url(cfg.base_url)
+    except LlmConfigError as exc:
+        # Same fail-open contract as an unreachable endpoint: NEEDS_REVIEW, no ledger entry.
+        # A misconfigured URL must not cost a kid money (spec §6.3).
+        raise LLMError(str(exc)) from exc
     url = cfg.base_url.rstrip("/") + "/chat/completions"
     headers = {"Authorization": f"Bearer {cfg.api_key}"}
 

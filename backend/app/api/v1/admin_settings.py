@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.auth.deps import AdminUser, DbDep
 from app.auth.passwords import hash_password
@@ -17,10 +17,12 @@ from app.config import get_settings
 from app.schemas.auth import BreakGlassPasswordRequest
 from app.services import audit
 from app.services.llm_config import (
+    LlmConfigError,
     ensure_settings_row,
     get_llm_config,
     get_verification_defaults,
     probe_models,
+    validate_base_url,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -38,6 +40,18 @@ class SettingsUpdate(BaseModel):
     llm_max_retries: int | None = Field(default=None, ge=0, le=5)
     auto_pass_threshold: float | None = Field(default=None, ge=0, le=1)
     auto_fail_threshold: float | None = Field(default=None, ge=0, le=1)
+
+    @field_validator("llm_base_url")
+    @classmethod
+    def _check_base_url(cls, v: str | None) -> str | None:
+        """Caught here so a typo is a 422 the parent can read, not a verification that
+        quietly fails open hours later (spec §6.3)."""
+        if v in (None, ""):
+            return v
+        try:
+            return validate_base_url(v)
+        except LlmConfigError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 async def _view(db: DbDep) -> dict:

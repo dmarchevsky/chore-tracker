@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import uuid
 from typing import Annotated
 
@@ -63,8 +64,6 @@ def require_self_or_admin(child_id_param: str = "child_id"):
 
 
 def _consteq(a: str, b: str) -> bool:
-    import hmac
-
     return hmac.compare_digest(a, b)
 
 
