@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import func, select
 from tests.helpers import sign_in
 
+from app.auth import ratelimit
 from app.models import Chore, ChoreOccurrence, LedgerEntry, OccurrenceStatus, Submission
 
 pytestmark = pytest.mark.asyncio
@@ -160,10 +161,25 @@ async def test_token_only_touches_location_occurrences(
 
 
 async def test_rate_limited_to_20_per_hour(client, admin_user, child_user):
+    """The per-token cap (spec §6.2). The per-IP cap is lower and would fire first, so it
+    is cleared each round — what is under test here is what one leaked token can do."""
     tok = await _token(client, admin_user, child_user)
     for _ in range(20):
+        ratelimit._ip_hits.clear()
         await client.post(f"/api/v1/checkin/{tok}", json=AT_SCHOOL)
+    ratelimit._ip_hits.clear()
     r = await client.post(f"/api/v1/checkin/{tok}", json=AT_SCHOOL)
+    assert r.status_code == 429
+
+
+async def test_guessing_tokens_is_rate_limited_by_ip(client):
+    """Every guess is a different token, so the per-token bucket never fills — without a
+    per-IP cap an unauthenticated caller could grind the token space unthrottled, on the
+    one path Cloudflare Access is configured to bypass."""
+    for i in range(10):
+        r = await client.post(f"/api/v1/checkin/guess-{i}", json=AT_SCHOOL)
+        assert r.status_code == 404  # unknown token, but not yet throttled
+    r = await client.post("/api/v1/checkin/guess-11", json=AT_SCHOOL)
     assert r.status_code == 429
 
 

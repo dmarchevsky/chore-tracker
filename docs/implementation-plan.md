@@ -357,7 +357,13 @@ Work items:
    Google via Cloudflare Access: the whole `/api/v1` surface requires a verified
    `Cf-Access-Jwt-Assertion` when `CF_ACCESS_*` is set, bar `/health`, `/checkin/{token}`
    and the break-glass `/auth/login` (which Caddy 404s so it never rides the tunnel).
-3. Rate limits across auth + `/checkin` + submission endpoints (Postgres-backed counters).
+3. ✅ Rate limits across auth + `/checkin`: 10/min/IP and per-account exponential backoff
+   on the break-glass login, 20/hour/token **and** 10/min/IP on the check-in webhook — the
+   per-IP cap is what throttles token *guessing*, since every guess lands in a fresh
+   per-token bucket. Counters are in-process, not Postgres-backed: one `api` replica serves
+   every request, so a shared store buys a round-trip and nothing else. The maps are swept
+   and hard-capped because `/checkin/{token}` is unauthenticated, Access-bypassed, and
+   keyed by whatever the caller sends (`app/auth/ratelimit.py`).
 4. Retention jobs (worker cron-style ticks): photos → after `MEDIA_RETENTION_DAYS` (180)
    delete original, keep 256px thumbnail + verdict (Q2 default); geo points → 30 days.
 5. ✅ **Backup + tested restore** — `just backup` (pg_dump `-Fc` + `MEDIA_ROOT` archive +
