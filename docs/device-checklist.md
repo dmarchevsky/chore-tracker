@@ -7,9 +7,10 @@ delivery and the geofence automations all behave differently per platform.
 ## Setup
 
 1. `just up` (backend) then `just web-serve` (builds + serves the PWA on `:5173`).
-2. `just seed` — logs print the `parent` / `alice` / `bea` identities. On the LAN stack
-   there is no Cloudflare Access, so sign in with the admin break-glass password the seed
-   prints; testing the real Google sign-in means going through the tunnel hostname.
+2. `just seed` — the log prints the seeded identities. The dev stack has neither Cloudflare
+   Access nor break-glass (it 404s that route): sign in at `http://localhost:5173` by
+   picking a user from the list. Testing the real Google sign-in means going through the
+   tunnel hostname.
 3. Put a VAPID keypair in `.env` (`VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY`,
    e.g. `npx web-push generate-vapid-keys`) and set `PUBLIC_BASE_URL` to the URL the
    phones will actually hit, then `just up` to reload. Without VAPID, push is logged as

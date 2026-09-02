@@ -352,8 +352,8 @@ Work items:
    directory listing, `/docs` off in prod — in the Caddy `proxy` + app middleware.
    ✅ **`cloudflared` service + Cloudflare Access** — `docker-compose.prod.yml`,
    [remote-access.md](remote-access.md).
-2. ✅ Operator path: **LAN / physical only, no Tailscale** (spec §12.2 `[D]`). The tunnel
-   overlay binds `api` + `db` to `127.0.0.1`; `llama-server` stays on the LAN. ✅ Identity is
+2. ✅ Operator path: **LAN / physical only, no Tailscale** (spec §12.2 `[D]`). The production
+   compose file binds `api` + `db` to `127.0.0.1`; `llama-server` stays on the LAN. ✅ Identity is
    Google via Cloudflare Access: the whole `/api/v1` surface requires a verified
    `Cf-Access-Jwt-Assertion` when `CF_ACCESS_*` is set, bar `/health`, `/checkin/{token}`
    and the break-glass `/auth/login` (which Caddy 404s so it never rides the tunnel).
@@ -364,8 +364,11 @@ Work items:
    every request, so a shared store buys a round-trip and nothing else. The maps are swept
    and hard-capped because `/checkin/{token}` is unauthenticated, Access-bypassed, and
    keyed by whatever the caller sends (`app/auth/ratelimit.py`).
-4. Retention jobs (worker cron-style ticks): photos → after `MEDIA_RETENTION_DAYS` (180)
-   delete original, keep 256px thumbnail + verdict (Q2 default); geo points → 30 days.
+4. ✅ Retention jobs (`app/services/retention.py`, run on every full worker pass): photos →
+   after `MEDIA_RETENTION_DAYS` (180) the original is replaced by a 256px thumbnail, verdict
+   kept (Q2 default); geo points → coarse lat/lon dropped after `GEO_RETENTION_DAYS` (30),
+   keeping only the `geo_within` boolean. Both stateless and idempotent, so they no-op once
+   caught up.
 5. ✅ **Backup + tested restore** — `just backup` (pg_dump `-Fc` + `MEDIA_ROOT` archive +
    a manifest of row counts and per-child balances), `just restore-verify` (throwaway
    Postgres, balances compared, touches nothing) and `just restore` (typed confirmation).
@@ -373,10 +376,14 @@ Work items:
    ⬜ **Off-box shipping is NOT done:** backups are local and manual, so the spec §5 wording
    ("nightly ... rsync to TrueNAS") is not yet satisfied. restore.md names the two ways to
    close it.
-6. `GET /admin/jobs` dashboard — queue depth, failures, last tick; alert when the scheduler
-   has not ticked (staleness check + push to admin).
-7. Structured JSON logging with actor / timestamp / before-after on every admin override,
-   ledger entry, and model call (§5 auditability).
+6. ✅ `GET /admin/jobs` dashboard — queue depth, stuck jobs, failures, check-in staleness,
+   and the scheduler heartbeat: every completed pass stamps
+   `household_settings.last_scheduler_tick_at`, and the admin **Ops** screen calls it stale
+   after 5 minutes. Without it a stopped worker is indistinguishable from a quiet one —
+   nothing generated, nothing missed, nothing settled, every screen still rendering.
+   ⬜ A *push* on staleness is not wired: it surfaces on the screen, not in a notification.
+7. ✅ Structured JSON logging with actor / timestamp / before-after on every admin override,
+   ledger entry, and model call (`app/obs.py`, §5 auditability).
 8. Startup reconciliation flags occurrences that expired during a known outage window
    (admin bulk-excuse affordance).
 9. Tests: ✅ endpoint-inventory test asserting every route requires auth except the

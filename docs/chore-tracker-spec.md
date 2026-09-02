@@ -1,17 +1,20 @@
 # ChoreKeeper — Self-Hosted Chore Tracking & AI Verification
 
-**Status:** draft spec v0.1 — intended as the root context document for coding agents.
+**Status:** current — describes the system as built and deployed. The code is the source of
+truth; where this document and the code disagree, the code is right and this is a bug.
 **Owner:** Dima
-**Deployment target:** home LAN, Docker Compose, local OpenAI-compatible LLM, exposed to Internet via tunnel.
+**Deployment target:** home LAN, Docker Compose, local OpenAI-compatible LLM, exposed to the
+internet via Cloudflare Tunnel.
 
 ---
 
 ## 0. How to use this document
 
-This is written to be handed to an implementation agent. Sections 1–13 are the spec.
-Section 14 is a phased build plan; each phase has explicit acceptance criteria that can be turned
-into tickets. Section 15 lists decisions that are still open — an agent should implement the
-**stated default** and leave a `TODO(decision)` comment rather than inventing an alternative.
+Sections 1–13 are the spec: what the system does and why it does it that way. Section 15
+lists the questions that are still open — implement the **stated default** and leave a
+`TODO(decision)` comment rather than inventing an alternative. The phased build plan that
+used to live in §14 is [implementation-plan.md](implementation-plan.md), which tracks what
+is actually built; keeping a second copy here only meant one of them was always wrong.
 
 Conventions used below:
 - **MUST / SHOULD / MAY** — RFC 2119 sense.
@@ -339,7 +342,9 @@ the browser. **Devices are mixed, so both paths must be documented and tested:**
   after a few weeks. Add a "last check-in seen" staleness warning to the admin dashboard so a broken
   automation surfaces as a config problem rather than as a kid getting penalized.
 
-`[D]` The webhook token is per-kid, high-entropy, revocable, and rate-limited to 20 req/hour. It can only
+`[D]` The webhook token is per-kid, high-entropy, revocable, and rate-limited to 20 req/hour per token
+**and** 10/min per IP. The per-token cap bounds what a leaked token can do; the per-IP cap is what makes
+*guessing* one expensive, since every guess lands in a bucket of its own and fills nothing. The token can only
 transition a `location` occurrence that is currently `OPEN` — it can never approve a photo chore or write
 an arbitrary ledger entry. Assume the token leaks eventually.
 
@@ -532,51 +537,93 @@ surface it prominently in the kid view. Alternative is clamping at zero, which q
 
 ## 10. API surface (v1)
 
-REST, JSON, `/api/v1`. Auth via HTTP-only session cookie; CSRF token for mutations.
+REST, JSON, under `/api/v1`. Identity is Cloudflare Access (§12.1); the app mints its own
+HTTP-only session cookie from it and requires an `X-CSRF-Token` header on every mutation.
+**admin** = parent only, **self** = the child the resource belongs to, **public** =
+reachable without a session (and enforced as such by `tests/test_endpoint_inventory.py`,
+which fails on any undocumented addition).
 
 ```
-POST   /auth/login                       {username, password} → session
-POST   /auth/logout
-GET    /auth/me
+GET    /auth/me                           public — the SPA bootstrap AND the sign-in: behind
+                                          Access the verified Google address becomes a session
+POST   /auth/login                        public — break-glass admin password only; the tunnel's
+                                          Caddy site 404s this path, LAN door only (§12.1)
+POST   /auth/logout                       public — clears the cookie; returns the Access logout URL
+GET    /auth/dev/users                    public — DEV_AUTH only, else 404
+POST   /auth/dev/login                    public — DEV_AUTH only, else 404
 
 GET    /children                          admin
+POST   /children                          admin — add a kid by Google address
+GET    /children/{id}                     admin
+PATCH  /children/{id}                     admin — rename / re-address / deactivate; revokes sessions
+DELETE /children/{id}                     admin — soft disable, never a delete
 GET    /children/{id}/balance             admin | self
 GET    /children/{id}/ledger?from&to      admin | self
+GET    /children/{id}/ledger.csv          admin | self — statement download
+GET    /children/{id}/checkin-token       admin — the kid's geofence webhook URL
+POST   /children/{id}/checkin-token/rotate admin
 
-GET    /chores                            admin
+GET    /chores                            any session — a kid sees only what is theirs (§4.4)
 POST   /chores                            admin
-GET    /chores/{id}
-PATCH  /chores/{id}                       ?apply=forward|future_generated
-DELETE /chores/{id}                       soft delete
+GET    /chores/{id}                       any session
+PATCH  /chores/{id}                       admin — ?apply=forward|future_generated
+DELETE /chores/{id}                       admin — soft delete
 POST   /chores/{id}/duplicate             admin — clone a definition (§4.1); the copy starts inactive
 POST   /chores/{id}/state                 admin — flip a standing chore on/off (§4.7)
-GET    /chores/{id}/state/history         flip history, newest first; readable by the kid
-POST   /chores/preview                    admin — returns next N occurrences for an unsaved definition
+GET    /chores/{id}/state/history         any session — flip history, newest first
+POST   /chores/preview                    admin — next N occurrences for an unsaved definition
 
-GET    /occurrences?from&to&status&child  admin | self(scoped)
-GET    /occurrences/{id}
-POST   /occurrences/{id}/submissions      multipart: files[], note, geo{lat,lon,accuracy}, client_meta
-POST   /occurrences/{id}/decision         admin {action: approve|reject|excuse|redo|tier, tier_id?, amount_override_cents?, reason}
-                                          tier picks one outcome tier (§4.6); approve/reject are refused for a tiered chore
+GET    /occurrences?from&to&status&child&chore&inbox&order&limit&offset
+                                          admin | self (scoped); X-Total-Count on the response
+GET    /occurrences/{id}                  admin | self
+GET    /occurrences/{id}/verifications    admin | self — a kid gets the friendly message only,
+                                          never confidence or anti-cheat flags (§11)
+GET    /occurrences/{id}/submissions      admin | self — media as signed URLs
+POST   /occurrences/{id}/submissions      admin | self — multipart: files[], note, geo, client_meta
+POST   /occurrences/{id}/decision         admin {action: approve|reject|excuse|redo|tier, tier_id?,
+                                          amount_override_cents?, reason} — tier picks one outcome
+                                          tier (§4.6); approve/reject are refused for a tiered chore
 PATCH  /occurrences/{id}/assignee         admin — swap
-POST   /occurrences/{id}/dispute          child {message}
+GET    /occurrences/{id}/disputes         admin | self
+POST   /occurrences/{id}/dispute          self {message}
 
-GET    /submissions/{id}/media/{n}        signed, short-TTL, authz-checked
+GET    /disputes                          admin — open appeals with their context
+POST   /disputes/{id}/resolve             admin
+
+GET    /submissions/{id}                  admin | self
+GET    /submissions/{id}/media/{n}        public IF the HMAC signature is valid (5-min TTL);
+                                          otherwise admin | self
 GET    /verifications/{id}                admin — full raw model I/O
 
-POST   /penalties                         admin {chore_id, child_id, tier_id, amount_override_cents?, note?} (§4.8)
+POST   /penalties                         admin {chore_id, child_id, tier_id,
+                                          amount_override_cents?, note?} (§4.8)
 POST   /penalties/{entry_id}/reverse      admin {reason} — compensating entry; manual penalties only
 
 POST   /payouts                           admin {child_id, amount_cents, method, note, covers_through}
-GET    /payouts
+GET    /payouts                           admin
 
-POST   /checkin/{kid_token}               unauthenticated-by-token, for iOS Shortcuts geofence
-POST   /push/subscribe
-GET    /health   /health/llm              liveness + VLM reachability
-GET    /admin/jobs                        queue depth, failures, last tick
+POST   /checkin/{kid_token}               public — the token IS the credential, for iOS Shortcuts
+                                          geofence; 20/h per token and 10/min per IP (§6.2)
+GET    /push/vapid-key                    any session
+POST   /push/subscribe                    any session
+DELETE /push/subscribe                    any session
+
+GET    /health                            public — liveness probe
+GET    /health/llm                        admin — VLM reachability + model list
+GET    /admin/jobs                        admin — queue depth, stuck jobs, failures, scheduler
+                                          heartbeat, check-in staleness
+GET    /admin/notifications               admin — recent push log
+GET    /admin/settings                    admin — effective vision-LLM config + banding
+PATCH  /admin/settings                    admin — DB overrides over the env defaults; the API key
+                                          is write-only and reads report `api_key_set`
+GET    /admin/llm/models                  admin — probe an endpoint's /v1/models
+POST   /admin/break-glass-password        admin — set one's own local password (min 12 chars)
+GET    /admin/export                      admin — whole household as one JSON bundle
+POST   /admin/import                      admin — restore a bundle; `dry_run` reports without writing
 ```
 
-`[D]` Media served through the API with authz on every request, never as static files. Signed URL TTL 5 minutes.
+`[D]` Media served through the API with authz on every request, never as static files.
+Signed URL TTL 5 minutes.
 
 ---
 
@@ -618,7 +665,10 @@ here, not a loss.
   shared family tablet hands one child the previous child's screen.
 - `[D]` **One local admin password survives as break-glass**, for when Cloudflare or Google is
   unavailable. It is admin-only, minimum 12 characters, and rate limited as before (10/min/IP,
-  exponential backoff per account).
+  exponential backoff per account). It has **no default value**: on a brand-new production
+  database the bootstrap seed takes it from `ADMIN_PASSWORD` and refuses to run without one,
+  rather than planting a password that lives in the repo on a door every device on the LAN
+  can reach.
 - `[D]` **Break-glass has its own LAN door** — a second Caddy site on `:81`, published to the home
   network and unreachable from the tunnel, since cloudflared's ingress names `proxy:80` and nothing
   else. The Access check is skipped there wholesale. Without that it is theatre: the login succeeds
@@ -732,8 +782,9 @@ LLM_VISION_API_KEY=not-needed
 LLM_TIMEOUT_S=120
 LLM_MAX_RETRIES=1
 VAPID_PUBLIC_KEY= / VAPID_PRIVATE_KEY=
-SESSION_SECRET=
+SESSION_SECRET=              # prod refuses to start on the default (main.create_app)
 ADMIN_EMAIL=                 # parent-admin's Google address; read once by the auth migration
+ADMIN_PASSWORD=              # read once by the bootstrap seed; prod refuses to seed without it
 ADMIN_SESSION_HOURS=12
 CHILD_SESSION_DAYS=90
 COOKIE_SECURE=false
@@ -752,6 +803,9 @@ ALLOWED_HOSTS=               # empty disables the Host check
 TRUST_PROXY_HEADERS=false
 CF_ACCESS_TEAM_DOMAIN=       # e.g. yourteam.cloudflareaccess.com
 CF_ACCESS_AUD=               # comma-separated, one AUD tag per Access application
+CF_ACCESS_ISSUER=            # only if the Zero Trust team was renamed; else derived
+# Development only
+DEV_AUTH=false               # the passwordless picker; prod refuses to start with it (§12.1)
 ```
 
 ### 13.3 Dev ergonomics
@@ -773,62 +827,9 @@ backdated occurrences in mixed states so the UI is never empty during developmen
 
 ## 14. Implementation plan
 
-Each phase is independently demoable. Do not start a phase before its predecessor's acceptance criteria pass.
-
-### Phase 0 — VLM bake-off (do this first, half a day)
-Standalone script, no app code. Collect ~40 real photos (20 clean sink / 20 dirty, 15 clean room / 15 messy),
-label them, run 3–4 candidate vision models through the §7.3 prompt, report accuracy, mean latency, and
-confidence calibration per model.
-**Accept when:** a model + prompt combination is chosen with documented precision/recall, or the
-decision is made to launch in `llm_assist` mode. Latency < 30s per image on the target hardware.
-
-### Phase 1 — Core skeleton
-Postgres schema + Alembic migrations, FastAPI app, auth (local accounts + TOTP), users/children CRUD,
-Docker Compose, justfile, seed script, CI running lint + tests.
-**Accept when:** admin and two child accounts can log in; `just up && just seed && just test` is green from a clean clone.
-
-### Phase 2 — Chores & scheduler
-Chore CRUD with the full field set, cadence parser, rotation resolver, occurrence generator, missed-detection
-ticker, preview endpoint.
-**Accept when:** the four brief chores are configurable through the API; a two-week horizon generates
-correct occurrences including biweekly rotation; DST-crossing and month-boundary cases have unit tests;
-running the generator twice creates zero duplicates.
-
-### Phase 3 — Submissions & manual verification
-Multipart upload, image pipeline (EXIF, orientation, resize, sha256, pHash), media serving with signed URLs,
-admin review UI, decision endpoint, ledger writes, balances, payouts.
-**Accept when:** the whole loop works end to end with `verification_mode: manual` — a photo submitted from
-a phone appears in the admin inbox, approving it credits the correct amount exactly once, and a
-double-submitted approve does not double-pay.
-
-### Phase 4 — LLM verification
-Job queue, verification worker, prompt builder from checklists, JSON-schema parsing with repair retry,
-confidence banding, anti-cheat flags (pHash dedup, EXIF staleness, screenshot heuristics, gallery-upload),
-`/health/llm`, `just eval` harness against the Phase 0 labeled set.
-**Accept when:** an auto-verified pass and an auto-verified fail both work end to end; killing the LLM
-container routes new submissions to `NEEDS_REVIEW` with an error note and zero incorrect ledger entries;
-a resubmitted identical photo is flagged.
-
-### Phase 5 — Kid PWA
-Kid shell, in-app `getUserMedia` capture with labeled slots, offline queue, location check-in with geofence
-math, `/checkin/{token}` webhook, Web Push for both roles, balance/statement views.
-**Accept when:** installable and verified on **one iPhone and one Android** — capture, install-to-home-screen,
-Web Push delivery, and camera permission recovery tested separately on each; a full chore completes from
-lock screen to verdict in under 60 seconds; a submission made in airplane mode uploads on reconnect;
-both the Shortcuts and Tasker/MacroDroid/HA check-in automations fire against the webhook successfully.
-Note: iOS delivers Web Push **only** to a PWA added to the Home Screen — the onboarding flow must walk
-each kid through installing it, and must detect and warn when running in a plain browser tab.
-
-### Phase 6 — Hardening & operations
-Remote access wiring, security headers/CSP, rate limits, retention jobs, backup + **tested restore**,
-`/admin/jobs` dashboard, structured logging, alert on scheduler-not-ticking.
-**Accept when:** a restore from last night's backup into a clean environment reproduces all balances
-exactly; an external security scan shows no unauthenticated endpoint other than `/health` and
-`/checkin/{token}`, and `/api/v1/auth/login` answers 404 through the tunnel (§12.1 break-glass).
-
-### Phase 7 — Nice-to-haves (backlog)
-Streaks and bonus multipliers; sibling leaderboard `[Q1]`; chore trading between kids with parent approval;
-weekly email/Push digest; savings goals; recurring auto-payout on Sundays.
+Moved to [implementation-plan.md](implementation-plan.md), which carries the phases, their
+acceptance criteria and what is done. It was duplicated here and the two drifted, which is
+the failure mode a spec exists to prevent.
 
 ---
 
@@ -839,7 +840,7 @@ weekly email/Push digest; savings goals; recurring auto-payout on Sundays.
 | Q1 | Can kids see each other's balances and completion rates? | No. Own data only. |
 | Q2 | Photo retention period, and delete-or-thumbnail after? | 180 days, then keep a 256px thumbnail + verdict, delete the original. |
 | Q3 | Can a balance go negative from penalties? | Yes, allow negative. |
-| Q4 | Kid password reset flow? | Admin resets from panel. |
+| ~~Q4~~ | ~~Kid password reset flow?~~ | **RESOLVED: there is no kid password.** Identity is Google via Access; a parent changes the address from the admin panel, which revokes that kid's live sessions. §12.1. |
 | ~~Q5~~ | ~~Remote access?~~ | **RESOLVED: Cloudflare Tunnel** + Access (Google) on the whole hostname; operator surfaces are LAN-only. §12.2. |
 | Q6 | Filesystem media storage or MinIO? | Filesystem, content-addressed. |
 | ~~Q13~~ | ~~Device mix?~~ | **RESOLVED: mixed iOS + Android.** Both geofence automation paths required (§6.2); Web Push must be verified on both; iOS requires Home Screen install before push works at all. |
@@ -851,6 +852,7 @@ weekly email/Push digest; savings goals; recurring auto-payout on Sundays.
 | Q11 | Weekly payout cadence and method (cash, transfer, gift card)? | Manual payout entry, method free-text. |
 | Q12 | Should `anyone`-mode chores exist in v1, or is every chore explicitly assigned? | Support the field, but only `fixed`/`rotating` in the v1 UI. |
 | Q15 | `geofence.arrive_before` is specified but `evaluate_checkin` never reads it — flag a late check-in, fail it, or drop the field? | Not enforced in v1, and **not shown in the admin form** — a control that does nothing is worse than no control. Implement the check before surfacing it. |
+| Q17 | §4.1 lists a `custom_rule` cadence but gives no grammar for it. | Not implemented. `services/cadence.py` raises `CadenceError` on it and the chore form does not offer it; define the grammar before accepting the value. |
 | Q16 | `late_multiplier` is specified but `was_late` is never set to `True`, so it is inert. Should a late-but-in-grace submission pay less? | Not enforced in v1, not shown in the form. Enabling it means setting `was_late` in `ingest_submission` first. |
 
 ---

@@ -29,7 +29,7 @@ sign-in form; a parent adds a kid by putting their Google address in *both* the 
 policy and the app.
 
 `cloudflared` authenticates to Cloudflare with a **tunnel token** (a bearer credential —
-keep it in `.env`, never commit, rotate on suspicion). It grants no LAN access beyond the
+keep it in `env.production`, which is gitignored; never commit it, rotate it on suspicion). It grants no LAN access beyond the
 one mapped service.
 
 **There is no remote operator path** (spec §12.2 `[D]`). SSH, Postgres, `llama-server` and
@@ -80,9 +80,15 @@ tunnel, and no VPN is maintained for them. A fault that needs a shell needs some
   Set it **only** in this deployment — on the LAN a local client would spoof the header to
   dodge the login rate-limit or poison audit logs.
 - **Login DoS**: with break-glass unreachable through the tunnel there is no public
-  credential endpoint left to flood; the WAF rate-limit now guards `/api/v1/checkin/*`
-  instead (step 7). The in-process IP limiter and per-account backoff still guard the
-  loopback path.
+  credential endpoint left to flood; the WAF rate-limit guards `/api/v1/checkin/*` instead
+  (step 7). The app limits that path itself as well — 20/hour per token and 10/min per IP —
+  because the WAF rule is a console setting that does not exist on the LAN door, and the
+  per-token cap alone throttles use but not *guessing*: every guess lands in a bucket of
+  its own. The same IP limiter and per-account backoff guard the loopback login path.
+- **Vision endpoint**: the LLM base URL is admin-writable, so it is a request the origin
+  makes on a caller's say-so. It is constrained to an http(s) URL with a host; it is not
+  constrained to a *particular* host, because reaching a llama-server elsewhere on the LAN
+  is the entire point of the setting. Admin-only, and the admin is the parent.
 - **Cache poisoning / signed-URL leakage**: `/api/*` and media must **never** be edge
   cached. Caddy sends `Cache-Control: private, no-store`; add the Cloudflare Cache Rule
   (step 6) as well. A cached signed media URL served to another session is *the* failure
@@ -101,9 +107,9 @@ tunnel, and no VPN is maintained for them. A fault that needs a shell needs some
 
 ## Setup
 
-**Prerequisites:** a domain on Cloudflare (free plan), a Zero Trust org (free),
-Docker Compose **v2.24+** (for the `!override` tag in the overlay), a Google Cloud project
-for the OAuth client (step 5a), and a Google account for every household member.
+**Prerequisites:** a domain on Cloudflare (free plan), a Zero Trust org (free), Docker
+Compose v2, a Google Cloud project for the OAuth client (step 5a), and a Google account for
+every household member.
 
 ### 1. Create the tunnel
 
@@ -137,14 +143,16 @@ CLOUDFLARE_TUNNEL_TOKEN=<token from step 1>
 PUBLIC_BASE_URL=https://chores.example.com
 ALLOWED_HOSTS=chores.example.com
 SESSION_SECRET=<openssl rand -hex 32>
-TRUST_PROXY_HEADERS=true
-ADMIN_EMAIL=you@gmail.com    # read once by the auth migration to seed the admin identity
 DB_PASSWORD=<openssl rand -hex 32>
+ADMIN_EMAIL=you@example.com     # read once by the auth migration to seed the admin identity
+ADMIN_PASSWORD=<12+ chars>      # read once by the bootstrap seed on a brand-new database
 # CF_ACCESS_* are filled in step 5g
 ```
 
-`ENVIRONMENT=prod`, `COOKIE_SECURE=true` and `TRUST_PROXY_HEADERS=true` are pinned in
-`docker-compose.prod.yml` itself, so a stray value here cannot downgrade them.
+Do **not** put `ENVIRONMENT`, `COOKIE_SECURE` or `TRUST_PROXY_HEADERS` here.
+`docker-compose.prod.yml` pins all three to production values so a stray variable cannot
+downgrade the stack, and a second copy in this file would only raise the question of which
+one wins. Every secret is a `${VAR:?}` guard: a missing one fails the deploy by name.
 
 **Upgrading an existing install:** `DB_PASSWORD` must match the password already baked into
 the `chorekeeper_db_data` volume (`chore`, if it was created by the old dev compose file) —
@@ -280,8 +288,8 @@ both sides:
 
 ```sh
 docker compose logs api | grep cf_access.rejected | tail -1
-# ... "error":"Invalid issuer","token_iss":"https://misty-grass-1e4b.cloudflareaccess.com",
-#     "expected_iss":["https://yourteam.cloudflareaccess.com"] ...
+# ... "error":"Invalid issuer","token_iss":"https://<original-team-name>.cloudflareaccess.com",
+#     "expected_iss":["https://<new-team-name>.cloudflareaccess.com"] ...
 ```
 
 `CF_ACCESS_ISSUER` accepts a comma-separated list, so you can keep both the old and the new
@@ -373,8 +381,8 @@ Google is not in front of this door.
 
 ### 10. Operator path — LAN and console only
 
-There is nothing to set up, and that is the decision (spec §12.2 `[D]`). The overlay binds
-the API to `127.0.0.1:8088` and Postgres to `127.0.0.1:5432`, so `ssh`, `psql` and
+There is nothing to set up, and that is the decision (spec §12.2 `[D]`). The production
+compose file binds the API to `127.0.0.1:8088` and Postgres to `127.0.0.1:5432`, so `ssh`, `psql` and
 `llama-server` are reachable from the host itself and from nowhere else. No VPN mesh is
 maintained for them. The app's own break-glass sign-in is the exception: it has a LAN door
 (step 9b), because "get back in when the edge is down" is useless if it needs a shell.
@@ -422,3 +430,8 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8088/api/v1/au
   redirects to Google, the Bypass application (5e) is missing.
 - External port scan of the host's public IP → only Cloudflare's 443; `5432` / `8088`
   refused. Those ports answer from the host itself only.
+- The LAN door, from a laptop on the home network: `http://<home-ip>:5173/` serves the app
+  and offers the break-glass sign-in, and the same URL is unreachable from cell data with
+  wifi off. If break-glass 404s here too, Caddy is serving the tunnel site on `:5173` —
+  check the port mapping, not the app.
+- `docker compose -f docker-compose.prod.yml exec api id` → **not** uid 0.

@@ -52,7 +52,7 @@ Requires `docker` + `docker compose`, [`uv`](https://docs.astral.sh/uv/), and
 
 ```sh
 just up          # build + start db, api, worker, proxy — no .env needed
-just seed        # 1 household, admin "parent", children "alice"/"bea" (identities printed)
+just seed        # 1 household, admin "parent", three placeholder kids (identities printed)
 just test        # pytest against the compose Postgres (exposed on :5432)
 ```
 
@@ -81,7 +81,8 @@ Interactive docs at `/docs` when `ENVIRONMENT=dev`.
   their Google address under Kids — and in the Access policy, which is the half that
   actually lets them through the door.
 - **Break-glass:** one local admin password (`POST /api/v1/auth/login`) for when Cloudflare
-  or Google is unavailable. In the tunnel deployment it lives on a **LAN door** —
+  or Google is unavailable. On a fresh production database the bootstrap seed takes it from
+  `ADMIN_PASSWORD` and refuses to run without one. In the tunnel deployment it lives on a **LAN door** —
   `http://<home-ip>:5173`, a second Caddy site the tunnel has no route to — while the public
   hostname answers 404 for that path. Set the password from admin Settings.
 - **Dev sign-in:** the dev stack sets `DEV_AUTH`, which adds `/auth/dev/users` +
