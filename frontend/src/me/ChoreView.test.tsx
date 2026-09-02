@@ -130,14 +130,25 @@ describe('kid ChoreView', () => {
     await waitFor(() => expect(screen.getByText(/That cost you \$5\.00/)).toBeInTheDocument());
   });
 
+  it('does not put the raw status on screen when there is no news yet', async () => {
+    // An open chore has no verdict and no canned line; the message used to fall through to
+    // the status enum, so the kid was shown a big "open".
+    renderChore({}, { status: 'open' });
+
+    await screen.findByRole('button', { name: /take a photo/i });
+    expect(screen.queryByText('open')).not.toBeInTheDocument();
+  });
+
   it('offers the appeal inside the window and drops it once closed', async () => {
     renderChore({}, { status: 'missed', penalty_cents: 500, appeal_closes_at: soon() });
-    await waitFor(() => expect(screen.getByText(/isn’t right/)).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Dispute' })).toBeInTheDocument(),
+    );
 
     cleanup();
     vi.restoreAllMocks();
     renderChore({}, { status: 'missed', penalty_cents: 500, appeal_closes_at: past() });
     await waitFor(() => expect(screen.getByText(/This one was missed/)).toBeInTheDocument());
-    expect(screen.queryByText(/isn’t right/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Dispute' })).not.toBeInTheDocument();
   });
 });

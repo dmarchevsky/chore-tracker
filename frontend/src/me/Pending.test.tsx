@@ -39,6 +39,10 @@ function renderPending() {
     if (url.includes('status=open'))
       return Promise.resolve(json([occ({ id: 'o1', status: 'open' })]));
     if (url.includes('status=verified_fail')) return Promise.resolve(json([]));
+    if (url.includes('status=missed'))
+      return Promise.resolve(
+        json([occ({ id: 'm1', status: 'missed', chore_id: 'c4', penalty_cents: 100 })]),
+      );
     if (url.includes('status=pending'))
       return Promise.resolve(
         json([
@@ -55,6 +59,7 @@ function renderPending() {
           { id: 'c1', title: 'Empty the sink' },
           { id: 'c2', title: 'Walk the dog' },
           { id: 'c3', title: 'Take out the bins' },
+          { id: 'c4', title: 'Feed the cat' },
         ]),
       );
     return Promise.resolve(json([]));
@@ -84,6 +89,14 @@ describe('kid Pending', () => {
     expect(screen.getByText('Coming up')).toBeInTheDocument();
     const later = screen.getByText('Walk the dog');
     expect(later.closest('a')).toBeNull();
+  });
+
+  it('lists chores missed today, tappable so the kid can still dispute them', async () => {
+    renderPending();
+
+    expect(await screen.findByText('Missed today')).toBeInTheDocument();
+    const miss = screen.getByText('Feed the cat');
+    expect(miss.closest('a')).toHaveAttribute('href', '/me/chores/m1');
   });
 
   it('shows only the next upcoming occurrence of each chore', async () => {

@@ -29,9 +29,16 @@ export function Money() {
         {[...(ledger.data ?? [])].reverse().map((e) => (
           <div key={e.id} className="flex justify-between border-b border-slate-800 py-2 text-sm">
             <div>
-              <p>{e.reason || entryLabel(e)}</p>
+              <p>
+                {e.reason || entryLabel(e)}
+                {/* "Missed chore" alone doesn't say *which* one — name it, like the
+                    parent's statement does, so a charge is recognisable. */}
+                {e.chore_title && <span className="text-slate-400"> — {e.chore_title}</span>}
+              </p>
               <p className="text-xs text-slate-500">
                 {new Date(e.created_at).toLocaleDateString()}
+                {e.occurrence_due_at &&
+                  ` · due ${new Date(e.occurrence_due_at).toLocaleDateString()}`}
               </p>
             </div>
             <span className={e.amount_cents < 0 ? 'text-rose-400' : 'text-emerald-400'}>

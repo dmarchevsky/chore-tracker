@@ -70,7 +70,10 @@ export function ChoreView() {
   const actionable = ACTIONABLE.has(o.status);
   const filed = disputes.data ?? [];
   const openDispute = filed.find((d) => d.status === 'open');
-  const message = latest?.child_message || CANNED[o.status] || o.status;
+  // Only say something when there is something to say. A chore that is simply open has no
+  // news yet, and falling through to the raw status put the word "open" on screen as if it
+  // were a message to the kid.
+  const message = latest?.child_message || CANNED[o.status] || null;
   // Appeals close a few days after the due date (the server refuses later ones), so stop
   // offering a button that can only fail. A parent can still put it right by hand.
   const canAppeal = !o.appeal_closes_at || new Date(o.appeal_closes_at) > new Date();
@@ -151,15 +154,17 @@ export function ChoreView() {
         {c.description && <p className="mt-2 text-sm text-slate-300">{c.description}</p>}
       </div>
 
-      <Card className={actionable ? 'border-sky-700' : ''}>
-        {fromParent && <p className="text-xs font-semibold text-slate-400">From a parent</p>}
-        <p className="text-base">{message}</p>
-        {missCost && <p className="mt-1 text-sm text-rose-400">{missCost}</p>}
-        {!actionable && o.status !== 'pending' && (
-          <p className="mt-2 text-xs text-slate-500">A parent always has the final say.</p>
-        )}
-        {flash && <p className="mt-2 text-sm text-emerald-400">{flash}</p>}
-      </Card>
+      {(message || missCost || flash) && (
+        <Card className={actionable ? 'border-sky-700' : ''}>
+          {fromParent && <p className="text-xs font-semibold text-slate-400">From a parent</p>}
+          {message && <p className="text-base">{message}</p>}
+          {missCost && <p className="mt-1 text-sm text-rose-400">{missCost}</p>}
+          {!actionable && o.status !== 'pending' && (
+            <p className="mt-2 text-xs text-slate-500">A parent always has the final say.</p>
+          )}
+          {flash && <p className="mt-2 text-sm text-emerald-400">{flash}</p>}
+        </Card>
+      )}
 
       {sentPhotos.length > 0 && (
         <div>
@@ -217,12 +222,9 @@ export function ChoreView() {
         canAppeal &&
         o.status !== 'verified_pass' &&
         o.status !== 'approved' && (
-          <button
-            className="self-start text-sm text-slate-400 underline"
-            onClick={() => setShowDispute((s) => !s)}
-          >
-            This isn’t right
-          </button>
+          <Button className="self-start" variant="ghost" onClick={() => setShowDispute((s) => !s)}>
+            Dispute
+          </Button>
         )}
       {showDispute && (
         <Card>
