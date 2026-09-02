@@ -138,3 +138,29 @@ async def test_admin_can_set_the_break_glass_password(client, admin_user):
         json={"username": "parent", "password": "a-much-longer-passphrase"},
     )
     assert logged_in.status_code == 200
+
+
+async def test_the_lan_door_gets_a_non_secure_cookie(client, admin_user, monkeypatch):
+    """A Secure cookie is never sent back over the LAN door's plain HTTP, so break-glass
+    would log in and then lose the session on the very next request (spec §12.1)."""
+    from app.config import get_settings
+
+    monkeypatch.setenv("COOKIE_SECURE", "true")
+    get_settings.cache_clear()
+    try:
+        lan = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "parent", "password": "parent-pass"},
+            headers={"X-CK-Door": "lan"},
+        )
+        tunnel = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "parent", "password": "parent-pass"},
+            headers={"X-CK-Door": "tunnel"},
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert "secure" not in lan.headers["set-cookie"].lower()
+    # Everywhere else the cookie stays Secure — the exemption is the door, not the build.
+    assert "secure" in tunnel.headers["set-cookie"].lower()

@@ -349,7 +349,14 @@ Two things make this safe rather than a bypass:
   (`tunnel` or `lan`), overwriting anything the client sent. The app skips the Access check
   only on an explicit `lan`; a stripped, misspelled or absent value keeps Access in force.
 
-App auth is unchanged behind the LAN door — session cookie, CSRF, and the same rate limits.
+The session cookie issued on this door is **not** `Secure`, because a Secure cookie is never
+sent back over plain HTTP — the login would succeed and the session would vanish on the next
+request. That gives nothing away: the door is already plaintext, so anyone positioned to read
+the cookie could read the whole exchange. If that is not acceptable on your network, put the
+LAN door behind a local TLS cert instead of relaxing anything else.
+
+App auth is otherwise unchanged behind the LAN door — session cookie, CSRF, and the same rate
+limits.
 What it grants is the *chance* to enter the admin password, so treat anyone on your wifi as
 someone who gets to try. Kids cannot sign in there at all: their identity is Google, and
 Google is not in front of this door.

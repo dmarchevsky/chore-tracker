@@ -116,7 +116,7 @@ class CfAccessMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         if not _guarded(request.url.path):
             return await call_next(request)
-        if request.headers.get(_DOOR_HEADER) == _LAN_DOOR:
+        if is_lan_door(request):
             # The LAN door. Cloudflare is not in front of it and cannot be, which is the
             # whole point of it existing (spec §12.1). App auth still applies to every
             # route behind this — the session cookie and CSRF checks are untouched.
@@ -135,6 +135,17 @@ class CfAccessMiddleware(BaseHTTPMiddleware):
             )
         request.state.cf_access = claims
         return await call_next(request)
+
+
+def is_lan_door(request: Request) -> bool:
+    """True when Caddy stamped this request as arriving through the LAN door.
+
+    Enforcement is the default and only an exact "lan" skips it, so a stripped, misspelled
+    or absent value fails closed. Trustworthy because the api is reachable from nothing but
+    the two Caddy sites and the host's own loopback, and each site sets this header
+    unconditionally, overwriting whatever the client sent.
+    """
+    return request.headers.get(_DOOR_HEADER) == _LAN_DOOR
 
 
 def _unverified(token: str) -> dict[str, Any]:

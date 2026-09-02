@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlalchemy import select
 
 from app.auth import SESSION_COOKIE, ratelimit
-from app.auth.cf_access import access_email
+from app.auth.cf_access import access_email, is_lan_door
 from app.auth.deps import DbDep
 from app.auth.passwords import hash_password, needs_rehash, verify_password
 from app.auth.sessions import create_session, load_session, revoke_session
@@ -20,14 +20,21 @@ from app.schemas.auth import BreakGlassLoginRequest, LogoutResponse, MeResponse
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _set_session_cookie(response: Response, session_id: str, *, max_age: int) -> None:
+def _set_session_cookie(
+    response: Response, session_id: str, *, max_age: int, lan_door: bool = False
+) -> None:
     s = get_settings()
     response.set_cookie(
         SESSION_COOKIE,
         session_id,
         max_age=max_age,
         httponly=True,
-        secure=s.cookie_secure or s.is_prod,  # always Secure once internet-facing
+        # Always Secure once internet-facing — except on the LAN break-glass door, which is
+        # plain HTTP on a private address. A Secure cookie is simply never sent back over it,
+        # so the login would succeed and the session would vanish on the next request, which
+        # is no way back in at all. Nothing is given away: that door is already plaintext, so
+        # anyone who could read the cookie could read the whole exchange (spec §12.1).
+        secure=not lan_door and (s.cookie_secure or s.is_prod),
         samesite="lax",
         path="/",
     )
@@ -38,7 +45,7 @@ async def _start_session(user: User, request: Request, response: Response, db: D
         db, user, user_agent=request.headers.get("user-agent"), ip=client_ip(request)
     )
     max_age = int((session.expires_at - session.created_at).total_seconds())
-    _set_session_cookie(response, str(session.id), max_age=max_age)
+    _set_session_cookie(response, str(session.id), max_age=max_age, lan_door=is_lan_door(request))
     return _me(user, session.csrf_token)
 
 
@@ -83,8 +90,8 @@ async def break_glass_login(
 ) -> MeResponse:
     """Local admin password — the way back in when Cloudflare or Google is unavailable.
 
-    Only reachable on the host's loopback port: the Caddy front door answers 404 for this
-    path, so it is never exposed through the tunnel (see docs/remote-access.md).
+    Reachable on the LAN door and the host's loopback only: the tunnel's Caddy site answers
+    404 for this path, so it never rides the tunnel (see docs/remote-access.md).
     """
     ip = client_ip(request)
     if not ratelimit.ip_allowed(ip):
