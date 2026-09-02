@@ -1,6 +1,6 @@
 """Development seed data (spec §13.3).
 
-One household, one admin (with a break-glass password), two children, and
+One household, one admin (with a break-glass password for the prod stack), two children, and
 the four example chores from the brief. Phase 3 adds 30 days of backdated occurrences in
 mixed states so the UI is never empty.
 
@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from app.auth.passwords import hash_password
+from app.config import get_settings
 from app.db import SessionLocal
 from app.models import (
     Chore,
@@ -44,8 +45,10 @@ _STATUS_CYCLE = [
     OccurrenceStatus.excused,
 ]
 
-# Sign-in is Google via Cloudflare Access (spec §12.1), so what a seeded account needs is
-# an email. The admin also gets the break-glass password, which is the only password left.
+# Sign-in is Google via Cloudflare Access in production and the DEV_AUTH picker locally
+# (spec §12.1), so what a seeded account needs is an email. The admin also gets the
+# break-glass password — unusable on the dev stack, which 404s that route, but a seeded
+# database is also what a production stack is bootstrapped from.
 ADMIN = {
     "username": "parent",
     "display_name": "Parent",
@@ -84,9 +87,15 @@ async def seed() -> None:
     print("Seed complete.")
     print(f"  chores:   {n_chores}")
     print(f"  occurrences: {n_occ}")
-    print(f"  admin:    {ADMIN['email']}  (break-glass: {ADMIN['username']} / {ADMIN['password']})")
+    print(f"  admin:    {ADMIN['username']} / {ADMIN['email']}")
     for child in CHILDREN:
         print(f"  child:    {child['username']} / {child['email']}")
+    # Naming the door that actually works here: on the dev stack break-glass is 404, so
+    # printing a password would send the reader to the one page that cannot let them in.
+    if get_settings().dev_auth:
+        print("\n  Sign in at http://localhost:5173 — pick a user, no password.")
+    else:
+        print(f"\n  Break-glass: {ADMIN['username']} / {ADMIN['password']} (LAN door only)")
 
 
 async def _seed_chores(db, household_id, alice: User, bea: User) -> None:
