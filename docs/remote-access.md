@@ -1,7 +1,10 @@
 # Remote access — Cloudflare Tunnel
 
-How ChoreKeeper is reached from outside the LAN (spec §12.2, `[D]`). Local `just up`
-development is unaffected — everything here is opt-in via `docker-compose.tunnel.yml`.
+How ChoreKeeper is reached from outside the LAN (spec §12.2, `[D]`). This is the
+**production** mode, `docker-compose.prod.yml` + `env.production`, driven by `just prod-up`.
+Local `just up` development is a separate compose file and a separate compose project and is
+unaffected by everything here — it has no tunnel, no Access and no break-glass; see
+[CLAUDE.md](../CLAUDE.md).
 
 ---
 
@@ -118,16 +121,16 @@ Still in the tunnel config, **Published application routes → Add**:
 | Type | `HTTP` |
 | URL | `proxy:80` |
 
-`proxy:80`, **not** `proxy:5173`. `5173` is only the host-side port mapping in
-`docker-compose.yml`; inside the compose network Caddy listens on `80`, and pointing the
-tunnel at `5173` gets a `connection refused` from `cloudflared` and a 502 in the browser.
+`proxy:80`, **not** `proxy:5173`. `5173` is only the host-side mapping of the **LAN door**
+(`:81`); inside the compose network Caddy listens on `80`, and pointing the tunnel at `5173`
+gets a `connection refused` from `cloudflared` and a 502 in the browser.
 
 Cloudflare creates the `CNAME` automatically. No path routing here — the Access
 applications do the admin split.
 
-### 3. Host `.env`
+### 3. Host `env.production`
 
-Copy `.env.example` to `.env` on the host and set:
+Copy `env.production.example` to `env.production` on the host (it is gitignored) and set:
 
 ```sh
 CLOUDFLARE_TUNNEL_TOKEN=<token from step 1>
@@ -136,16 +139,23 @@ ALLOWED_HOSTS=chores.example.com
 SESSION_SECRET=<openssl rand -hex 32>
 TRUST_PROXY_HEADERS=true
 ADMIN_EMAIL=you@gmail.com    # read once by the auth migration to seed the admin identity
+DB_PASSWORD=<openssl rand -hex 32>
 # CF_ACCESS_* are filled in step 5g
 ```
 
-`ENVIRONMENT=prod` and `COOKIE_SECURE=true` are set by the overlay — no need to add them.
+`ENVIRONMENT=prod`, `COOKIE_SECURE=true` and `TRUST_PROXY_HEADERS=true` are pinned in
+`docker-compose.prod.yml` itself, so a stray value here cannot downgrade them.
+
+**Upgrading an existing install:** `DB_PASSWORD` must match the password already baked into
+the `chorekeeper_db_data` volume (`chore`, if it was created by the old dev compose file) —
+Postgres reads `POSTGRES_PASSWORD` only when it initialises an empty data directory, and a
+different value here simply fails to authenticate against the existing one.
 
 ### 4. Bring it up
 
 ```sh
-just tunnel-up          # docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --build
-just tunnel-logs        # expect "Registered tunnel connection" x4
+just prod-up                  # docker compose -f docker-compose.prod.yml --env-file env.production up -d --build
+just prod-logs cloudflared    # expect "Registered tunnel connection" x4
 ```
 
 `https://chores.example.com` now serves the PWA. `/docs` returns 404; `/api/v1/health`
@@ -241,7 +251,7 @@ the per-kid token and its 20/hour cap (spec §6.2).
 Optionally add a Bypass application for path `api/v1/health` too, if anything outside the
 compose network probes it. Container health checks reach it directly and need nothing.
 
-#### 5g. AUD tags → `.env`
+#### 5g. AUD tags → `env.production`
 
 Open each application's **Overview** and copy its **Application Audience (AUD) tag**. Every
 application issues its own, and a JWT minted by one will not verify against another's, so
@@ -252,7 +262,7 @@ CF_ACCESS_TEAM_DOMAIN=<yourteam>.cloudflareaccess.com
 CF_ACCESS_AUD=<app-A-aud>,<admin-api-aud>
 ```
 
-Then `just tunnel-up` again. With these set the app requires a verified assertion on every
+Then `just prod-up` again. With these set the app requires a verified assertion on every
 `/api/v1` path except `/health`, `/checkin/{token}` and the break-glass `/auth/login`.
 
 **If your Zero Trust team has ever been renamed, add `CF_ACCESS_ISSUER`.** Cloudflare serves
@@ -377,7 +387,7 @@ parent-only Access application and the app's own JWT verification.
 ### 11. Rotating the tunnel token
 
 Dashboard → the tunnel → **Refresh token** (or delete and recreate the tunnel). Update
-`CLOUDFLARE_TUNNEL_TOKEN` in `.env` and `just tunnel-up`.
+`CLOUDFLARE_TUNNEL_TOKEN` in `env.production` and `just prod-up`.
 
 ---
 

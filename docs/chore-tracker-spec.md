@@ -629,6 +629,15 @@ here, not a loss.
   CSRF and the rate limits are unchanged behind it; what the door grants is the chance to type the
   admin password, so everyone on the wifi gets to try. Kids cannot use it — their identity is
   Google, and Google is not in front of it.
+- `[D]` **Development has neither Access nor break-glass; it has a picker.** The dev compose
+  stack sets `DEV_AUTH`, which adds `/auth/dev/users` + `/auth/dev/login`: the login page
+  lists the household's active members and a click mints a session through the same
+  `start_session()` production uses. Those routes 404 in every other configuration, the
+  break-glass password 404s while `DEV_AUTH` is on (one sign-in path per mode, so neither can
+  quietly drift from the other), and `create_app()` **refuses to start** with `DEV_AUTH` under
+  `ENVIRONMENT=prod` or alongside `CF_ACCESS_*`. Without this there is no way into a local
+  checkout at all: Cloudflare cannot be put in front of a laptop, so `/auth/me` answers 401
+  forever and the only other door is an admin password on a stack that has no admin yet.
 - ~~`[Q4]`~~ **RESOLVED** — there is no kid password to reset. A parent changes the Google address
   from the admin panel, which revokes that kid's live sessions.
 
@@ -737,7 +746,7 @@ APPEAL_WINDOW_S=259200
 ENVIRONMENT=dev              # prod turns on HSTS and turns off /docs
 LOG_FORMAT=json
 PUBLIC_BASE_URL=http://localhost:8088
-# Internet exposure (§12.2) — used by docker-compose.tunnel.yml
+# Internet exposure (§12.2) — production only, set in env.production
 CLOUDFLARE_TUNNEL_TOKEN=
 ALLOWED_HOSTS=               # empty disables the Host check
 TRUST_PROXY_HEADERS=false
@@ -747,7 +756,16 @@ CF_ACCESS_AUD=               # comma-separated, one AUD tag per Access applicati
 
 ### 13.3 Dev ergonomics
 
-`justfile` targets: `up`, `down`, `logs`, `migrate`, `seed`, `test`, `eval`, `backup`, `restore`, `fmt`, `lint`.
+`justfile` targets: `up`, `down`, `logs`, `migrate`, `seed`, `test`, `eval`, `fmt`, `lint`,
+`web-*`, and `prod-up` / `prod-down` / `prod-logs` / `prod-ps` for the production stack.
+
+`[D]` **Two compose files, two modes, no overlay** — `docker-compose.yml` is dev and
+`docker-compose.prod.yml` is production, as separate compose projects with separate volumes.
+They were one base file plus a tunnel overlay, and the overlay lost: `just up` re-created
+`api` and `proxy` from the base file alone, silently dropping `CF_ACCESS_*` and re-publishing
+the tunnel door in place of the LAN one, while `cloudflared` kept running against it. The
+result was a household locked out of its own app with every container reporting healthy. An
+overlay that half the commands forget is worse than two files that share nothing.
 Seed data MUST create two children, the four example chores from the original brief, and 30 days of
 backdated occurrences in mixed states so the UI is never empty during development.
 

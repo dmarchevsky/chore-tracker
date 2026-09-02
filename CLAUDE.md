@@ -25,9 +25,13 @@ Pydantic v2. Managed by **uv**. Lint/format **ruff**, tests **pytest**.
 - `backend/app/worker/` — scheduler ticks + verification queue (same image, entrypoint
   `python -m app.worker`).
 - `backend/migrations/` — Alembic (async `env.py`), one migration per phase.
-- `docker-compose.yml` — services `db` / `api` / `worker` (`web` / `proxy` behind profiles;
-  `llm-vision` wired in Phase 4). **API on host `:8088`** — host `:8000` is a pre-existing
-  llama-server, do not use it.
+- **Two compose files, two modes, no overlay between them** — `docker-compose.yml` is dev
+  (`db` `api` `worker` `proxy`; LAN only; `DEV_AUTH` passwordless sign-in; no tunnel, no
+  break-glass) and `docker-compose.prod.yml` is production (adds `cloudflared`, Cloudflare
+  Access, break-glass on the LAN door). Separate compose projects — `chorekeeper` and
+  `chorekeeper-prod` — with separate volumes, so `just up` cannot disturb the live household
+  stack. They do both bind `:5173` and `:8088`: **stop one before starting the other.**
+  **API on host `:8088`** — host `:8000` is a pre-existing llama-server, do not use it.
 
 ## Dev commands (see [justfile](justfile))
 
@@ -38,7 +42,8 @@ Prerequisites: `docker` + `docker compose`, `uv`, and [`just`](https://github.co
 | Task | Command |
 |---|---|
 | Postgres only (for tests) | `just db-up` / `just db-down` |
-| Full app stack | `just up` (builds + starts `db` `api` `worker` — **not** the PWA) / `just down` |
+| Full dev stack | `just up` (builds + starts `db` `api` `worker` `proxy`) / `just down` |
+| Production stack | `just prod-up` / `just prod-down` / `just prod-ps` (needs `env.production`) |
 | Migrations | `just migrate` · `just makemigration "message"` |
 | Seed dev data | `just seed` |
 | **Lint gate (backend)** | `just lint` (ruff check + `ruff format --check`) |
@@ -48,6 +53,10 @@ Prerequisites: `docker` + `docker compose`, `uv`, and [`just`](https://github.co
 | **Lint gate (PWA)** | `just web-lint` (eslint + `prettier --check` + `tsc --noEmit`) |
 | **Test gate (PWA)** | `just web-test` (vitest) |
 | **Rebuild + serve the PWA** | `just web-serve` (rebuilds the `proxy` image, serves on `:5173`) |
+
+`just up` builds `db` `api` `worker` `proxy` but does **not** rebuild the PWA bundle — see
+step 9. Sign in to the dev stack at `http://localhost:5173` by picking a user; there is no
+password and no Google.
 
 ## Git workflow — MUST follow for every change
 
@@ -83,7 +92,10 @@ History on `main` is **linear** (rebase + fast-forward, no merge commits).
 8. **Clean up worktrees BEFORE Docker:**
    `git worktree remove .worktrees/feat-<slug>` · `git branch -d feat/<slug>` ·
    `git worktree prune`. `git worktree list` must show only the main checkout.
-9. **Green build = Docker up and healthy.** From `main`: `just up`, then verify
+9. **Green build = Docker up and healthy.** This runs the **dev** stack, on its own compose
+   project and its own volumes; if the production stack is running, `just prod-down` first
+   (both bind `:5173` and `:8088`) and `just prod-up` again when you are done. From `main`:
+   `just up`, then verify
    - `docker compose ps` → `db` healthy, `api` + `worker` up
    - `curl -sf localhost:8088/api/v1/health` → `{"status":"ok"}`
    - `docker compose logs worker` → tick loop, no tracebacks

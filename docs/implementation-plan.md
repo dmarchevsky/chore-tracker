@@ -29,7 +29,7 @@ criteria. Build order follows the spec exactly.
 **Decided with the user:**
 - Cover **all phases 0–7**.
 - ~~**Descoped:** external/remote access via Cloudflare Tunnel~~ — **wired** (§12.2):
-  `cloudflared` + a single Caddy front door in `docker-compose.tunnel.yml`, Cloudflare
+  `cloudflared` + a single Caddy front door in `docker-compose.prod.yml`, Cloudflare
   Access (Google) in front of the whole hostname, plus the app hardening the LAN-only
   assumptions needed (proxy-aware client IP, `TrustedHost`, `Secure` cookies in prod,
   `Cf-Access-Jwt-Assertion` verification). Setup + tradeoffs in
@@ -350,7 +350,7 @@ a security scan shows no unauthenticated endpoint other than `/health` and `/che
 Work items:
 1. ✅ Security headers / CSP: strict CSP, HSTS + `preload`, `Secure` cookies in prod, no
    directory listing, `/docs` off in prod — in the Caddy `proxy` + app middleware.
-   ✅ **`cloudflared` service + Cloudflare Access** — `docker-compose.tunnel.yml`,
+   ✅ **`cloudflared` service + Cloudflare Access** — `docker-compose.prod.yml`,
    [remote-access.md](remote-access.md).
 2. ✅ Operator path: **LAN / physical only, no Tailscale** (spec §12.2 `[D]`). The tunnel
    overlay binds `api` + `db` to `127.0.0.1`; `llama-server` stays on the LAN. ✅ Identity is

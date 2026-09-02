@@ -1,9 +1,11 @@
 # Production deployment — DockHand
 
 ChoreKeeper deploys as **one compose file**: [../docker-compose.prod.yml](../docker-compose.prod.yml).
-It is `docker-compose.yml` + `docker-compose.tunnel.yml` merged for orchestrators that take
-a single stack definition — the two-file pair stays canonical for development
-(`just up` / `just tunnel-up`) and nothing in this bundle changes it.
+It is one of the project's two compose files: this one is production, and
+`docker-compose.yml` is the dev stack (`just up` — LAN only, passwordless sign-in, no
+tunnel). There is no overlay between them and they share nothing, so deploying this changes
+nothing about local development. `just prod-up` runs exactly this file with
+`--env-file env.production`.
 
 Topology, security model and every Cloudflare console step are [remote-access.md](remote-access.md).
 This document covers only what is DockHand-specific, plus the readiness audit.

@@ -1,3 +1,28 @@
+# ChoreKeeper — DEV mode. The other file is docker-compose.prod.yml; there is no overlay
+# and nothing here is shared with production (spec §12.1, §13.3).
+#
+#   just up          db + api + worker + proxy, all of it
+#   just seed        fill the database with a household
+#   http://localhost:5173    the PWA — pick a user, no password
+#
+# Three things make this stack safe to be this open, and all three are pinned literals
+# below rather than ${...}: a stray .env must not be able to promote dev into production.
+#
+#   ENVIRONMENT: dev     no HSTS, /docs served, session cookie not Secure
+#   DEV_AUTH: "true"     /auth/dev/users + /auth/dev/login; the API refuses to start with
+#                        this under ENVIRONMENT=prod or alongside CF_ACCESS_*
+#   no CF_ACCESS_*       Cloudflare is not in front of this and cannot be
+#
+# There is no cloudflared here and no break-glass password (the API 404s it under
+# DEV_AUTH): one sign-in path per mode, so neither can drift from the other unnoticed.
+#
+# Caddy still listens on :80 and :81 inside the container, but only the LAN door (:81) is
+# published. Publishing the tunnel door too would give a developer a second front door with
+# subtly different rules to trip over, for no gain when there is no tunnel.
+#
+# The volumes are dev-scoped and disposable; the household's real data lives in the prod
+# stack's, which this file never names.
+
 name: chorekeeper
 
 services:
@@ -8,7 +33,7 @@ services:
       POSTGRES_PASSWORD: chore
       POSTGRES_DB: chore
     ports:
-      - "5432:5432"
+      - "5432:5432"      # `just test` talks to this directly
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -20,7 +45,11 @@ services:
   api:
     build: ./backend
     environment:
+      # --- pinned: dev cannot be talked into looking like production ---
       ENVIRONMENT: dev
+      DEV_AUTH: "true"
+      COOKIE_SECURE: "false"
+      LOG_FORMAT: text
       DATABASE_URL: postgresql+asyncpg://chore:chore@db:5432/chore
       MEDIA_ROOT: /data/media
       SESSION_SECRET: dev-insecure-change-me
@@ -35,7 +64,7 @@ services:
       sh -c "alembic upgrade head &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
-      - "8088:8000"
+      - "8088:8000"      # :8000 on this host is a pre-existing llama-server
     volumes:
       - media_data:/data/media
 
@@ -59,25 +88,22 @@ services:
     volumes:
       - media_data:/data/media
 
-  # Single front door: Caddy serves the built PWA, proxies /api, owns the
-  # security headers (spec §12.2). Behind the `proxy` profile for LAN device
-  # tests; the Cloudflare Tunnel deployment brings it up via
-  # docker-compose.tunnel.yml (see docs/remote-access.md).
+  # Caddy serves the built PWA and proxies /api (spec §12.2). No profile: the PWA is part
+  # of the dev stack, because "the app works" and "the API answers" are different claims.
+  # `just up` does NOT rebuild it — use `just web-serve` after touching frontend/.
   proxy:
     build: ./frontend
-    profiles: ["proxy"]
     depends_on:
       - api
     ports:
-      # 5173 is the HOST mapping only; inside the compose network Caddy listens on 80,
-      # so the tunnel ingress must point at http://proxy:80, not :5173.
-      - "5173:80"  # installable PWA + /api proxy — LAN device-test target
+      - "5173:81"        # the LAN door; :80 stays unpublished, there is no tunnel here
 
-  # Vision LLM is an external llama-server for now (spec §7.2). Wired in Phase 4.
-  # llm-vision:
-  #   image: ...
-  #   ports: ["8081:8081"]
+  # Vision LLM is an external llama-server for now (spec §7.2), reached over the LAN.
 
 volumes:
+  # Dev-scoped and disposable — `just seed` refills them. Named explicitly so they can
+  # never collide with the prod stack's, which hold the household's real data.
   db_data:
+    name: chorekeeper_dev_db_data
   media_data:
+    name: chorekeeper_dev_media_data

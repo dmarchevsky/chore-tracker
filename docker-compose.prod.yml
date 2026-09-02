@@ -1,8 +1,8 @@
 # ChoreKeeper — single-file PRODUCTION compose (DockHand-ready; no !override tags).
 #
-# This is docker-compose.yml + docker-compose.tunnel.yml merged into one file for
-# orchestrators that deploy exactly one compose file. The dev pair stays canonical for
-# `just up` / `just tunnel-up`; nothing here changes them.
+# One of the project's two compose files: this one is production (tunnel + Cloudflare
+# Access), docker-compose.yml is dev (LAN only, pick-a-user sign-in). There is no overlay
+# between them and nothing is shared — see CLAUDE.md.
 #
 #   manual:  docker compose -f docker-compose.prod.yml --env-file env.production up -d --build
 #   dockhand: stack source = this repo, compose path = docker-compose.prod.yml,
@@ -11,6 +11,9 @@
 # Security-critical settings (ENVIRONMENT, COOKIE_SECURE, TRUST_PROXY_HEADERS) are pinned
 # HERE, not read from env — a production stack cannot be misconfigured into dev mode by a
 # stray .env. Secrets use ${VAR:?} guards: a missing one fails the deploy loudly.
+#
+# DEV_AUTH (the dev stack's passwordless sign-in) is absent on purpose and must stay absent:
+# the API refuses to start with it under ENVIRONMENT=prod, which is pinned below.
 #
 # Topology (docs/remote-access.md):
 #   internet → cloudflared → proxy:80 (tunnel door; break-glass 404ed by Caddy) → api:8000
@@ -146,5 +149,12 @@ services:
     restart: unless-stopped
 
 volumes:
+  # Named explicitly rather than left to `name:`-prefixing. This stack's compose project is
+  # `chorekeeper-prod`, so the default names would be chorekeeper-prod_* — brand new, empty
+  # volumes — and production would come up on a blank database while the household's real
+  # data sat untouched under the old `chorekeeper_*` names. The dev stack uses
+  # chorekeeper_dev_* and cannot collide with these.
   db_data:
+    name: chorekeeper_db_data
   media_data:
+    name: chorekeeper_media_data

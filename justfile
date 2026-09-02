@@ -1,85 +1,119 @@
-# ChoreKeeper dev tasks (spec §13.3)
-set dotenv-load := true
+# ChoreKeeper tasks (spec §13.3)
+#
+# Two modes, two compose files, no overlay between them:
+#   dev   docker-compose.yml       `just up`      LAN only, passwordless picker sign-in
+#   prod  docker-compose.prod.yml  `just prod-up` Cloudflare Tunnel + Google via Access
+#
+# They are separate compose PROJECTS (chorekeeper / chorekeeper-prod) with separate
+# volumes, so `just up` can never disturb the household's live stack — but they do both
+# bind :5173 and :8088, so stop one before starting the other.
+#
+# No `set dotenv-load` on purpose: it exported the repo's .env into every recipe, so a
+# recipe run inside .worktrees/<branch> silently picked up the MAIN checkout's .env —
+# `just test` in particular. The dev compose file pins its own values as literals and the
+# prod recipes pass --env-file explicitly, so nothing needs it.
 
 backend := "backend"
 compose := "docker compose"
+prod := compose + " -f docker-compose.prod.yml --env-file env.production"
 
 default:
     @just --list
 
-# --- Container lifecycle -------------------------------------------------
-up:
-    {{compose}} up -d --build db api worker
+# --- Dev stack (docker-compose.yml) --------------------------------------
 
+# Build and start the whole dev stack; sign in at http://localhost:5173, no password
+up:
+    {{compose}} up -d --build
+
+# Stop the dev stack
 down:
     {{compose}} down
 
+# Follow dev logs, optionally for one service
 logs service="":
     {{compose}} logs -f {{service}}
 
-# --- Database ----------------------------------------------------------
+# --- Production stack (docker-compose.prod.yml + env.production) ---------
+
+# Build and start production — tunnel + Access. Stop the dev stack first
+prod-up:
+    {{prod}} up -d --build
+
+# Stop the production stack
+prod-down:
+    {{prod}} down
+
+# Follow production logs, optionally for one service
+prod-logs service="":
+    {{prod}} logs -f {{service}}
+
+# What production is running right now
+prod-ps:
+    {{prod}} ps
+
+# --- Database ------------------------------------------------------------
+
+# Postgres alone — what `just test` needs
 db-up:
     {{compose}} up -d db
 
+# Stop Postgres
 db-down:
     {{compose}} stop db
 
+# Apply migrations to the database in DATABASE_URL
 migrate:
     cd {{backend}} && uv run alembic upgrade head
 
+# Autogenerate a migration from the models
 makemigration message:
     cd {{backend}} && uv run alembic revision --autogenerate -m "{{message}}"
 
+# Fill the dev database with a household, chores and backdated occurrences
 seed:
     {{compose}} exec -T api python -m app.seed
 
-# --- Quality ---------------------------------------------------------
+# --- Quality gates -------------------------------------------------------
+
+# Backend tests (needs Postgres on :5432)
 test *args:
     cd {{backend}} && uv run pytest {{args}}
 
+# Autofix backend formatting and lints
 fmt:
     cd {{backend}} && uv run ruff format . && uv run ruff check --fix .
 
+# Backend lint gate
 lint:
     cd {{backend}} && uv run ruff check . && uv run ruff format --check .
 
-# --- Later phases (placeholders) --------------------------------------
+# Score the vision model against the labelled set (spec §7)
 eval *args:
     cd {{backend}} && uv run python -m eval.run {{args}}
 
-backup:
-    @echo "Phase 6: pg_dump + media rsync to TrueNAS"
+# --- Frontend (PWA) ------------------------------------------------------
 
-restore:
-    @echo "Phase 6: restore from last night's backup"
-
-# --- Frontend (PWA) --------------------------------------------------
+# Install node_modules — once per worktree, they are not shared
 web-install:
     cd frontend && npm ci
 
+# Vite dev server with /api proxied to :8088
 web-dev:
     cd frontend && npm run dev
 
+# Build the production bundle
 web-build:
     cd frontend && npm run build
 
+# PWA lint gate: eslint + prettier + tsc
 web-lint:
     cd frontend && npm run lint && npm run typecheck
 
+# PWA test gate: vitest
 web-test *args:
     cd frontend && npm run test {{args}}
 
+# Rebuild the bundle into the proxy image — `just up` does NOT do this
 web-serve:
-    {{compose}} --profile proxy up -d --build proxy
-
-# --- Remote access — Cloudflare Tunnel (docs/remote-access.md) --------
-tunnel := compose + " -f docker-compose.yml -f docker-compose.tunnel.yml"
-
-tunnel-up:
-    {{tunnel}} up -d --build
-
-tunnel-down:
-    {{tunnel}} down
-
-tunnel-logs service="cloudflared":
-    {{tunnel}} logs -f {{service}}
+    {{compose}} up -d --build proxy
