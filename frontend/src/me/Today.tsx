@@ -21,6 +21,15 @@ function firstPerChore() {
   };
 }
 
+/** A timestamp as a clock reading — and the weekday too, when it isn't today. */
+function whenLabel(iso: string, withWeekday = false): string {
+  return new Date(iso).toLocaleString([], {
+    ...(withWeekday ? { weekday: 'short' as const } : {}),
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 /** Midnight-to-midnight around `now`, in the device's own timezone — the kid's "today". */
 function todaySpan(now = new Date()) {
   const start = new Date(now);
@@ -74,7 +83,11 @@ export function Today() {
       )}
       {doNow.map((o) => (
         <Link key={o.id} to={`/me/chores/${o.id}`}>
-          <OccRow o={o} chore={byId.get(o.chore_id)} subtitle={dueLabel(o.due_at)} />
+          <OccRow
+            o={o}
+            chore={byId.get(o.chore_id)}
+            subtitle={`${dueLabel(o.due_at)} · due ${whenLabel(o.due_at)}`}
+          />
         </Link>
       ))}
 
@@ -86,10 +99,7 @@ export function Today() {
               <OccRow
                 o={o}
                 chore={byId.get(o.chore_id)}
-                subtitle={`was due ${new Date(o.due_at).toLocaleTimeString([], {
-                  hour: 'numeric',
-                  minute: '2-digit',
-                })}`}
+                subtitle={`was due ${whenLabel(o.due_at)}`}
               />
             </Link>
           ))}
@@ -100,14 +110,7 @@ export function Today() {
         <>
           <h2 className="mt-4 text-sm font-semibold text-slate-400">Penalties</h2>
           {penalties.map((e) => (
-            <PenaltyRow
-              key={e.id}
-              entry={e}
-              when={new Date(e.created_at).toLocaleTimeString([], {
-                hour: 'numeric',
-                minute: '2-digit',
-              })}
-            />
+            <PenaltyRow key={e.id} entry={e} when={whenLabel(e.created_at)} />
           ))}
         </>
       )}
@@ -120,11 +123,10 @@ export function Today() {
               key={o.id}
               o={o}
               chore={byId.get(o.chore_id)}
-              subtitle={`opens ${new Date(o.window_open_at).toLocaleString([], {
-                weekday: 'short',
-                hour: 'numeric',
-                minute: '2-digit',
-              })}`}
+              subtitle={`opens ${whenLabel(o.window_open_at, true)} · due ${whenLabel(
+                o.due_at,
+                true,
+              )}`}
               muted
             />
           ))}

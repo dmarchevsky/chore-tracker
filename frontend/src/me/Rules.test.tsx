@@ -25,6 +25,8 @@ const BASE = {
   photo_prompts: [],
   proof_type: 'checkbox',
   cadence: 'daily',
+  due_time: '08:00:00',
+  window_open_offset_s: -12 * 3600,
   standing_on: false,
 };
 
@@ -106,6 +108,27 @@ describe('Rules', () => {
     await screen.findByText('The rules');
     expect(screen.queryByText('Bike left out')).not.toBeInTheDocument();
     expect(screen.queryByText('Costs you money')).not.toBeInTheDocument();
+  });
+
+  it('shows when a scheduled chore happens', async () => {
+    // Without this a daily chore and a Saturday-only one look identical on this screen —
+    // the whole point of showing a kid their rules is that nothing is a surprise (§15 Q8).
+    setup([{ ...MINE, cadence: 'weekly(on=[SAT])' }]);
+
+    expect(await screen.findByText(/Every Sat, due /)).toBeInTheDocument();
+    expect(screen.getByText(/opens .* the day before/)).toBeInTheDocument();
+  });
+
+  it('shows no schedule line on rules that have no schedule', async () => {
+    // A standing chore is a state a parent flips and a penalty rule is a price list; the
+    // backend fills their schedule columns with defaults, so printing them would be a lie.
+    setup([
+      { ...MINE, id: 'c5', title: 'Room tidy', chore_kind: 'standing', cadence: 'standing' },
+      PENALTY,
+    ]);
+
+    await screen.findByText('Room tidy');
+    expect(screen.queryByText(/due /)).not.toBeInTheDocument();
   });
 
   it('shows an all-mode chore to each kid it names', async () => {

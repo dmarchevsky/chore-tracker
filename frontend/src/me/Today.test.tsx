@@ -135,6 +135,19 @@ describe('kid Today', () => {
     expect(screen.getByText('Take out the bins')).toBeInTheDocument();
   });
 
+  it('puts a clock time on every row, not just a countdown', async () => {
+    // "due in 3 h" is only half the story — a kid planning their afternoon needs the actual
+    // time, and an upcoming row needs to say when it unlocks as well as when it is due.
+    renderToday();
+    await screen.findByText('Coming up');
+
+    const nowClock = new Date().toLocaleString([], { hour: 'numeric', minute: '2-digit' });
+    // The open row keeps its countdown and gains the clock reading.
+    expect(screen.getByText(new RegExp(`due in .* · due ${nowClock}`))).toBeVisible();
+    // Both upcoming rows say when they open *and* when they are due.
+    expect(screen.getAllByText(/^opens .* · due .*$/)).toHaveLength(2);
+  });
+
   it('shows penalties charged today, and leaves undone ones off', async () => {
     renderToday([
       penalty(),

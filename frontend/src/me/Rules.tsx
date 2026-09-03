@@ -4,7 +4,17 @@ import { isAssignedTo, isVisibleTo } from '../shared/assignment';
 import type { Chore } from '../api/types';
 import { Card, Spinner } from '../shared/ui';
 import { money, tierOutcome } from '../shared/format';
-import { onceDate } from '../admin/chores/choreFields';
+import { formatCadence, formatClock, opensAt } from '../shared/schedule';
+
+/** When the chore happens, in one line: what a kid needs to plan around it (spec §15 Q8).
+ *  Standing chores and penalty rules have no schedule — the backend fills those columns
+ *  with defaults — so this is only ever called for a scheduled chore. */
+function scheduleSummary(c: Chore): string {
+  return `${formatCadence(c.cadence)}, due ${formatClock(c.due_time)} · ${opensAt(
+    c.due_time,
+    c.window_open_offset_s,
+  )}`;
+}
 
 function proofSummary(c: Chore): string {
   if (c.proof_type === 'photo')
@@ -90,12 +100,8 @@ export function Rules() {
                 )}
               </p>
             )}
+            <p className="mt-2 text-xs text-slate-500">{scheduleSummary(c)}</p>
             <p className="mt-1 text-xs text-slate-500">{proofSummary(c)}</p>
-            {onceDate(c.cadence) && (
-              <p className="mt-1 text-xs text-slate-500">
-                Just once, on {new Date(`${onceDate(c.cadence)}T00:00`).toLocaleDateString()}
-              </p>
-            )}
           </Card>
         ),
       )}
