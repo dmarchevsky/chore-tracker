@@ -33,6 +33,22 @@ export const useInbox = () =>
     queryFn: () => api.get<Occurrence[]>('/occurrences?inbox=true'),
   });
 
+/** Misses a parent has not settled yet. A miss sits at `missed` until it is excused or
+ *  decided, so the list needs no date window — deciding one drops it out. Newest first,
+ *  so an old backlog sinks rather than burying today's. */
+export const useMissed = () =>
+  useQuery({
+    queryKey: ['inbox', 'missed'],
+    queryFn: () => api.get<Occurrence[]>('/occurrences?status=missed&order=desc&limit=200'),
+  });
+
+/** Everything still scheduled, soonest first; the view keeps the next one per chore and kid. */
+export const useUpcoming = () =>
+  useQuery({
+    queryKey: ['inbox', 'upcoming'],
+    queryFn: () => api.get<Occurrence[]>('/occurrences?status=pending&order=asc&limit=500'),
+  });
+
 export const useAdminOccurrence = (id: string) =>
   useQuery({
     queryKey: ['occurrence', id],

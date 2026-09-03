@@ -27,6 +27,51 @@ const occurrence = {
   verification_error: null,
 };
 
+const hourAgo = new Date(Date.now() - 3600_000).toISOString();
+const tomorrow = new Date(Date.now() + 86_400_000).toISOString();
+const nextWeek = new Date(Date.now() + 7 * 86_400_000).toISOString();
+
+const missed = {
+  ...occurrence,
+  id: 'o2',
+  chore_id: 'c2',
+  due_at: hourAgo,
+  window_open_at: hourAgo,
+  status: 'missed',
+  reward_cents: 0,
+  penalty_cents: 100,
+};
+
+/** Two turns of the same chore for Mo, plus Ana's — the parent should see Mo's next one and
+ *  Ana's, not every day of the horizon. */
+const pending = [
+  {
+    ...occurrence,
+    id: 'o3',
+    chore_id: 'c3',
+    due_at: tomorrow,
+    window_open_at: tomorrow,
+    status: 'pending',
+  },
+  {
+    ...occurrence,
+    id: 'o4',
+    chore_id: 'c3',
+    due_at: nextWeek,
+    window_open_at: nextWeek,
+    status: 'pending',
+  },
+  {
+    ...occurrence,
+    id: 'o5',
+    chore_id: 'c3',
+    assignee_id: 'k2',
+    due_at: nextWeek,
+    window_open_at: nextWeek,
+    status: 'pending',
+  },
+];
+
 const submission = {
   id: 's1',
   kind: 'photo',
@@ -141,12 +186,21 @@ function renderInbox(chores: unknown[] = [], route = '/admin') {
           },
         ]),
       );
+    if (url.includes('status=missed')) return Promise.resolve(json([missed]));
+    if (url.includes('status=pending')) return Promise.resolve(json(pending));
     if (url.includes('/penalties'))
       return Promise.resolve(json({ id: 'l1', amount_cents: -500, kind: 'penalty' }));
     if (url.includes('/chores'))
       // The bare stub has no chore_kind, so it is not a standing chore and the section
       // filters it out — do not "tidy" it into a full Chore or the queue tests shift.
-      return Promise.resolve(json([{ id: 'c1', title: 'Empty the sink' }, ...chores]));
+      return Promise.resolve(
+        json([
+          { id: 'c1', title: 'Empty the sink' },
+          { id: 'c2', title: 'Sweep the porch' },
+          { id: 'c3', title: 'Water the plants' },
+          ...chores,
+        ]),
+      );
     if (url.endsWith('/children'))
       return Promise.resolve(
         json([
@@ -155,6 +209,7 @@ function renderInbox(chores: unknown[] = [], route = '/admin') {
         ]),
       );
     if (url.endsWith('/occurrences/o1')) return Promise.resolve(json(occurrence));
+    if (url.endsWith('/occurrences/o2')) return Promise.resolve(json(missed));
     if (url.includes('/disputes')) return Promise.resolve(json([dispute]));
     if (url.includes('/submissions')) return Promise.resolve(json([submission]));
     if (url.includes('/verifications')) return Promise.resolve(json([verification]));
@@ -416,5 +471,35 @@ describe('admin Inbox', () => {
     // the pane is still here, now showing the new state — it does not close on success
     expect(await screen.findByText("grounded until it's fixed")).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Turn it off' })).toBeInTheDocument();
+  });
+
+  it('lists misses the parent has not settled yet, and opens one for a decision', async () => {
+    const row = await screen.findByText('Sweep the porch');
+    expect(await screen.findByText('Missed (1)')).toBeInTheDocument();
+    expect(row.parentElement!.parentElement!.textContent).toContain('Mo');
+
+    row.click();
+
+    // A miss has no submission to look at, but it can still be excused.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^excuse$/i })).toBeInTheDocument(),
+    );
+  });
+
+  it('shows only the next turn of each chore and kid under Coming up, and leaves it inert', async () => {
+    await screen.findByText('Coming up');
+    // o3 (Mo, tomorrow) and o5 (Ana) survive; o4 is Mo's second turn on the same chore.
+    const rows = screen.getAllByText('Water the plants');
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.parentElement!.parentElement!.textContent)).toEqual([
+      expect.stringContaining('Mo'),
+      expect.stringContaining('Ana'),
+    ]);
+    rows.forEach((r) => expect(r.closest('button')).toBeNull());
+  });
+
+  it('keeps missed and upcoming rows out of bulk approve', async () => {
+    await screen.findByText('Coming up');
+    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
   });
 });

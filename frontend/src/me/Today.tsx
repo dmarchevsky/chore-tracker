@@ -4,22 +4,13 @@ import { useChores, useLedger, useOccurrences } from '../api/hooks';
 import type { Occurrence } from '../api/types';
 import { Spinner } from '../shared/ui';
 import { dueLabel } from '../shared/format';
+import { firstPerKey } from '../shared/occurrences';
 import { OccRow } from './occRow';
 import { chargedPenalties } from './penalties';
 import { PenaltyRow } from './penaltyRow';
 
 // Chores the kid still has to act on right now.
 const DO_NOW = new Set(['open', 'verified_fail']);
-
-/** Keep the first occurrence of each chore — apply to a due-sorted list, so that's the next one. */
-function firstPerChore() {
-  const seen = new Set<string>();
-  return (o: Occurrence) => {
-    if (seen.has(o.chore_id)) return false;
-    seen.add(o.chore_id);
-    return true;
-  };
-}
 
 /** A timestamp as a clock reading — and the weekday too, when it isn't today. */
 function whenLabel(iso: string, withWeekday = false): string {
@@ -69,7 +60,7 @@ export function Today() {
   const missedToday = (missed.data ?? []).sort(byDue);
   // A daily chore materialises a row per day across the horizon; a kid only
   // needs to know which one is next.
-  const upcoming = (later.data ?? []).sort(byDue).filter(firstPerChore());
+  const upcoming = (later.data ?? []).sort(byDue).filter(firstPerKey((o) => o.chore_id));
 
   return (
     <div className="flex flex-col gap-3 pt-2">

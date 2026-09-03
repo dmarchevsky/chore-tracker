@@ -1,6 +1,7 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useInbox, useDecision } from './api';
+import { useInbox, useDecision, useMissed, useUpcoming } from './api';
 import { useAdminChores, useChildren, useOpenDisputes } from './api';
 import { ReviewDetail } from './ReviewDetail';
 import { StandingDetail } from './StandingDetail';
@@ -9,15 +10,80 @@ import { Button, Card, Spinner } from '../shared/ui';
 import { StatusBadge } from '../shared/StatusBadge';
 import { standingEntry, TONE_CLASS } from '../shared/status';
 import { occurrenceWorth } from '../shared/outcome';
+import { firstPerKey } from '../shared/occurrences';
 import { tierOutcome } from '../shared/format';
+import type { Occurrence } from '../api/types';
 
 /** The right pane serves two kinds of thing now, so the selection has to say which.
  *  /admin/review/:id always means an occurrence — keeping the route the only untagged input
  *  is what stops the push deep-link breaking. */
 type Selection = { kind: 'occurrence' | 'standing' | 'penalty'; id: string };
 
+/** One occurrence in the left rail. `onSelect` omitted leaves the row inert: the "Coming up"
+ *  list is a forward view, and a chore whose window has not opened has nothing to review. */
+function OccCard({
+  o,
+  title,
+  kid,
+  subtitle,
+  selected,
+  onSelect,
+  muted,
+  children,
+}: {
+  o: Occurrence;
+  title: string;
+  kid: string;
+  subtitle: string;
+  selected?: boolean;
+  onSelect?: () => void;
+  muted?: boolean;
+  /** The bulk-approve checkbox — only the review queue passes one. */
+  children?: ReactNode;
+}) {
+  const body = (
+    <>
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="font-semibold">{title}</p>
+        <StatusBadge status={o.status} className="shrink-0 text-xs" />
+      </div>
+      <p className="text-xs text-slate-400">
+        {kid} · {subtitle}
+        {occurrenceWorth(o) && ` · ${occurrenceWorth(o)}`}
+      </p>
+      {o.verification_error && (
+        <p className="text-xs text-amber-400">
+          the vision model couldn’t be reached — {o.verification_error}
+        </p>
+      )}
+    </>
+  );
+  return (
+    <Card
+      className={`${muted ? 'opacity-60' : ''} ${onSelect ? 'cursor-pointer' : ''} ${
+        selected ? 'border-sky-600' : ''
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        {children}
+        {onSelect ? (
+          <button className="flex-1 text-left" onClick={onSelect}>
+            {body}
+          </button>
+        ) : (
+          <div className="flex-1">{body}</div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 export function Inbox() {
   const inbox = useInbox();
+  // A miss never enters the review queue, and nothing else on this screen looks ahead —
+  // so the parent gets the same three-part picture the kid's Today screen gives.
+  const missed = useMissed();
+  const upcoming = useUpcoming();
   const chores = useAdminChores();
   const kids = useChildren();
   const openDisputes = useOpenDisputes();
@@ -40,10 +106,20 @@ export function Inbox() {
     if (routeId) nav('/admin');
   }
 
-  if (inbox.isLoading || chores.isLoading) return <Spinner />;
+  if (inbox.isLoading || chores.isLoading || missed.isLoading || upcoming.isLoading)
+    return <Spinner />;
   const byId = new Map((chores.data ?? []).map((c) => [c.id, c]));
   const kidById = new Map((kids.data ?? []).map((k) => [k.id, k]));
   const rows = inbox.data ?? [];
+  const title = (o: Occurrence) => byId.get(o.chore_id)?.title ?? 'Chore';
+  const kidName = (o: Occurrence) =>
+    (o.assignee_id ? kidById.get(o.assignee_id)?.display_name : null) ?? 'Unassigned';
+  const misses = missed.data ?? [];
+  // A daily chore materialises a row per day across the horizon, per kid; the parent only
+  // needs to know whose turn is next on each chore.
+  const soon = (upcoming.data ?? []).filter(
+    firstPerKey((o) => `${o.chore_id}:${o.assignee_id ?? ''}`),
+  );
   // include_inactive=true on the underlying query, and set_state does not check active — so a
   // retired grounding would otherwise offer a live flip button.
   const standing = (chores.data ?? [])
@@ -191,44 +267,61 @@ export function Inbox() {
         )}
         {rows.length === 0 && <p className="text-slate-500">Nothing waiting. 🎉</p>}
         {rows.map((o) => (
-          <Card
+          <OccCard
             key={o.id}
-            className={`cursor-pointer ${
-              selected?.kind === 'occurrence' && selected.id === o.id ? 'border-sky-600' : ''
-            }`}
+            o={o}
+            title={title(o)}
+            kid={kidName(o)}
+            subtitle={`due ${new Date(o.due_at).toLocaleString()}`}
+            selected={selected?.kind === 'occurrence' && selected.id === o.id}
+            onSelect={() => select({ kind: 'occurrence', id: o.id })}
           >
-            <div className="flex items-start gap-3">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={checked.has(o.id)}
-                onChange={() => toggle(o.id)}
-                onClick={(e) => e.stopPropagation()}
-              />
-              <button
-                className="flex-1 text-left"
-                onClick={() => select({ kind: 'occurrence', id: o.id })}
-              >
-                <div className="flex items-baseline justify-between gap-2">
-                  <p className="font-semibold">{byId.get(o.chore_id)?.title ?? 'Chore'}</p>
-                  <StatusBadge status={o.status} className="shrink-0 text-xs" />
-                </div>
-                <p className="text-xs text-slate-400">
-                  {o.assignee_id
-                    ? (kidById.get(o.assignee_id)?.display_name ?? 'Unassigned')
-                    : 'Unassigned'}{' '}
-                  · due {new Date(o.due_at).toLocaleString()}
-                  {occurrenceWorth(o) && ` · ${occurrenceWorth(o)}`}
-                </p>
-                {o.verification_error && (
-                  <p className="text-xs text-amber-400">
-                    the vision model couldn’t be reached — {o.verification_error}
-                  </p>
-                )}
-              </button>
-            </div>
-          </Card>
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={checked.has(o.id)}
+              onChange={() => toggle(o.id)}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </OccCard>
         ))}
+
+        {misses.length > 0 && (
+          <div className="flex flex-col gap-2">
+            {/* A miss is settled money the parent can still excuse (spec §4.2), and it never
+                reaches the review queue — this is the only place it surfaces unprompted. */}
+            <h2 className="mt-4 text-sm font-semibold text-rose-400">Missed ({misses.length})</h2>
+            {misses.map((o) => (
+              <OccCard
+                key={o.id}
+                o={o}
+                title={title(o)}
+                kid={kidName(o)}
+                subtitle={`was due ${new Date(o.due_at).toLocaleString()}`}
+                selected={selected?.kind === 'occurrence' && selected.id === o.id}
+                onSelect={() => select({ kind: 'occurrence', id: o.id })}
+              />
+            ))}
+          </div>
+        )}
+
+        {soon.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <h2 className="mt-4 text-sm font-semibold text-slate-400">Coming up</h2>
+            {soon.map((o) => (
+              <OccCard
+                key={o.id}
+                o={o}
+                title={title(o)}
+                kid={kidName(o)}
+                subtitle={`opens ${new Date(o.window_open_at).toLocaleString()} · due ${new Date(
+                  o.due_at,
+                ).toLocaleString()}`}
+                muted
+              />
+            ))}
+          </div>
+        )}
       </div>
       <div>
         {selected?.kind === 'standing' ? (
