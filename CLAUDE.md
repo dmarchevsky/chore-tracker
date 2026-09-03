@@ -12,7 +12,6 @@ the app, and Google + Cloudflare hold sign-in identity but never chore content (
 - **Source of truth:** [docs/chore-tracker-spec.md](docs/chore-tracker-spec.md) — the spec.
   `[D]` = settled decision (don't relitigate), `[Q]` = open question (implement the stated
   default, leave a `TODO(decision)` comment).
-- **Phased roadmap:** [docs/implementation-plan.md](docs/implementation-plan.md).
 - **Quick start:** [README.md](README.md).
 
 ## Stack & layout

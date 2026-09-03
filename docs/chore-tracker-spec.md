@@ -12,9 +12,8 @@ internet via Cloudflare Tunnel.
 
 Sections 1–13 are the spec: what the system does and why it does it that way. Section 15
 lists the questions that are still open — implement the **stated default** and leave a
-`TODO(decision)` comment rather than inventing an alternative. The phased build plan that
-used to live in §14 is [implementation-plan.md](implementation-plan.md), which tracks what
-is actually built; keeping a second copy here only meant one of them was always wrong.
+`TODO(decision)` comment rather than inventing an alternative. This document says what the
+system does, not what has been built when; git history is the record of that.
 
 Conventions used below:
 - **MUST / SHOULD / MAY** — RFC 2119 sense.
@@ -839,9 +838,9 @@ backdated occurrences in mixed states so the UI is never empty during developmen
 
 ## 14. Implementation plan
 
-Moved to [implementation-plan.md](implementation-plan.md), which carries the phases, their
-acceptance criteria and what is done. It was duplicated here and the two drifted, which is
-the failure mode a spec exists to prevent.
+Removed. The phased build plan was duplicated here and in a separate document, and the two
+drifted — the failure mode a spec exists to prevent. What is built is in the code and in git
+history; what the system should do is §§1–13.
 
 ---
 
