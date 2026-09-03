@@ -30,7 +30,7 @@ function occ(id: string, status: string) {
 
 const urls: string[] = [];
 
-function renderHistory() {
+function renderHistory(route = '/admin/history') {
   urls.length = 0;
   vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
     const url = String(input);
@@ -49,7 +49,7 @@ function renderHistory() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[route]}>
         <History />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -85,6 +85,25 @@ describe('admin History', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /^approve$/i })).toBeInTheDocument(),
     );
+  });
+
+  it('opens pre-filtered when the inbox links here for the misses it left out', async () => {
+    renderHistory('/admin/history?status=missed');
+    await waitFor(() => expect(urls.length).toBeGreaterThan(0));
+
+    expect(urls.at(-1)).toContain('status=missed');
+    expect(urls.at(-1)).not.toContain('status=approved');
+    // The chips still work as before — the URL only seeds them.
+    fireEvent.click(screen.getByRole('button', { name: 'Approved' }));
+    await waitFor(() => expect(urls.at(-1)).toContain('status=approved'));
+  });
+
+  it('ignores a status the filter does not offer', async () => {
+    renderHistory('/admin/history?status=nonsense');
+    await waitFor(() => expect(urls.length).toBeGreaterThan(0));
+
+    expect(urls.at(-1)).toContain('status=missed');
+    expect(urls.at(-1)).toContain('status=approved');
   });
 
   it('filters by kid and widens the window on load more', async () => {

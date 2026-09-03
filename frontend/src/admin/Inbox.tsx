@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useInbox, useDecision, useMissed, useUpcoming } from './api';
 import { useAdminChores, useChildren, useOpenDisputes } from './api';
 import { ReviewDetail } from './ReviewDetail';
@@ -18,6 +18,22 @@ import type { Occurrence } from '../api/types';
  *  /admin/review/:id always means an occurrence — keeping the route the only untagged input
  *  is what stops the push deep-link breaking. */
 type Selection = { kind: 'occurrence' | 'standing' | 'penalty'; id: string };
+
+/** A miss sits at `missed` until someone decides it, and most never are — so the raw list only
+ *  grows. These three bounds keep the section to what a parent might still act on today. */
+const MISS_WINDOW_DAYS = 7;
+const MISS_ROWS = 5;
+
+/** One row per chore per kid: a daily chore otherwise repeats down both lists. */
+const occKey = (o: Occurrence) => `${o.chore_id}:${o.assignee_id ?? ''}`;
+
+/** Local midnight `days` back — a cutoff that does not drift as the session goes on. */
+function midnightDaysAgo(days: number): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - days);
+  return d;
+}
 
 /** One occurrence in the left rail. `onSelect` omitted leaves the row inert: the "Coming up"
  *  list is a forward view, and a chore whose window has not opened has nothing to review. */
@@ -114,12 +130,20 @@ export function Inbox() {
   const title = (o: Occurrence) => byId.get(o.chore_id)?.title ?? 'Chore';
   const kidName = (o: Occurrence) =>
     (o.assignee_id ? kidById.get(o.assignee_id)?.display_name : null) ?? 'Unassigned';
-  const misses = missed.data ?? [];
+  // Newest first from the query, so: drop the stale ones, keep the newest miss per chore and
+  // kid, then cap. Anything dropped is counted into the History link below the section.
+  const allMissed = missed.data ?? [];
+  const cutoff = midnightDaysAgo(MISS_WINDOW_DAYS);
+  const recentMissed = allMissed.filter((o) => new Date(o.due_at) >= cutoff);
+  const sameKey = new Map<string, number>();
+  recentMissed.forEach((o) => sameKey.set(occKey(o), (sameKey.get(occKey(o)) ?? 0) + 1));
+  const misses = recentMissed.filter(firstPerKey(occKey)).slice(0, MISS_ROWS);
+  // The query asks for 200, so a pathological backlog under-counts — the link goes to the
+  // full list either way.
+  const hiddenMisses = allMissed.length - misses.length;
   // A daily chore materialises a row per day across the horizon, per kid; the parent only
   // needs to know whose turn is next on each chore.
-  const soon = (upcoming.data ?? []).filter(
-    firstPerKey((o) => `${o.chore_id}:${o.assignee_id ?? ''}`),
-  );
+  const soon = (upcoming.data ?? []).filter(firstPerKey(occKey));
   // include_inactive=true on the underlying query, and set_state does not check active — so a
   // retired grounding would otherwise offer a live flip button.
   const standing = (chores.data ?? [])
@@ -291,17 +315,27 @@ export function Inbox() {
             {/* A miss is settled money the parent can still excuse (spec §4.2), and it never
                 reaches the review queue — this is the only place it surfaces unprompted. */}
             <h2 className="mt-4 text-sm font-semibold text-rose-400">Missed ({misses.length})</h2>
-            {misses.map((o) => (
-              <OccCard
-                key={o.id}
-                o={o}
-                title={title(o)}
-                kid={kidName(o)}
-                subtitle={`was due ${new Date(o.due_at).toLocaleString()}`}
-                selected={selected?.kind === 'occurrence' && selected.id === o.id}
-                onSelect={() => select({ kind: 'occurrence', id: o.id })}
-              />
-            ))}
+            {misses.map((o) => {
+              const also = (sameKey.get(occKey(o)) ?? 1) - 1;
+              return (
+                <OccCard
+                  key={o.id}
+                  o={o}
+                  title={title(o)}
+                  kid={kidName(o)}
+                  subtitle={`was due ${new Date(o.due_at).toLocaleString()}${
+                    also > 0 ? ` · ${also} more like this` : ''
+                  }`}
+                  selected={selected?.kind === 'occurrence' && selected.id === o.id}
+                  onSelect={() => select({ kind: 'occurrence', id: o.id })}
+                />
+              );
+            })}
+            {hiddenMisses > 0 && (
+              <Link to="/admin/history?status=missed" className="text-xs text-slate-400 underline">
+                {hiddenMisses} more in History
+              </Link>
+            )}
           </div>
         )}
 

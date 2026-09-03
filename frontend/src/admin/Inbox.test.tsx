@@ -31,16 +31,28 @@ const hourAgo = new Date(Date.now() - 3600_000).toISOString();
 const tomorrow = new Date(Date.now() + 86_400_000).toISOString();
 const nextWeek = new Date(Date.now() + 7 * 86_400_000).toISOString();
 
-const missed = {
-  ...occurrence,
-  id: 'o2',
-  chore_id: 'c2',
-  due_at: hourAgo,
-  window_open_at: hourAgo,
-  status: 'missed',
-  reward_cents: 0,
-  penalty_cents: 100,
-};
+const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+
+function miss(over: Record<string, unknown>) {
+  return {
+    ...occurrence,
+    status: 'missed',
+    reward_cents: 0,
+    penalty_cents: 100,
+    due_at: hourAgo,
+    window_open_at: hourAgo,
+    ...over,
+  };
+}
+
+/** Newest first, the way the query returns them: Mo's fresh miss, Mo's older miss of the same
+ *  chore (folded into the first), Ana's miss of another chore, and one from a month ago. */
+const missed = [
+  miss({ id: 'o2', chore_id: 'c2' }),
+  miss({ id: 'o6', chore_id: 'c2', due_at: daysAgo(2), window_open_at: daysAgo(2) }),
+  miss({ id: 'o7', chore_id: 'c4', assignee_id: 'k2', due_at: daysAgo(3) }),
+  miss({ id: 'o8', chore_id: 'c5', due_at: daysAgo(30) }),
+];
 
 /** Two turns of the same chore for Mo, plus Ana's — the parent should see Mo's next one and
  *  Ana's, not every day of the horizon. */
@@ -167,7 +179,7 @@ const penalty = {
 };
 const penaltyRetired = { ...penalty, id: 'p2', title: 'Old fine', active: false };
 
-function renderInbox(chores: unknown[] = [], route = '/admin') {
+function renderInbox(chores: unknown[] = [], route = '/admin', misses: unknown[] = missed) {
   vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
     const url = String(input);
     if (url.includes('inbox=true')) return Promise.resolve(json([occurrence]));
@@ -186,7 +198,7 @@ function renderInbox(chores: unknown[] = [], route = '/admin') {
           },
         ]),
       );
-    if (url.includes('status=missed')) return Promise.resolve(json([missed]));
+    if (url.includes('status=missed')) return Promise.resolve(json(misses));
     if (url.includes('status=pending')) return Promise.resolve(json(pending));
     if (url.includes('/penalties'))
       return Promise.resolve(json({ id: 'l1', amount_cents: -500, kind: 'penalty' }));
@@ -198,6 +210,8 @@ function renderInbox(chores: unknown[] = [], route = '/admin') {
           { id: 'c1', title: 'Empty the sink' },
           { id: 'c2', title: 'Sweep the porch' },
           { id: 'c3', title: 'Water the plants' },
+          { id: 'c4', title: 'Fold laundry' },
+          { id: 'c5', title: 'Rake leaves' },
           ...chores,
         ]),
       );
@@ -209,7 +223,7 @@ function renderInbox(chores: unknown[] = [], route = '/admin') {
         ]),
       );
     if (url.endsWith('/occurrences/o1')) return Promise.resolve(json(occurrence));
-    if (url.endsWith('/occurrences/o2')) return Promise.resolve(json(missed));
+    if (url.endsWith('/occurrences/o2')) return Promise.resolve(json(missed[0]));
     if (url.includes('/disputes')) return Promise.resolve(json([dispute]));
     if (url.includes('/submissions')) return Promise.resolve(json([submission]));
     if (url.includes('/verifications')) return Promise.resolve(json([verification]));
@@ -475,7 +489,7 @@ describe('admin Inbox', () => {
 
   it('lists misses the parent has not settled yet, and opens one for a decision', async () => {
     const row = await screen.findByText('Sweep the porch');
-    expect(await screen.findByText('Missed (1)')).toBeInTheDocument();
+    expect(await screen.findByText('Missed (2)')).toBeInTheDocument();
     expect(row.parentElement!.parentElement!.textContent).toContain('Mo');
 
     row.click();
@@ -484,6 +498,37 @@ describe('admin Inbox', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /^excuse$/i })).toBeInTheDocument(),
     );
+  });
+
+  it('keeps one missed row per chore and kid, and says how many it stands for', async () => {
+    const row = await screen.findByText('Sweep the porch');
+
+    // Mo missed it twice; the older one folds into the newer rather than repeating.
+    expect(screen.getAllByText('Sweep the porch')).toHaveLength(1);
+    expect(row.parentElement!.parentElement!.textContent).toContain('1 more like this');
+    // Ana's miss of another chore is its own row, and stands alone.
+    const ana = screen.getByText('Fold laundry');
+    expect(ana.parentElement!.parentElement!.textContent).toContain('Ana');
+    expect(ana.parentElement!.parentElement!.textContent).not.toContain('more like this');
+  });
+
+  it('leaves misses older than a week to History, and links there for the rest', async () => {
+    await screen.findByText('Sweep the porch');
+
+    expect(screen.queryByText('Rake leaves')).not.toBeInTheDocument();
+    const link = screen.getByRole('link', { name: '2 more in History' });
+    expect(link).toHaveAttribute('href', '/admin/history?status=missed');
+  });
+
+  it('caps the missed list however many are outstanding', async () => {
+    cleanup();
+    vi.restoreAllMocks();
+    // Eight distinct chores, all missed today — nothing for the window or the dedupe to drop.
+    const many = Array.from({ length: 8 }, (_, i) => miss({ id: `m${i}`, chore_id: `c1${i}` }));
+    renderInbox([], '/admin', many);
+
+    expect(await screen.findByText('Missed (5)')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '3 more in History' })).toBeInTheDocument();
   });
 
   it('shows only the next turn of each chore and kid under Coming up, and leaves it inert', async () => {

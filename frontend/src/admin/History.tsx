@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAdminChores, useChildren, useHistory } from './api';
 import type { HistoryQuery } from './api';
 import { ReviewDetail } from './ReviewDetail';
@@ -24,9 +25,13 @@ function daysAgo(n: number): string {
 export function History() {
   const kids = useChildren();
   const chores = useAdminChores();
+  // The inbox links here for the misses it left out (?status=missed). Seeding the initial
+  // chips is all it does — the filters stay local state, and nothing writes back to the URL.
+  const [params] = useSearchParams();
+  const asked = params.getAll('status').filter((s) => (DECIDED as readonly string[]).includes(s));
   const [child, setChild] = useState('');
   const [chore, setChore] = useState('');
-  const [statuses, setStatuses] = useState<string[]>([...DECIDED]);
+  const [statuses, setStatuses] = useState<string[]>(asked.length ? asked : [...DECIDED]);
   const [from, setFrom] = useState(daysAgo(30));
   const [to, setTo] = useState('');
   const [pages, setPages] = useState(1);
