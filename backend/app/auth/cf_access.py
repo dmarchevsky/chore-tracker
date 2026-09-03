@@ -123,6 +123,14 @@ class CfAccessMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         token = request.headers.get(_HEADER)
         if not token:
+            # The line that separates "reached us without an assertion" from "never reached
+            # us at all" — the two look identical from the app, and only one of them is
+            # Cloudflare's problem. INFO: any unauthenticated request lands here, though
+            # behind Access essentially none get this far.
+            log.info(
+                "request carried no Cloudflare Access assertion",
+                extra={"event": "cf_access.missing", "path": request.url.path},
+            )
             return JSONResponse(
                 {"detail": "Cloudflare Access authentication required"}, status_code=403
             )

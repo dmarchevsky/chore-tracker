@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from tests.helpers import sign_in
 
@@ -42,6 +44,44 @@ async def test_an_unknown_google_account_is_named_in_the_error(client, admin_use
     # Naming the address is the point: the parent's next move is to paste this exact
     # string into Kids, and a generic "access denied" hides which account the phone used.
     assert "stranger@example.com" in r.json()["detail"]
+
+
+async def test_the_address_turned_away_is_logged_not_only_returned(client, caplog, admin_user):
+    """A failed sign-in has to leave a trace with the address on it.
+
+    The phone that fails is in another room, and until this line existed the only record was
+    an access-log 403 naming no account — so "why can't my kid sign in" could not be answered
+    from the logs at all.
+    """
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="chorekeeper.api"):
+        r = await sign_in(client, "stranger@example.com")
+    assert r.status_code == 403
+    (rec,) = [x for x in caplog.records if getattr(x, "event", "") == "auth.not_a_member"]
+    assert rec.email == "stranger@example.com"
+    assert rec.inactive is False
+
+
+async def test_a_deactivated_member_is_logged_as_one(client, caplog, db_session, child_user):
+    """Deactivated and never-heard-of answer the same 403 on purpose, but they are different
+    problems for the parent, so the log has to tell them apart."""
+    child_user.is_active = False
+    await db_session.commit()
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="chorekeeper.api"):
+        assert (await sign_in(client, "alice@example.com")).status_code == 403
+    (rec,) = [x for x in caplog.records if getattr(x, "event", "") == "auth.not_a_member"]
+    assert rec.inactive is True
+
+
+async def test_a_probe_with_no_identity_says_which_door_it_came_through(client, caplog, admin_user):
+    """Behind Access a 401 here should be unreachable, so if one shows up the door it arrived
+    on is the whole diagnosis."""
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="chorekeeper.api"):
+        assert (await client.get("/api/v1/auth/me")).status_code == 401
+    (rec,) = [x for x in caplog.records if getattr(x, "event", "") == "auth.no_identity"]
+    assert rec.lan_door is False
 
 
 async def test_a_deactivated_member_cannot_sign_in(client, db_session, child_user):

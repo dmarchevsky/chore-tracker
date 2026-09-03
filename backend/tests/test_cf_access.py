@@ -88,6 +88,20 @@ async def test_missing_assertion_is_403(client):
     assert r.status_code == 403
 
 
+async def test_a_request_with_no_assertion_is_logged(client, caplog):
+    """Distinguishes "reached us without an assertion" from "never reached us at all" — the
+    two are indistinguishable from inside the app, and only one of them is Cloudflare's."""
+    import logging
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="chorekeeper.api"):
+        async with client as c:
+            r = await c.get("/api/v1/admin/ping")
+    assert r.status_code == 403
+    (rec,) = [x for x in caplog.records if getattr(x, "event", "") == "cf_access.missing"]
+    assert rec.path == "/api/v1/admin/ping"
+
+
 async def test_wrong_audience_is_403(client):
     async with client as c:
         r = await c.get(

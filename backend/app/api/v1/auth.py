@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -24,6 +25,10 @@ from app.schemas.auth import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# Same logger as the Access middleware: a sign-in that fails is one story whichever half
+# of it turned the person away, and an operator should only have to grep one name.
+log = logging.getLogger("chorekeeper.api")
 
 
 def _set_session_cookie(
@@ -76,6 +81,19 @@ async def me(request: Request, response: Response, db: DbDep) -> MeResponse:
         await revoke_session(db, sid)
 
     if email is None:
+        # Behind Access this is close to impossible — the middleware 403s a request with no
+        # assertion long before it reaches here — so seeing it in production is itself the
+        # finding: the door is the LAN one, or CF_ACCESS_* is unset and the check is not
+        # installed at all. INFO, because on the dev stack and the LAN door it is simply
+        # what every page load looks like before anyone has signed in.
+        log.info(
+            "sign-in probe carried no Access identity",
+            extra={
+                "event": "auth.no_identity",
+                "lan_door": is_lan_door(request),
+                "client_ip": client_ip(request),
+            },
+        )
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "not authenticated")
 
     user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
@@ -83,6 +101,14 @@ async def me(request: Request, response: Response, db: DbDep) -> MeResponse:
         # Name the address. The parent's next move is to add exactly this string under
         # Kids, and guessing which of a family's Google accounts the phone picked is the
         # kind of dead end that gets an app abandoned.
+        #
+        # Log it too. Somebody was actually turned away here, and without a line for it the
+        # only evidence a failed sign-in leaves behind is an access-log 403 with no address
+        # on it — which is no help at all when the phone is in another room.
+        log.warning(
+            "turned away a Google account that is not a member",
+            extra={"event": "auth.not_a_member", "email": email, "inactive": user is not None},
+        )
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             f"{email} is signed in to Google but is not an active member of this household",
