@@ -2,79 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
-/* The palette is one indirection deep so day and night share every utility class in the
+/* The palette is one indirection deep so night and day share every utility class in the
    app: `text-slate-400` stays `text-slate-400` in the JSX and resolves to a light-on-dark
    or dark-on-light value here. Channels, not hex, so Tailwind's opacity modifiers
    (`bg-slate-950/95`) still compose.
+
+   Night is the bare `:root` and holds Tailwind's own values, so a document nothing has
+   stamped yet — first paint, before the bundle runs — already looks like the app always
+   has. It also has to be this way round: the proxy's CSP is `script-src 'self'`
+   (frontend/Caddyfile), so no inline script can stamp the theme before paint, and
+   src/main.tsx applies it as the bundle boots instead.
 
    Day reads the slate ramp from the other end — 950 is the page, 900 the cards, 400 the
    muted text — and pulls each accent two or three stops darker so it survives on white.
    Faces that already carry white text (bg-sky-500, bg-rose-600) are the same in both. */
 :root {
-  color-scheme: light;
-  /* slate */
-  --slate-50: 2 6 23;
-  --slate-100: 15 23 42;
-  --slate-200: 30 41 59;
-  --slate-300: 51 65 85;
-  --slate-400: 71 85 105;
-  --slate-500: 100 116 139;
-  --slate-600: 100 116 139;
-  --slate-700: 203 213 225;
-  --slate-800: 226 232 240;
-  --slate-900: 255 255 255;
-  --slate-950: 248 250 252;
-  /* sky */
-  --sky-50: 240 249 255;
-  --sky-100: 224 242 254;
-  --sky-200: 186 230 253;
-  --sky-300: 3 105 161;
-  --sky-400: 2 132 199;
-  --sky-500: 14 165 233;
-  --sky-600: 2 132 199;
-  --sky-700: 14 165 233;
-  --sky-800: 7 89 133;
-  --sky-900: 125 211 252;
-  --sky-950: 186 230 253;
-  /* emerald */
-  --emerald-50: 236 253 245;
-  --emerald-100: 209 250 229;
-  --emerald-200: 167 243 208;
-  --emerald-300: 4 120 87;
-  --emerald-400: 5 150 105;
-  --emerald-500: 16 185 129;
-  --emerald-600: 5 150 105;
-  --emerald-700: 4 120 87;
-  --emerald-800: 6 95 70;
-  --emerald-900: 167 243 208;
-  --emerald-950: 209 250 229;
-  /* rose */
-  --rose-50: 255 241 242;
-  --rose-100: 255 228 230;
-  --rose-200: 159 18 57;
-  --rose-300: 190 18 60;
-  --rose-400: 225 29 72;
-  --rose-500: 244 63 94;
-  --rose-600: 225 29 72;
-  --rose-700: 190 18 60;
-  --rose-800: 253 164 175;
-  --rose-900: 254 205 211;
-  --rose-950: 255 241 242;
-  /* amber */
-  --amber-50: 255 251 235;
-  --amber-100: 254 243 199;
-  --amber-200: 253 230 138;
-  --amber-300: 180 83 9;
-  --amber-400: 217 119 6;
-  --amber-500: 245 158 11;
-  --amber-600: 217 119 6;
-  --amber-700: 180 83 9;
-  --amber-800: 146 64 14;
-  --amber-900: 253 230 138;
-  --amber-950: 254 243 199;
-}
-
-html[data-theme='dark'] {
   color-scheme: dark;
   /* slate */
   --slate-50: 248 250 252;
@@ -136,6 +78,70 @@ html[data-theme='dark'] {
   --amber-800: 146 64 14;
   --amber-900: 120 53 15;
   --amber-950: 69 26 3;
+}
+
+html[data-theme='light'] {
+  color-scheme: light;
+  /* slate */
+  --slate-50: 2 6 23;
+  --slate-100: 15 23 42;
+  --slate-200: 30 41 59;
+  --slate-300: 51 65 85;
+  --slate-400: 71 85 105;
+  --slate-500: 100 116 139;
+  --slate-600: 100 116 139;
+  --slate-700: 203 213 225;
+  --slate-800: 226 232 240;
+  --slate-900: 255 255 255;
+  --slate-950: 248 250 252;
+  /* sky */
+  --sky-50: 240 249 255;
+  --sky-100: 224 242 254;
+  --sky-200: 186 230 253;
+  --sky-300: 3 105 161;
+  --sky-400: 2 132 199;
+  --sky-500: 14 165 233;
+  --sky-600: 2 132 199;
+  --sky-700: 14 165 233;
+  --sky-800: 7 89 133;
+  --sky-900: 125 211 252;
+  --sky-950: 186 230 253;
+  /* emerald */
+  --emerald-50: 236 253 245;
+  --emerald-100: 209 250 229;
+  --emerald-200: 167 243 208;
+  --emerald-300: 4 120 87;
+  --emerald-400: 5 150 105;
+  --emerald-500: 16 185 129;
+  --emerald-600: 5 150 105;
+  --emerald-700: 4 120 87;
+  --emerald-800: 6 95 70;
+  --emerald-900: 167 243 208;
+  --emerald-950: 209 250 229;
+  /* rose */
+  --rose-50: 255 241 242;
+  --rose-100: 255 228 230;
+  --rose-200: 159 18 57;
+  --rose-300: 190 18 60;
+  --rose-400: 225 29 72;
+  --rose-500: 244 63 94;
+  --rose-600: 225 29 72;
+  --rose-700: 190 18 60;
+  --rose-800: 253 164 175;
+  --rose-900: 254 205 211;
+  --rose-950: 255 241 242;
+  /* amber */
+  --amber-50: 255 251 235;
+  --amber-100: 254 243 199;
+  --amber-200: 253 230 138;
+  --amber-300: 180 83 9;
+  --amber-400: 217 119 6;
+  --amber-500: 245 158 11;
+  --amber-600: 217 119 6;
+  --amber-700: 180 83 9;
+  --amber-800: 146 64 14;
+  --amber-900: 253 230 138;
+  --amber-950: 254 243 199;
 }
 
 html,

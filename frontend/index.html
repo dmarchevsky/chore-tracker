@@ -8,24 +8,6 @@
     />
     <meta name="theme-color" content="#0f172a" />
     <title>ChoreKeeper</title>
-    <script>
-      // Before first paint, so a day-mode device never flashes the night palette (and the
-      // other way round) while the bundle loads. Kept in sync with src/shared/theme.ts.
-      (function () {
-        var t;
-        try {
-          t = localStorage.getItem('chorekeeper.theme');
-        } catch (e) {
-          t = null;
-        }
-        if (t !== 'light' && t !== 'dark')
-          t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        document.documentElement.dataset.theme = t;
-        document
-          .querySelector('meta[name="theme-color"]')
-          .setAttribute('content', t === 'dark' ? '#0f172a' : '#f8fafc');
-      })();
-    </script>
   </head>
   <body>
     <div id="root"></div>
