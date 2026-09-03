@@ -84,11 +84,6 @@ export const CADENCE_EXAMPLES = [
   'monthly(day=15)',
 ];
 
-// window_open_offset_s is a negative offset from the due time (backend bounds: 0 to
-// -14 days). The form takes hours, but keeps the raw seconds so an offset that isn't a
-// whole number of hours round-trips untouched when nobody edits the field.
-export const HOURS_BEFORE = (secs: number) => Math.round((-secs / 3600) * 100) / 100;
-
 // The cadence/window humanisers moved to shared/schedule.ts once the kid's rules screen
 // needed them too; re-exported here so the form sections keep one import.
 export { opensAt, onceDate } from '../../shared/schedule';

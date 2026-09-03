@@ -92,3 +92,33 @@ export function opensAt(dueTime: string, offsetSecs: number): string {
   if (days === 1) return `opens ${clock} the day before`;
   return `opens ${clock}, ${days} days before`;
 }
+
+// ---- Durations -------------------------------------------------------------------------
+//
+// The window offset and the grace period are both stored as whole seconds, and both used to
+// have a bare number box in one fixed unit — "0.25" for a quarter of an hour, "45" for
+// three quarters of one, in two different fields. `2h30m` is what a parent actually means.
+
+const DURATION_RE = /^(?:(\d+(?:\.\d+)?)h)?(?:(\d+(?:\.\d+)?)m)?$/;
+
+/** Whole seconds as the shortest exact spelling parseDuration accepts: 12h, 2h30m, 15m. */
+export function formatDuration(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.round((total % 3600) / 60);
+  if (!h) return `${m}m`;
+  return m ? `${h}h${m}m` : `${h}h`;
+}
+
+/** Seconds from `2h30m`, `2h 30m`, `2.5h`, `90m`, or a bare number read as hours (which is
+ *  what the field used to take). Null for anything else, so a half-typed value can sit in
+ *  the box without writing nonsense into the form. */
+export function parseDuration(text: string): number | null {
+  const t = text.trim().toLowerCase().replace(/\s+/g, '');
+  if (!t) return null;
+  if (/^\d+(\.\d+)?$/.test(t)) return Math.round(parseFloat(t) * 3600);
+
+  const m = DURATION_RE.exec(t);
+  if (!m || (!m[1] && !m[2])) return null;
+  return Math.round((parseFloat(m[1] ?? '0') * 60 + parseFloat(m[2] ?? '0')) * 60);
+}

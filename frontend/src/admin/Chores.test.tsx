@@ -127,25 +127,27 @@ describe('admin Chores', () => {
     expect((patch.body as Record<string, unknown>).fixed_assignee_id).toBe('k1');
   });
 
-  it('edits the open time in hours before due and PATCHes the offset', async () => {
+  it('edits the open window in hours and minutes and PATCHes the offset', async () => {
     const calls = setup();
     await waitFor(() => expect(screen.getByText('Empty the sink')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Empty the sink'));
     await screen.findByDisplayValue('Empty the sink');
 
     // -43200s is the stored default: 12 hours before an 08:00 due time.
-    const opens = screen.getByDisplayValue('12') as HTMLInputElement;
-    expect(screen.getByText(/^opens .* the day before/i)).toBeInTheDocument();
+    const opens = screen.getByDisplayValue('12h') as HTMLInputElement;
+    expect(screen.getByText(/opens .* the day before/i)).toBeInTheDocument();
 
-    fireEvent.change(opens, { target: { value: '2' } });
-    expect(screen.getByText(/^opens .*, the same day/i)).toBeInTheDocument();
+    // The field used to be a bare hours box, so two and a half hours could only be typed
+    // as "2.5"; the column still stores whole seconds, negative from the due time.
+    fireEvent.change(opens, { target: { value: '2h30m' } });
+    expect(screen.getByText(/opens .*, the same day/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
     expect(
       (calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>)
         .window_open_offset_s,
-    ).toBe(-7200);
+    ).toBe(-9000);
   });
 
   it('leaves an untouched open time exactly as stored', async () => {
@@ -546,7 +548,7 @@ describe('admin Chores', () => {
     const calls = setup();
 
     fireEvent.click(await screen.findByText('Empty the sink'));
-    fireEvent.change(screen.getByLabelText(/^Grace period/), { target: { value: '45' } });
+    fireEvent.change(screen.getByLabelText(/^Grace period/), { target: { value: '45m' } });
     fireEvent.change(screen.getByLabelText(/^End date/), { target: { value: '2030-12-31' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 

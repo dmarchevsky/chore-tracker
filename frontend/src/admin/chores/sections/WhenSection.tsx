@@ -1,5 +1,6 @@
+import { DurationInput } from '../../../shared/DurationInput';
 import { Field } from '../../../shared/ui';
-import { CADENCE_EXAMPLES, HOURS_BEFORE, ONCE_TODAY, onceDate, opensAt } from '../choreFields';
+import { CADENCE_EXAMPLES, ONCE_TODAY, onceDate, opensAt } from '../choreFields';
 import type { ChoreFormApi } from '../useChoreForm';
 
 export function WhenSection({ f }: { f: ChoreFormApi }) {
@@ -87,21 +88,18 @@ export function WhenSection({ f }: { f: ChoreFormApi }) {
           onChange={(e) => f.set('due_time', `${e.target.value}:00`)}
         />
       </Field>
-      <Field label="Opens (hours before it’s due)">
-        <input
-          className="inp"
-          type="number"
-          step="0.25"
-          min="0"
-          max="336"
-          value={HOURS_BEFORE(Number(form.window_open_offset_s))}
-          onChange={(e) =>
-            f.set('window_open_offset_s', -Math.round(parseFloat(e.target.value || '0') * 3600))
-          }
+      <Field label="Opens (before it’s due)">
+        {/* Stored as a negative offset from the due time; the box only ever sees how long
+            before, which is how a parent says it. */}
+        <DurationInput
+          value={-Number(form.window_open_offset_s)}
+          onChange={(secs) => f.set('window_open_offset_s', -secs)}
+          max={14 * 24 * 3600}
         />
         <p className="mt-1 text-xs text-slate-500">
-          {opensAt(String(form.due_time), Number(form.window_open_offset_s))} — a kid can’t submit
-          before that.
+          e.g. <code>2h30m</code>, <code>90m</code>, <code>12h</code> —{' '}
+          {opensAt(String(form.due_time), Number(form.window_open_offset_s))}, and a kid can’t
+          submit before that.
         </p>
       </Field>
       <Field label={`Start date${f.editing ? ' (fixed)' : ''}`}>
@@ -119,19 +117,15 @@ export function WhenSection({ f }: { f: ChoreFormApi }) {
       <details className="rounded-xl border border-slate-800 p-3">
         <summary className="cursor-pointer text-sm text-slate-400">Advanced</summary>
         <div className="mt-2 flex flex-col gap-2">
-          <Field label="Grace period (minutes)">
-            <input
-              className="inp"
-              type="number"
-              min="0"
-              max="1440"
-              value={Math.round(Number(form.grace_period_s ?? 0) / 60)}
-              onChange={(e) =>
-                f.set('grace_period_s', Math.round(parseFloat(e.target.value || '0') * 60))
-              }
+          <Field label="Grace period">
+            <DurationInput
+              value={Number(form.grace_period_s ?? 0)}
+              onChange={(secs) => f.set('grace_period_s', secs)}
+              max={24 * 3600}
             />
             <p className="mt-1 text-xs text-slate-500">
-              How late still counts. After this it is marked missed.
+              How late still counts — <code>15m</code>, <code>1h30m</code>. After this it is marked
+              missed.
             </p>
           </Field>
           {once === null && (

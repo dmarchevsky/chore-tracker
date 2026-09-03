@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { formatCadence, formatClock, onceDate, opensAt } from './schedule';
+import {
+  formatCadence,
+  formatClock,
+  formatDuration,
+  onceDate,
+  opensAt,
+  parseDuration,
+} from './schedule';
 
 describe('formatCadence', () => {
   it.each([
@@ -70,5 +77,35 @@ describe('opensAt', () => {
     expect(opensAt('08:00:00', -2 * 3600)).toMatch(/the same day$/);
     expect(opensAt('08:00:00', -12 * 3600)).toMatch(/the day before$/);
     expect(opensAt('08:00:00', -3 * 24 * 3600)).toMatch(/3 days before$/);
+  });
+});
+
+describe('durations', () => {
+  it.each([
+    [0, '0m'],
+    [900, '15m'],
+    [3600, '1h'],
+    [9000, '2h30m'],
+    [12 * 3600, '12h'],
+    [36 * 3600, '36h'],
+    [14 * 24 * 3600, '336h'],
+  ])('formats %d seconds as %s, and reads it back', (secs, text) => {
+    expect(formatDuration(secs)).toBe(text);
+    expect(parseDuration(text)).toBe(secs);
+  });
+
+  it.each([
+    ['2h 30m', 9000],
+    ['2H30M', 9000],
+    ['2.5h', 9000],
+    ['90m', 5400],
+    ['0.25', 900], // a bare number is hours — what the old number box took
+    ['3', 3 * 3600],
+  ])('parses %s', (text, secs) => {
+    expect(parseDuration(text)).toBe(secs);
+  });
+
+  it.each(['', '  ', 'later', '2h30', 'h', '30x', '-1h'])('rejects %o', (text) => {
+    expect(parseDuration(text)).toBeNull();
   });
 });
