@@ -10,22 +10,31 @@ export default defineConfig({
       registerType: 'autoUpdate',
       injectRegister: 'auto',
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-        // NO navigateFallback, deliberately. It served every navigation from the precached
-        // shell, which means Cloudflare Access never saw a navigation — and Access can only
-        // re-authenticate on a top-level navigation. Once the edge session ended, the app
-        // kept loading from cache, every API call got a cross-origin redirect that `fetch`
-        // cannot follow, and the user was locked out with no way to sign in again.
+        // No navigation may EVER be answered from cache. A top-level navigation is the
+        // only thing that can complete a Cloudflare Access round-trip, so a cached one
+        // locks the visitor out for good: the edge never sees them, every API call comes
+        // back as the Access login page, and the reload that is supposed to fix it is
+        // served from cache too — a refresh loop that cannot end.
         //
-        // Behind Access an offline shell buys almost nothing anyway: every screen needs an
-        // API call, and those need both the network and a live edge session. What spec §11
-        // actually requires — capturing and queueing a submission when the network drops
-        // mid-use — happens in IndexedDB in an already-open tab and is unaffected.
-        // Assets stay precached, so loads are still fast.
-        //
+        // Two settings, because dropping `html` from the glob is not on its own enough:
+        // `directoryIndex` defaults to 'index.html' and resolves a request for "/" onto a
+        // precached shell anyway. Removing navigateFallback missed exactly that — "/",
+        // which is the URL a bookmark or a shared link uses. (workbox's `cleanURLs`, which
+        // would try "/me.html", is not a generateSW option; it is harmless here because
+        // once no HTML is precached there is nothing for it to find.)
+        globPatterns: ['**/*.{js,css,svg,png,woff2}'],
+        directoryIndex: null,
         // Must be set explicitly: vite-plugin-pwa defaults it to 'index.html', so simply
         // omitting the option leaves the navigation route in place.
         navigateFallback: undefined,
+        //
+        // The cost, stated plainly: with no network the app does not load. It already did
+        // not — the manifest's start_url is /me, which was never precached, so only the
+        // bare domain ever opened offline. Behind Access an offline shell buys nothing
+        // regardless, since every screen needs an API call and a live edge session. What
+        // spec §11 actually requires — queueing a submission when the network drops
+        // mid-use — is IndexedDB in an already-open tab and is untouched. Assets stay
+        // precached, so loads are still fast.
       },
       manifest: {
         name: 'ChoreKeeper',

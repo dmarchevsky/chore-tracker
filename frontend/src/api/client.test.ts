@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, api, getPage } from './client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError, NetworkError, api, getPage } from './client';
 
 function res(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -77,5 +77,81 @@ describe('api error detail', () => {
     stub(res(200, [{ id: 'o1' }]));
 
     await expect(getPage('/occurrences')).resolves.toEqual({ items: [{ id: 'o1' }], total: 7 });
+  });
+});
+
+/** What the edge answers with when it, rather than our API, handles the request: the
+ *  Cloudflare Access login page, or a Cloudflare error page while the origin is down. */
+function html(status: number) {
+  return new Response('<!doctype html><title>Just a moment…</title>', {
+    status,
+    headers: { 'content-type': 'text/html; charset=UTF-8' },
+  });
+}
+
+describe('an HTML answer from the edge', () => {
+  const reload = vi.fn();
+
+  beforeEach(() => {
+    reload.mockClear();
+    sessionStorage.clear();
+    vi.stubGlobal('location', { reload });
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('navigates once, because only a navigation can finish an Access sign-in', async () => {
+    stub(html(200));
+
+    await expect(api.get('/auth/me')).rejects.toBeInstanceOf(NetworkError);
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it('does not navigate again, however long the HTML keeps coming', async () => {
+    // The regression test for a refresh loop with no exit: the trigger is the content type
+    // alone, and a Cloudflare error page while the origin is down is HTML that will not
+    // stop arriving. Reloading on each one spins the tab forever.
+    stub(html(530));
+
+    await expect(api.get('/auth/me')).rejects.toBeInstanceOf(NetworkError);
+    await expect(api.get('/auth/me')).rejects.toBeInstanceOf(NetworkError);
+    await expect(api.get('/auth/me')).rejects.toBeInstanceOf(NetworkError);
+
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it('gets its one reload back once the API answers properly again', async () => {
+    // The guard is for a loop, not a lifetime ban: an Access session that expires later in
+    // the same tab still deserves the navigation that signs the visitor back in.
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(html(200))
+      .mockResolvedValueOnce(res(200, { id: 'u1' }))
+      .mockResolvedValueOnce(html(200));
+
+    await expect(api.get('/auth/me')).rejects.toBeInstanceOf(NetworkError);
+    expect(reload).toHaveBeenCalledOnce();
+
+    await api.get('/auth/me');
+
+    await expect(api.get('/auth/me')).rejects.toBeInstanceOf(NetworkError);
+    expect(reload).toHaveBeenCalledTimes(2);
+  });
+
+  it('still reloads exactly once when the mark cannot be stored', async () => {
+    // A private window, or a browser set to block site data. Losing the guard is bad; a
+    // throw from inside the fetch path would be worse.
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('denied');
+    });
+    stub(html(200));
+
+    await expect(api.get('/auth/me')).rejects.toBeInstanceOf(NetworkError);
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it('applies to paged lists too', async () => {
+    stub(html(200));
+    await expect(getPage('/occurrences')).rejects.toBeInstanceOf(NetworkError);
+    expect(reload).toHaveBeenCalledOnce();
   });
 });

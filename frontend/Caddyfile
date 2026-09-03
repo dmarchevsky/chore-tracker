@@ -64,6 +64,13 @@
 		@assets path /assets/*
 		header @assets Cache-Control "public, max-age=31536000, immutable"
 
+		# Everything else is the shell, and it went out with no Cache-Control at all — which
+		# leaves browsers and Cloudflare free to cache it heuristically and pin a client to
+		# an old index.html whose hashed assets have since been evicted. `no-cache` means
+		# revalidate, not refetch: the ETag still saves the bytes when nothing has changed.
+		@shell not path /assets/* /sw.js /registerSW.js
+		header @shell Cache-Control "no-cache"
+
 		try_files {path} /index.html
 		file_server
 	}
