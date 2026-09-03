@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Login } from './Login';
 import { useAuth } from '../auth/AuthContext';
+import { resetApp } from '../pwa/reset';
 import type { DevUser } from '../api/types';
 
 vi.mock('../auth/AuthContext', () => ({ useAuth: vi.fn() }));
+vi.mock('../pwa/reset', () => ({ resetApp: vi.fn() }));
 
 const NOT_A_MEMBER = 'stranger@example.com is signed in to Google but is not an active member';
 
@@ -12,6 +14,7 @@ function setup(
   error: string | null,
   canSwitchAccount = error !== null,
   devUsers: DevUser[] | null = null,
+  unreachable = false,
 ) {
   const logout = vi.fn();
   const refresh = vi.fn();
@@ -21,6 +24,7 @@ function setup(
     loading: false,
     error,
     canSwitchAccount,
+    unreachable,
     devUsers,
     breakGlassLogin: vi.fn(),
     devLogin,
@@ -72,6 +76,37 @@ describe('Login', () => {
     expect(screen.queryByRole('button', { name: /different google account/i })).toBeNull();
   });
 
+  it('navigates instead of retrying when the app was unreachable', () => {
+    // A retry runs the same `fetch` that just failed, and a `fetch` cannot complete an
+    // Access round trip — the edge answers with a cross-origin redirect to Google. Only a
+    // top-level navigation can, so the button has to be one.
+    const reload = vi.fn();
+    vi.stubGlobal('location', { reload });
+    const { refresh } = setup('Could not reach ChoreKeeper.', false, null, true);
+
+    fireEvent.click(screen.getByRole('button', { name: /try again/i }));
+
+    expect(reload).toHaveBeenCalledOnce();
+    expect(refresh).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('resets the device only once the warning is accepted', () => {
+    // The escape hatch for a device stuck on a bad cached copy. It lives here rather than
+    // in Settings because a stuck device cannot get far enough to sign in.
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    setup(null);
+
+    fireEvent.click(screen.getByRole('button', { name: /app stuck/i }));
+    expect(resetApp).not.toHaveBeenCalled();
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: /app stuck/i }));
+    expect(resetApp).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+  });
+
   it('reveals the break-glass form on demand', () => {
     setup(null);
     fireEvent.click(screen.getByRole('button', { name: /break-glass/i }));
@@ -84,12 +119,14 @@ describe('Login', () => {
     await waitFor(() => expect(devLogin).toHaveBeenCalledWith('u-2'));
   });
 
-  it('offers nothing but the picker on the dev stack', () => {
+  it('offers nothing but the picker and the reset on the dev stack', () => {
     // Neither Access nor break-glass exists there, so both would be dead ends: the
-    // break-glass route 404s under DEV_AUTH and there is no edge session to retry.
+    // break-glass route 404s under DEV_AUTH and there is no edge session to retry. The
+    // reset stays, because a wedged cache is a wedged cache on any stack.
     setup(null, false, DEV_USERS);
     expect(screen.queryByRole('button', { name: /break-glass/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /try again/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /app stuck/i })).toBeInTheDocument();
   });
 
   it('falls back to the Access page when the picker is empty', () => {

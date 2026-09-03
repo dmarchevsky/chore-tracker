@@ -12,6 +12,10 @@ interface AuthState {
    *  the one case where ending the edge session and picking another account helps. A
    *  network failure also sets `error`, and offering it there would just fail again. */
   canSwitchAccount: boolean;
+  /** The probe never got an HTTP status back. Retrying it as another `fetch` cannot help:
+   *  the usual cause is the edge redirecting to Google, and only a top-level navigation
+   *  can complete that round trip. The Login screen offers one instead of a retry. */
+  unreachable: boolean;
   /** The household, when the dev stack's passwordless sign-in is on; null in every
    *  deployed configuration, where the route does not exist. */
   devUsers: DevUser[] | null;
@@ -35,6 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [canSwitchAccount, setCanSwitch] = useState(false);
+  const [unreachable, setUnreachable] = useState(false);
   const [devUsers, setDevUsers] = useState<DevUser[] | null>(null);
 
   const apply = useCallback((m: Me | null) => {
@@ -49,6 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       apply(await api.get<Me>('/auth/me'));
       setError(null);
       setCanSwitch(false);
+      setUnreachable(false);
     } catch (e) {
       apply(null);
       // 401 is just "not signed in" — silent. A 403 means Access vouched for an address
@@ -58,6 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // served the shell offline and every call died on a cross-origin redirect.
       const notAMember = e instanceof ApiError && e.status === 403;
       setCanSwitch(notAMember);
+      setUnreachable(e instanceof NetworkError);
       if (e instanceof NetworkError) {
         setError('Could not reach ChoreKeeper. Check your connection, then try again.');
       } else {
@@ -82,6 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       apply(await api.post<Me>('/auth/login', { username, password }));
       setError(null);
       setCanSwitch(false);
+      setUnreachable(false);
     },
     [apply],
   );
@@ -91,6 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       apply(await api.post<Me>('/auth/dev/login', { user_id: userId }));
       setError(null);
       setCanSwitch(false);
+      setUnreachable(false);
     },
     [apply],
   );
@@ -114,13 +123,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       error,
       canSwitchAccount,
+      unreachable,
       devUsers,
       breakGlassLogin,
       devLogin,
       logout,
       refresh: probe,
     }),
-    [me, loading, error, canSwitchAccount, devUsers, breakGlassLogin, devLogin, logout, probe],
+    [
+      me,
+      loading,
+      error,
+      canSwitchAccount,
+      unreachable,
+      devUsers,
+      breakGlassLogin,
+      devLogin,
+      logout,
+      probe,
+    ],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

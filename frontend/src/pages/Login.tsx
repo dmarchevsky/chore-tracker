@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { ApiError } from '../api/client';
 import type { DevUser } from '../api/types';
+import { resetApp } from '../pwa/reset';
 import { Button, Card } from '../shared/ui';
 
 /** Shown only when the automatic Google sign-in did not land on a household member.
  *  In the normal case Cloudflare Access has already signed the visitor in and the app
  *  goes straight to their screens — nobody sees this page. */
 export function Login() {
-  const { error, canSwitchAccount, devUsers, refresh, logout } = useAuth();
+  const { error, canSwitchAccount, unreachable, devUsers, refresh, logout } = useAuth();
   const [breakGlass, setBreakGlass] = useState(false);
 
   // The dev stack has no Cloudflare and no break-glass, so none of the copy below applies
@@ -32,7 +33,13 @@ export function Login() {
         ) : (
           <p className="text-sm text-slate-400">You are not signed in.</p>
         )}
-        <Button onClick={() => void refresh()}>Try again</Button>
+        {/* A retry that re-runs the probe cannot fix an unreachable server: the usual cause
+            is the edge answering with a cross-origin redirect to Google, and `fetch` can
+            neither follow that nor complete the sign-in. Only a top-level navigation can,
+            so send the browser through one. */}
+        <Button onClick={() => (unreachable ? window.location.reload() : void refresh())}>
+          Try again
+        </Button>
         {/* Only offered when Cloudflare did sign someone in (the 403 above). With no Access
             session there is nothing to switch away from, and the request would just fail. */}
         {canSwitchAccount && (
@@ -61,8 +68,31 @@ export function Login() {
         >
           Use the break-glass password
         </button>
+        <ResetLink />
       </Card>
     </div>
+  );
+}
+
+/** The last resort, and the reason it sits on every signed-out screen rather than in
+ *  Settings: a device stuck on a bad cached copy cannot get far enough to sign in, so
+ *  every other way out of it is buried in the phone's own settings. */
+function ResetLink() {
+  return (
+    <button
+      type="button"
+      className="text-center text-xs text-slate-600 underline"
+      onClick={() => {
+        if (
+          window.confirm(
+            'Clear this device’s copy of the app and reload? Photos you have already taken are kept.',
+          )
+        )
+          void resetApp();
+      }}
+    >
+      App stuck? Reset it
+    </button>
   );
 }
 
@@ -99,6 +129,7 @@ function DevPicker({ users }: { users: DevUser[] }) {
           </Button>
         ))}
         {error && <p className="text-sm text-rose-400">{error}</p>}
+        <ResetLink />
       </Card>
     </div>
   );
