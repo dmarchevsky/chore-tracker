@@ -33,6 +33,9 @@ export default defineConfig({
         start_url: '/me',
         scope: '/',
         display: 'standalone',
+        // Deliberately fixed to the night palette: the manifest is baked at build time and
+        // the splash is a one-time surface, so it cannot follow the per-device choice the
+        // app makes at runtime (src/shared/theme.ts) — dark is the app's own identity.
         background_color: '#0f172a',
         theme_color: '#0f172a',
         icons: [

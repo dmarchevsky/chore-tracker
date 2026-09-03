@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { ThemeToggle } from '../shared/ThemeToggle';
 import { useBodyScrollLock } from '../shared/useBodyScrollLock';
 
 const tabs = [
@@ -87,9 +88,12 @@ export function AdminShell() {
             </button>
             <span className="font-bold md:hidden">ChoreKeeper</span>
           </div>
-          <button className="text-sm text-slate-400 hover:text-slate-200" onClick={logout}>
-            <span className="hidden sm:inline">{me?.display_name} · </span>sign out
-          </button>
+          <div className="flex items-center gap-3">
+            <ThemeToggle />
+            <button className="text-sm text-slate-400 hover:text-slate-200" onClick={logout}>
+              <span className="hidden sm:inline">{me?.display_name} · </span>sign out
+            </button>
+          </div>
         </header>
         <main className="min-w-0 flex-1 p-4">
           <Outlet />

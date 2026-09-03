@@ -5,6 +5,7 @@ import { useBalance } from '../api/hooks';
 import { money } from '../shared/format';
 import { startAutoFlush } from '../pwa/offlineQueue';
 import { pushState, type PushState } from '../pwa/push';
+import { ThemeToggle } from '../shared/ThemeToggle';
 import { StandingBanner } from './StandingBanner';
 
 const tabs = [
@@ -33,12 +34,18 @@ export function MeShell() {
             {balance.data ? money(balance.data.balance_cents) : '—'}
           </p>
         </div>
-        <NavLink to="/me/settings" aria-label="Settings" className="relative p-2 text-slate-400">
-          ⚙️
-          {(push === 'needs-install' || push === 'ready') && (
-            <span aria-hidden className="absolute right-1 top-1 h-2 w-2 rounded-full bg-sky-400" />
-          )}
-        </NavLink>
+        <div className="flex items-center gap-1">
+          <ThemeToggle />
+          <NavLink to="/me/settings" aria-label="Settings" className="relative p-2 text-slate-400">
+            ⚙️
+            {(push === 'needs-install' || push === 'ready') && (
+              <span
+                aria-hidden
+                className="absolute right-1 top-1 h-2 w-2 rounded-full bg-sky-400"
+              />
+            )}
+          </NavLink>
+        </div>
       </header>
 
       <main className="flex-1 px-4 pb-24">
