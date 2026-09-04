@@ -59,6 +59,7 @@ function renderHistory(route = '/admin/history') {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('historyQs', () => {
@@ -85,6 +86,27 @@ describe('admin History', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /^approve$/i })).toBeInTheDocument(),
     );
+  });
+
+  it('opens the item over the list on a phone, where the pane is below the fold', async () => {
+    // jsdom has no matchMedia; a phone has to say so before the component renders.
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+    );
+    renderHistory();
+
+    const rows = () => screen.getAllByText('Kitchen', { selector: 'p' });
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    fireEvent.click(rows()[0].closest('button')!);
+
+    const sheet = await screen.findByRole('dialog', { name: 'History item' });
+    await waitFor(() =>
+      expect(sheet).toContainElement(screen.getByRole('button', { name: /^approve$/i })),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
   it('opens pre-filtered when the inbox links here for the misses it left out', async () => {

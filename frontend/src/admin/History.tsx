@@ -7,6 +7,7 @@ import { Button, Card, Spinner } from '../shared/ui';
 import { StatusBadge } from '../shared/StatusBadge';
 import { ADMIN_STATUS } from '../shared/status';
 import { occurrenceWorth } from '../shared/outcome';
+import { DetailSheet } from '../shared/DetailSheet';
 
 const DECIDED = [
   'approved',
@@ -173,11 +174,13 @@ export function History() {
         )}
       </div>
       <div>
-        {selected ? (
-          <ReviewDetail id={selected} onDone={() => setSelected(null)} />
-        ) : (
-          <p className="text-slate-500">Pick an item to look at it again.</p>
-        )}
+        <DetailSheet open={!!selected} onClose={() => setSelected(null)} label="History item">
+          {selected ? (
+            <ReviewDetail id={selected} onDone={() => setSelected(null)} />
+          ) : (
+            <p className="text-slate-500">Pick an item to look at it again.</p>
+          )}
+        </DetailSheet>
       </div>
     </div>
   );

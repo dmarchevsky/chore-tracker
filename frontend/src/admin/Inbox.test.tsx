@@ -269,7 +269,18 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
+
+/** jsdom has no matchMedia; a phone has to say so before the component renders. */
+function onAPhone() {
+  cleanup();
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+  );
+  renderInbox();
+}
 
 /** Standing, Penalties, Missed and Coming up start collapsed (DEFAULT_OPEN in Inbox.tsx), so
  *  a test that reaches into one opens it first — the way a parent would. */
@@ -291,6 +302,19 @@ describe('admin Inbox', () => {
       expect(screen.getByRole('button', { name: /^approve$/i })).toBeInTheDocument(),
     );
     expect(screen.getByPlaceholderText(/^Reason — your kid will see this$/)).toBeInTheDocument();
+  });
+
+  it('opens the detail over the list on a phone, where the pane is below the fold', async () => {
+    onAPhone();
+    (await queueRow()).click();
+
+    const sheet = await screen.findByRole('dialog', { name: 'Review' });
+    await waitFor(() =>
+      expect(sheet).toContainElement(screen.getByRole('button', { name: /^approve$/i })),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
   it('names the status and the kid instead of printing the raw enum', async () => {

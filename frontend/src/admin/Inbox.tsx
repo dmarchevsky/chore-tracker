@@ -13,6 +13,7 @@ import { occurrenceWorth } from '../shared/outcome';
 import { firstPerKey } from '../shared/occurrences';
 import { tierOutcome } from '../shared/format';
 import { useSectionState } from '../shared/collapsed';
+import { DetailSheet } from '../shared/DetailSheet';
 import type { Occurrence } from '../api/types';
 
 /** The right pane serves two kinds of thing now, so the selection has to say which.
@@ -133,12 +134,12 @@ export function Inbox() {
 
   function select(sel: Selection) {
     setPicked(sel);
-    if (routeId && routeId !== sel.id) nav('/admin');
+    if (routeId && routeId !== sel.id) nav('/admin', { replace: true });
   }
 
   function clearSelection() {
     setPicked(null);
-    if (routeId) nav('/admin');
+    if (routeId) nav('/admin', { replace: true });
   }
 
   if (
@@ -429,15 +430,17 @@ export function Inbox() {
         )}
       </div>
       <div>
-        {selected?.kind === 'standing' ? (
-          <StandingDetail id={selected.id} onDone={clearSelection} />
-        ) : selected?.kind === 'penalty' ? (
-          <PenaltyDetail id={selected.id} onDone={clearSelection} />
-        ) : selected ? (
-          <ReviewDetail id={selected.id} onDone={clearSelection} />
-        ) : (
-          <p className="text-slate-500">Select something to review.</p>
-        )}
+        <DetailSheet open={!!selected} onClose={clearSelection} label="Review">
+          {selected?.kind === 'standing' ? (
+            <StandingDetail id={selected.id} onDone={clearSelection} />
+          ) : selected?.kind === 'penalty' ? (
+            <PenaltyDetail id={selected.id} onDone={clearSelection} />
+          ) : selected ? (
+            <ReviewDetail id={selected.id} onDone={clearSelection} />
+          ) : (
+            <p className="text-slate-500">Select something to review.</p>
+          )}
+        </DetailSheet>
       </div>
     </div>
   );
