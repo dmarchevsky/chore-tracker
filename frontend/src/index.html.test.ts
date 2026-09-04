@@ -15,4 +15,11 @@ describe('index.html', () => {
   it('still loads the bundle', () => {
     expect(html).toMatch(/<script type="module" src="[^"]+"><\/script>/);
   });
+
+  it('declares a favicon and an apple-touch-icon', () => {
+    // Without these the tab falls back to the browser's default glyph, which is what
+    // shipped for the first eight phases — nothing renders wrong, so nothing catches it.
+    expect(html).toMatch(/<link rel="icon"[^>]*href="\/favicon\.svg"/);
+    expect(html).toMatch(/<link rel="apple-touch-icon"[^>]*href="[^"]+"/);
+  });
 });

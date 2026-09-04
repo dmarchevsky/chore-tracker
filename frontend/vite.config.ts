@@ -29,7 +29,7 @@ export default defineConfig({
         // spec §11 actually requires — queueing a submission when the network drops
         // mid-use — is IndexedDB in an already-open tab and is untouched. Assets stay
         // precached, so loads are still fast.
-        globPatterns: ['**/*.{js,css,svg,png,woff2}'],
+        globPatterns: ['**/*.{js,css,svg,png,ico,woff2}'],
       },
       manifest: {
         name: 'ChoreKeeper',
@@ -46,7 +46,14 @@ export default defineConfig({
         icons: [
           { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
-          { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          // Its own file, not the rounded tile: a maskable icon is clipped to whatever
+          // shape the OS picks, so it needs a full-bleed background.
+          {
+            src: '/icon-512-maskable.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
         ],
       },
     }),

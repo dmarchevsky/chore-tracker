@@ -87,6 +87,10 @@ makemigration message:
 vapid-keys:
     cd {{backend}} && uv run python -m app.vapid_keys
 
+# Redraw the app icons into frontend/public (uses the backend's Pillow)
+icons:
+    cd {{backend}} && uv run python ../scripts/icons.py ../frontend/public
+
 # Fill the dev database with a household, chores and backdated occurrences
 seed:
     {{compose}} exec -T api python -m app.seed
