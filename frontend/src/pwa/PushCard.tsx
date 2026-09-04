@@ -31,23 +31,37 @@ export function PushCard({
   const [push, setPush] = useState<PushState | null>(null);
   const [busy, setBusy] = useState(false);
   const [test, setTest] = useState<{ ok: boolean; text: string } | null>(null);
+  const [failure, setFailure] = useState<{ what: string; why: string } | null>(null);
 
   useEffect(() => {
     void pushState().then(setPush);
   }, []);
 
-  async function turnOn() {
+  /** Run a step that talks to the browser's push service or the server, and never leave the
+   *  card stuck. Both of these used to be bare `setPush(await …)`: a rejection skipped the
+   *  `setBusy(false)` underneath it, so the button greyed out and stayed that way until a
+   *  reload, with the error — the only thing that explained anything — lost to an unhandled
+   *  promise. Every failure below is one a real device produces: Safari refusing to register
+   *  with the push service, an expired Access session answering with an HTML login page, a
+   *  malformed VAPID key. */
+  async function run(what: string, step: () => Promise<PushState>) {
     setBusy(true);
-    setPush(await subscribeToPush());
-    setBusy(false);
+    setFailure(null);
+    setTest(null);
+    try {
+      setPush(await step());
+    } catch (e) {
+      const err = e as Error;
+      const why = `${err.name === 'Error' ? '' : err.name + ': '}${err.message}`;
+      setFailure({ what, why });
+      setPush(await pushState().catch(() => null));
+    } finally {
+      setBusy(false);
+    }
   }
 
-  async function turnOff() {
-    setBusy(true);
-    setTest(null);
-    setPush(await unsubscribeFromPush());
-    setBusy(false);
-  }
+  const turnOn = () => run('turn notifications on', subscribeToPush);
+  const turnOff = () => run('turn notifications off', unsubscribeFromPush);
 
   async function runTest() {
     setBusy(true);
@@ -130,6 +144,12 @@ export function PushCard({
             Turn on notifications
           </Button>
         </>
+      )}
+
+      {failure && (
+        <p className="mt-2 text-sm text-rose-400">
+          Couldn’t {failure.what}: {failure.why}
+        </p>
       )}
 
       {/* Outside the state branches on purpose. This is the diagnostic, and the states that

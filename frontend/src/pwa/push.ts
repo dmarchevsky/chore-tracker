@@ -1,11 +1,29 @@
 import { api } from '../api/client';
 import { isStandalone, pushSupported } from './install';
 
+/** Decode the server's VAPID public key into the raw P-256 point pushManager wants.
+ *
+ *  Validated rather than trusted: the key is pasted into an env file by hand, and every way
+ *  of getting it wrong — a trailing newline, standard base64 instead of base64url, a PEM
+ *  block, the private key by mistake — surfaces as `atob` throwing InvalidCharacterError or
+ *  as the push service refusing the subscription much later. Both read as "the button does
+ *  nothing". Fail here instead, naming the key. */
 function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
-  const padding = '='.repeat((4 - (base64.length % 4)) % 4);
-  const raw = atob((base64 + padding).replace(/-/g, '+').replace(/_/g, '/'));
+  const clean = base64.trim();
+  if (!/^[A-Za-z0-9_-]+=*$/.test(clean))
+    throw new Error(
+      'the server’s VAPID public key is not base64url — check VAPID_PUBLIC_KEY for stray characters or line breaks',
+    );
+  const padding = '='.repeat((4 - (clean.length % 4)) % 4);
+  const raw = atob((clean + padding).replace(/-/g, '+').replace(/_/g, '/'));
   const out = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  // An uncompressed P-256 point: 0x04 then two 32-byte coordinates. Anything else is a
+  // different kind of key, and the push service would reject it with a far vaguer error.
+  if (out.length !== 65 || out[0] !== 0x04)
+    throw new Error(
+      `the server’s VAPID public key is ${out.length} bytes, not the expected 65 — regenerate it with \`just vapid-keys\``,
+    );
   return out;
 }
 

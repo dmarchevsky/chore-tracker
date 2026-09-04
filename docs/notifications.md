@@ -119,6 +119,14 @@ click which layer is broken, and its answers map onto the statuses below.
 A subscription the push service reports as gone (404/410) is deleted automatically, so a phone
 that was wiped or reinstalled stops producing failures on its own.
 
+**"Turn on notifications" greys out and stays that way until you reload.** That is a thrown
+error, and the card now prints it in red — *Couldn't turn notifications on: <reason>*. Read
+that line; it is the diagnosis. `AbortError: Registration failed` is the phone's push service
+refusing to register (Safari does this when the app was installed from a different origin than
+the one it is running on). Anything mentioning `VAPID_PUBLIC_KEY` means the key on the server
+is malformed — a stray line break, a PEM block, or the private key pasted by mistake;
+regenerate the pair with `just vapid-keys`.
+
 **"Turn on notifications" seems to do nothing.** The card now says *This ChoreKeeper has no
 notification keys* when that is the reason — step 3 was skipped, or the keys were pasted but
 the api and worker were not restarted. Before that message existed the button silently

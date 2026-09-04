@@ -190,3 +190,36 @@ describe('a server with no notification keys', () => {
     expect(screen.queryByRole('button', { name: /turn on/i })).not.toBeInTheDocument();
   });
 });
+
+describe('when turning notifications on throws', () => {
+  it('shows the error instead of greying the button out forever', async () => {
+    // The failure as reported from a real iPhone against production: press the button,
+    // grant permission, and the button just stays disabled — the rejection skipped the
+    // setBusy(false) under it, so only a page reload brought the button back and nothing
+    // ever said what went wrong. Safari's own words are the whole diagnosis here.
+    vi.mocked(pushState).mockResolvedValue('ready');
+    vi.mocked(subscribeToPush).mockRejectedValue(
+      Object.assign(new Error('Registration failed - push service error'), {
+        name: 'AbortError',
+      }),
+    );
+    show();
+
+    fireEvent.click(await screen.findByRole('button', { name: /turn on notifications/i }));
+
+    expect(await screen.findByText(/AbortError: Registration failed/)).toBeInTheDocument();
+    // and the button is usable again, without a reload
+    expect(screen.getByRole('button', { name: /turn on notifications/i })).toBeEnabled();
+  });
+
+  it('reports a turn-off failure in its own words', async () => {
+    vi.mocked(pushState).mockResolvedValue('subscribed');
+    vi.mocked(unsubscribeFromPush).mockRejectedValue(new Error('could not reach ChoreKeeper'));
+    show();
+
+    fireEvent.click(await screen.findByRole('button', { name: /turn off/i }));
+
+    expect(await screen.findByText(/turn notifications off/)).toBeInTheDocument();
+    expect(screen.getByText(/could not reach ChoreKeeper/)).toBeInTheDocument();
+  });
+});
