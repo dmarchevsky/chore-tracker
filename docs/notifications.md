@@ -119,6 +119,11 @@ click which layer is broken, and its answers map onto the statuses below.
 A subscription the push service reports as gone (404/410) is deleted automatically, so a phone
 that was wiped or reinstalled stops producing failures on its own.
 
+**"Turn on notifications" seems to do nothing.** The card now says *This ChoreKeeper has no
+notification keys* when that is the reason — step 3 was skipped, or the keys were pasted but
+the api and worker were not restarted. Before that message existed the button silently
+returned you to the same screen, which is the same thing this looks like on an old bundle.
+
 **Nothing at all on an iPhone.** Almost always the app was opened from Safari rather than the
 Home Screen icon, or it was "installed" from Chrome, which on iOS cannot. The Reminders card
 says *needs install* in both cases.

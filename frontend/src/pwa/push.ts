@@ -9,7 +9,15 @@ function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
-export type PushState = 'unsupported' | 'needs-install' | 'denied' | 'ready' | 'subscribed';
+export type PushState =
+  | 'unsupported'
+  | 'needs-install'
+  | 'denied'
+  /** The server has no VAPID keys, so there is nothing to subscribe to. Used to be
+   *  indistinguishable from 'ready', which is why turning them on appeared to no-op. */
+  | 'unconfigured'
+  | 'ready'
+  | 'subscribed';
 
 export async function pushState(): Promise<PushState> {
   if (!pushSupported()) return 'unsupported';
@@ -28,7 +36,10 @@ export async function subscribeToPush(): Promise<PushState> {
   if (perm !== 'granted') return 'denied';
 
   const { public_key } = await api.get<{ public_key: string }>('/push/vapid-key');
-  if (!public_key) return 'ready'; // server has no VAPID keys configured
+  // Nothing to subscribe to. This used to return 'ready', which renders as the same
+  // "Turn on notifications" button the person just pressed — the app appeared to do nothing
+  // at all, and the one fact that explains it was known right here and thrown away.
+  if (!public_key) return 'unconfigured';
 
   const reg = await navigator.serviceWorker.ready;
   const sub =

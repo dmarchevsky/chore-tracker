@@ -23,8 +23,9 @@ export function PushCard({
   heading: string;
   pitch: string;
   installReason: string;
-  /** Show the "Send a test" button. A push that silently never arrives is the failure this
-   *  catches, and the parent is the one who has to diagnose it for the whole household. */
+  /** Show the "Send a test notification" button. A push that silently never arrives is the
+   *  failure this catches, and the parent is the one who has to diagnose it for the whole
+   *  household. Shown in every push state, not only when subscribed — see below. */
   offerTest?: boolean;
 }) {
   const [push, setPush] = useState<PushState | null>(null);
@@ -69,31 +70,14 @@ export function PushCard({
       ) : push === 'subscribed' ? (
         <>
           <p className="mt-1 text-sm text-emerald-400">Notifications are on for this device.</p>
-          <div className="mt-3 flex gap-2">
-            {offerTest && (
-              <Button
-                className="min-h-0 px-3 py-2 text-sm"
-                variant="ghost"
-                onClick={() => void runTest()}
-                disabled={busy}
-              >
-                Send a test
-              </Button>
-            )}
-            <Button
-              className="min-h-0 px-3 py-2 text-sm"
-              variant="ghost"
-              onClick={() => void turnOff()}
-              disabled={busy}
-            >
-              Turn off
-            </Button>
-          </div>
-          {test && (
-            <p className={`mt-2 text-sm ${test.ok ? 'text-emerald-400' : 'text-amber-400'}`}>
-              {test.text}
-            </p>
-          )}
+          <Button
+            className="mt-3 min-h-0 px-3 py-2 text-sm"
+            variant="ghost"
+            onClick={() => void turnOff()}
+            disabled={busy}
+          >
+            Turn off
+          </Button>
         </>
       ) : push === 'denied' ? (
         // subscribeToPush cannot recover from a denial, so don't offer a button that
@@ -102,6 +86,16 @@ export function PushCard({
           Notifications are blocked. Turn them back on for ChoreKeeper in your device’s settings,
           then come back here.
         </p>
+      ) : push === 'unconfigured' ? (
+        // Server-side, and the same for everyone in the household — so say what to do rather
+        // than sending the parent to hunt through their phone's settings.
+        <div className="mt-1 text-sm text-amber-400">
+          <p>This ChoreKeeper has no notification keys, so nothing can be sent to any device.</p>
+          <p className="mt-2 text-slate-400">
+            On the machine running ChoreKeeper: <code>just vapid-keys</code>, paste both lines into{' '}
+            <code>env.production</code>, then restart the api and worker. See docs/notifications.md.
+          </p>
+        </div>
       ) : push === 'unsupported' ? (
         <p className="mt-1 text-sm text-slate-400">
           This browser can’t show notifications. Try Chrome or Safari.
@@ -136,6 +130,33 @@ export function PushCard({
             Turn on notifications
           </Button>
         </>
+      )}
+
+      {/* Outside the state branches on purpose. This is the diagnostic, and the states that
+          most need diagnosing are the ones where nothing is subscribed — hiding it there (as
+          it was first shipped) made it invisible exactly when a parent reaches for it. The
+          server's answer is useful from any state: it knows whether it has VAPID keys at all,
+          and whether any of this parent's *other* devices are registered. */}
+      {offerTest && push !== null && (
+        <div className="mt-3 border-t border-slate-800 pt-3">
+          <Button
+            className="min-h-0 px-3 py-2 text-sm"
+            variant="ghost"
+            onClick={() => void runTest()}
+            disabled={busy}
+          >
+            Send a test notification
+          </Button>
+          {test ? (
+            <p className={`mt-2 text-sm ${test.ok ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {test.text}
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-slate-500">
+              Sends to your own devices and reports what happened.
+            </p>
+          )}
+        </div>
       )}
     </Card>
   );

@@ -113,6 +113,21 @@ describe('the test-notification button', () => {
     expect(screen.queryByRole('button', { name: /send a test/i })).not.toBeInTheDocument();
   });
 
+  it.each(['ready', 'denied', 'needs-install', 'unsupported', 'unconfigured'] as const)(
+    'is still there when this device is not subscribed (%s)',
+    async (state) => {
+      // The bug this replaces: the button lived inside the `subscribed` branch, so it was
+      // invisible on exactly the devices someone is trying to diagnose. The server can still
+      // answer — it knows about its own keys and this parent's other devices.
+      vi.mocked(pushState).mockResolvedValue(state);
+      show(true);
+
+      expect(
+        await screen.findByRole('button', { name: /send a test notification/i }),
+      ).toBeInTheDocument();
+    },
+  );
+
   it('reports how many devices the server actually reached', async () => {
     vi.mocked(pushState).mockResolvedValue('subscribed');
     vi.mocked(sendTestPush).mockResolvedValue({ status: 'sent', devices: 2, error: null });
@@ -156,5 +171,22 @@ describe('describeTest', () => {
     const r = describeTest({ status: 'failed', devices: 1, error: 'WebPushException: 403' });
     expect(r.ok).toBe(false);
     expect(r.text).toMatch(/403/);
+  });
+});
+
+describe('a server with no notification keys', () => {
+  it('says so instead of quietly leaving the button where it was', async () => {
+    // The failure as it reached a real phone: press "Turn on notifications", get asked for
+    // permission, grant it — and the card comes back showing the same button, with nothing
+    // to suggest the server was never configured.
+    vi.mocked(pushState).mockResolvedValue('ready');
+    vi.mocked(subscribeToPush).mockResolvedValue('unconfigured');
+    show();
+
+    fireEvent.click(await screen.findByRole('button', { name: /turn on notifications/i }));
+
+    expect(await screen.findByText(/no notification keys/)).toBeInTheDocument();
+    expect(screen.getByText(/vapid-keys/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /turn on/i })).not.toBeInTheDocument();
   });
 });
