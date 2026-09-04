@@ -44,6 +44,7 @@ Prerequisites: `docker` + `docker compose`, `uv`, and [`just`](https://github.co
 | Full dev stack | `just up` (builds + starts `db` `api` `worker` `proxy`) / `just down` |
 | Production stack | `just prod-up` / `just prod-down` / `just prod-ps` (needs `env.production`) |
 | Migrations | `just migrate` · `just makemigration "message"` |
+| VAPID keys for web push | `just vapid-keys` (prints a pair; writes nothing — [docs/notifications.md](docs/notifications.md)) |
 | Seed dev data | `just seed` — **ASK FIRST, every time** (see below). Needs `ADMIN_PASSWORD` set when `ENVIRONMENT=prod`; it refuses otherwise |
 | **Lint gate (backend)** | `just lint` (ruff check + `ruff format --check`) |
 | Autofix | `just fmt` |

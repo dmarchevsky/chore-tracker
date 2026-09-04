@@ -11,6 +11,7 @@ import type { SettingsPatch } from './api';
 import { setCsrfToken } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { Button, Card, Spinner } from '../shared/ui';
+import { PushCard } from '../pwa/PushCard';
 
 export function Settings() {
   const settings = useSettings();
@@ -61,6 +62,12 @@ export function Settings() {
   return (
     <div className="flex max-w-2xl flex-col gap-4">
       <h1 className="text-lg font-bold">Settings</h1>
+
+      <PushCard
+        heading="Notifications"
+        pitch="Hear about it when a chore is handed in and when one is missed."
+        installReason="Notifications only work once ChoreKeeper is installed on this device."
+      />
 
       <Card className="flex flex-col gap-3">
         <h2 className="font-bold">Vision model &amp; connection</h2>

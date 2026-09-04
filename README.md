@@ -117,6 +117,15 @@ Two things touch the public internet, and nothing else does:
 - **OpenStreetMap map tiles**, only in the admin screen where a parent draws a location
   fence, and only while that screen is open. No photo, name or chore data goes with it.
 
+## Notifications
+
+Kids get a push when a chore opens, thirty minutes before it is due, when a window closes on
+them, and whenever a parent replies; parents get one when something is handed in and when
+something is missed. It is Web Push from your own machine — no third-party service sees a
+chore. Installing the app on the Home Screen is required (on iOS, by Apple), and the server
+needs a VAPID keypair from `just vapid-keys`. Both walked through in
+[docs/notifications.md](docs/notifications.md).
+
 ## Remote access
 
 The app is reachable from anywhere without opening a single port on your router. A small

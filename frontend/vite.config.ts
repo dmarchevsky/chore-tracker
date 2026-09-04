@@ -9,24 +9,18 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: 'auto',
-      workbox: {
-        // No navigation may EVER be answered from cache. A top-level navigation is the
-        // only thing that can complete a Cloudflare Access round-trip, so a cached one
-        // locks the visitor out for good: the edge never sees them, every API call comes
-        // back as the Access login page, and the reload that is supposed to fix it is
-        // served from cache too — a refresh loop that cannot end.
-        //
-        // Two settings, because dropping `html` from the glob is not on its own enough:
-        // `directoryIndex` defaults to 'index.html' and resolves a request for "/" onto a
-        // precached shell anyway. Removing navigateFallback missed exactly that — "/",
-        // which is the URL a bookmark or a shared link uses. (workbox's `cleanURLs`, which
-        // would try "/me.html", is not a generateSW option; it is harmless here because
-        // once no HTML is precached there is nothing for it to find.)
-        globPatterns: ['**/*.{js,css,svg,png,woff2}'],
-        directoryIndex: null,
-        // Must be set explicitly: vite-plugin-pwa defaults it to 'index.html', so simply
-        // omitting the option leaves the navigation route in place.
-        navigateFallback: undefined,
+      // A hand-written service worker (src/sw.ts), because push notifications need a
+      // `push` listener and a generated one has none. injectManifest only substitutes the
+      // precache list into that file; everything else in it is ours.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
+      injectManifest: {
+        // No HTML in the precache. A precached index.html is served for any navigation
+        // ending in "/" — including the bare domain, which is what a bookmark uses.
+        // Cloudflare Access can only sign someone in on a real navigation, so a cached one
+        // locks them out and loops the tab. Under injectManifest the other half of that
+        // guard is structural: sw.ts registers no navigation route at all.
         //
         // The cost, stated plainly: with no network the app does not load. It already did
         // not — the manifest's start_url is /me, which was never precached, so only the
@@ -35,6 +29,7 @@ export default defineConfig({
         // spec §11 actually requires — queueing a submission when the network drops
         // mid-use — is IndexedDB in an already-open tab and is untouched. Assets stay
         // precached, so loads are still fast.
+        globPatterns: ['**/*.{js,css,svg,png,woff2}'],
       },
       manifest: {
         name: 'ChoreKeeper',

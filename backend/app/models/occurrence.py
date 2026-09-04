@@ -100,6 +100,11 @@ class ChoreOccurrence(TimestampMixin, Base):
     # and what tells the kid the money has actually moved.
     settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
+    # When the T-30min "due soon" reminder went out. Claimed by the UPDATE that sends it, so
+    # the nudge is exactly-once even if two ticks overlap (spec §4.5). Unlike OPEN and MISSED
+    # the reminder is not a state change, so it has nowhere else to record itself.
+    reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
     # Money terms snapshotted from the Chore at generation (spec §3).
     reward_cents: Mapped[int] = mapped_column(Integer, default=0)
     penalty_cents: Mapped[int] = mapped_column(Integer, default=0)

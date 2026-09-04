@@ -83,6 +83,10 @@ migrate:
 makemigration message:
     cd {{backend}} && uv run alembic revision --autogenerate -m "{{message}}"
 
+# Print a fresh VAPID keypair for web push — paste into .env (docs/notifications.md)
+vapid-keys:
+    cd {{backend}} && uv run python -m app.vapid_keys
+
 # Fill the dev database with a household, chores and backdated occurrences
 seed:
     {{compose}} exec -T api python -m app.seed

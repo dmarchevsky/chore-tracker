@@ -12,6 +12,8 @@ import json
 import logging
 import uuid
 from collections.abc import Sequence
+from datetime import UTC
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +22,7 @@ from app.config import get_settings
 from app.models import (
     Chore,
     ChoreOccurrence,
+    Household,
     NotificationLog,
     PushSubscription,
     User,
@@ -164,26 +167,76 @@ async def notify_redo(db: AsyncSession, occ: ChoreOccurrence, note: str) -> None
     )
 
 
-async def notify_missed(db: AsyncSession, occ: ChoreOccurrence) -> None:
-    """Tell the kid a window closed on them (spec §6.2).
+async def notify_window_open(db: AsyncSession, occ: ChoreOccurrence) -> None:
+    """Tell the kid a chore is now open to submit (spec §4.5).
 
-    Sent when the miss is detected, not when it is settled: the point is to reach them while
-    there is still time to say it's wrong. The parent hears about misses in the daily digest
-    instead of one push per miss (spec §15 Q10). An `anyone` occurrence has no assignee to
-    tell.
+    Sent from the same UPDATE that flips PENDING → OPEN, which happens exactly once per
+    occurrence — so the transition is its own dedupe and no marker column is needed. An
+    `anyone` occurrence has no assignee to tell.
     """
     if occ.assignee_id is None:
         return
     chore = await db.get(Chore, occ.chore_id)
-    cost = f" That costs you {occ.penalty_cents / 100:.2f}." if occ.penalty_cents else ""
     await notify(
         db,
         user_id=occ.assignee_id,
-        kind="missed",
-        title="You missed one",
-        body=f"{chore.title if chore else 'A chore'} closed without a check-in.{cost}"
-        " Tell a parent if that's wrong.",
+        kind="window_open",
+        title="A chore just opened",
+        body=f"{chore.title if chore else 'A chore'} — you can check it in now.",
         url=f"/me/chores/{occ.id}",
+    )
+
+
+async def notify_due_soon(db: AsyncSession, occ: ChoreOccurrence) -> None:
+    """The T-30min nudge (spec §4.5). Times are shown in the household's wall clock."""
+    if occ.assignee_id is None:
+        return
+    chore = await db.get(Chore, occ.chore_id)
+    household = (await db.execute(select(Household).limit(1))).scalar_one_or_none()
+    tz = ZoneInfo(household.timezone) if household else UTC
+    when = occ.due_at.astimezone(tz).strftime("%-I:%M %p").lower()
+    await notify(
+        db,
+        user_id=occ.assignee_id,
+        kind="due_soon",
+        title="Due soon",
+        body=f"{chore.title if chore else 'A chore'} is due at {when}.",
+        url=f"/me/chores/{occ.id}",
+    )
+
+
+async def notify_missed(db: AsyncSession, occ: ChoreOccurrence) -> None:
+    """Tell the kid — and the parent — that a window closed (spec §6.2).
+
+    Sent when the miss is detected, not when it is settled: the point is to reach them while
+    there is still time to say it's wrong. An `anyone` occurrence has no assignee to tell,
+    but the parent still hears about it.
+
+    TODO(decision): spec §15 Q10 says misses reach the parent in the 8:05am digest rather
+    than one push each. The household asked for them immediately and there is no digest job
+    yet; revisit if the volume becomes noise.
+    """
+    chore = await db.get(Chore, occ.chore_id)
+    title = chore.title if chore else "A chore"
+
+    if occ.assignee_id is not None:
+        cost = f" That costs you {occ.penalty_cents / 100:.2f}." if occ.penalty_cents else ""
+        await notify(
+            db,
+            user_id=occ.assignee_id,
+            kind="missed",
+            title="You missed one",
+            body=f"{title} closed without a check-in.{cost} Tell a parent if that's wrong.",
+            url=f"/me/chores/{occ.id}",
+        )
+
+    kid = await db.get(User, occ.assignee_id) if occ.assignee_id else None
+    await notify_admins(
+        db,
+        kind="admin.missed",
+        title="A chore was missed",
+        body=f"{kid.display_name} missed {title}." if kid else f"Nobody checked in {title}.",
+        url=f"/admin/review/{occ.id}",
     )
 
 

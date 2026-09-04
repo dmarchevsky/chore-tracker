@@ -41,3 +41,15 @@ export async function subscribeToPush(): Promise<PushState> {
   await api.post('/push/subscribe', sub.toJSON());
   return 'subscribed';
 }
+
+export async function unsubscribeFromPush(): Promise<PushState> {
+  if (!pushSupported()) return 'unsupported';
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  if (!sub) return (await pushState()) as PushState;
+  // Drop the server's copy first: a subscription it keeps pushing to after the browser has
+  // dropped it is dead weight that only clears when the endpoint starts returning 410.
+  await api.del(`/push/subscribe?endpoint=${encodeURIComponent(sub.endpoint)}`);
+  await sub.unsubscribe();
+  return 'ready';
+}

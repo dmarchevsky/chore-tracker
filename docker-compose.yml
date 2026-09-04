@@ -56,6 +56,11 @@ services:
       LLM_VISION_BASE_URL: ${LLM_VISION_BASE_URL:-http://llm-vision:8081/v1}
       LLM_VISION_MODEL: ${LLM_VISION_MODEL:-}
       LLM_VISION_API_KEY: ${LLM_VISION_API_KEY:-not-needed}
+      # Web push. Empty pair = push disabled and every send logged as `skipped`, which is
+      # the sane default for a dev stack; `just vapid-keys` prints a pair to paste into
+      # .env when you actually want to test notifications (docs/notifications.md).
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       TZ: America/Los_Angeles
     depends_on:
       db:
@@ -79,6 +84,11 @@ services:
       LLM_VISION_BASE_URL: ${LLM_VISION_BASE_URL:-http://llm-vision:8081/v1}
       LLM_VISION_MODEL: ${LLM_VISION_MODEL:-}
       LLM_VISION_API_KEY: ${LLM_VISION_API_KEY:-not-needed}
+      # Web push. Empty pair = push disabled and every send logged as `skipped`, which is
+      # the sane default for a dev stack; `just vapid-keys` prints a pair to paste into
+      # .env when you actually want to test notifications (docs/notifications.md).
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       TZ: America/Los_Angeles
     depends_on:
       db:

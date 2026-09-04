@@ -168,6 +168,8 @@ already-generated occurrences"**.
 - Web Push (VAPID). Kid: window opening, T-30min reminder, verdict, redo requested.
 - Admin: item needs review, chore missed, dispute filed, daily 8:05am digest.
 - All notification sends are logged; a failed push MUST NOT block the state machine.
+- **As built:** every kid notification above ships, and the admin gets needs-review, missed
+  (immediately — see Q10) and dispute-filed. The 8:05am digest is not implemented.
 
 ---
 
@@ -859,7 +861,7 @@ history; what the system should do is §§1–13.
 | Q7 | Ages of the daughters? | Drives reading level of kid-facing copy and how much friction is acceptable. Assumed 10–15. |
 | Q8 | Do kids get read-only visibility into the chore *definitions* (rules, amounts)? | Yes — transparency reduces arguments. |
 | Q9 | Is there an existing Postgres instance on the LAN to reuse, or run a dedicated one? | Dedicated container. |
-| Q10 | Should missed chores notify the parent immediately or only in the 8:05 digest? | Digest, except for the school check-in which notifies immediately. |
+| Q10 | Should missed chores notify the parent immediately or only in the 8:05 digest? | **Revised:** immediately, one push per miss — the household asked for it and there is no digest job. Revisit if it becomes noise. |
 | Q11 | Weekly payout cadence and method (cash, transfer, gift card)? | Manual payout entry, method free-text. |
 | Q12 | Should `anyone`-mode chores exist in v1, or is every chore explicitly assigned? | Support the field, but only `fixed`/`rotating` in the v1 UI. |
 | Q15 | `geofence.arrive_before` is specified but `evaluate_checkin` never reads it — flag a late check-in, fail it, or drop the field? | Not enforced in v1, and **not shown in the admin form** — a control that does nothing is worse than no control. Implement the check before surfacing it. |

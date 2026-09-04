@@ -27,6 +27,8 @@ from app.services.settlement import settle_missed
 log = logging.getLogger("chorekeeper.scheduler")
 
 DEFAULT_HORIZON_DAYS = 14
+# How far ahead of due_at the kid gets nudged (spec §4.5).
+REMINDER_LEAD_S = 30 * 60
 _PRE_MISSED = (OccurrenceStatus.pending, OccurrenceStatus.open)
 
 
@@ -34,6 +36,7 @@ _PRE_MISSED = (OccurrenceStatus.pending, OccurrenceStatus.open)
 class ReconcileReport:
     generated: int = 0
     opened: int = 0
+    reminded: int = 0
     missed: int = 0
     settled: int = 0
 
@@ -137,8 +140,22 @@ async def generate_occurrences(
     return result.rowcount or 0
 
 
+async def _notify_each(db: AsyncSession, ids: list, send) -> None:
+    """Re-select the rows an UPDATE ... RETURNING claimed and push one notification each."""
+    if not ids:
+        return
+    for occ in (
+        await db.execute(select(ChoreOccurrence).where(ChoreOccurrence.id.in_(ids)))
+    ).scalars():
+        await send(db, occ)
+
+
 async def open_due_windows(db: AsyncSession, *, now: datetime | None = None) -> int:
-    """PENDING → OPEN once the window has opened and grace has not yet lapsed (spec §3)."""
+    """PENDING → OPEN once the window has opened and grace has not yet lapsed (spec §3).
+
+    The flip happens exactly once per occurrence, so RETURNING is all the dedupe the
+    "a chore just opened" push needs (spec §4.5).
+    """
     now = _now(now)
     ts = literal(now)
     result = await db.execute(
@@ -151,10 +168,45 @@ async def open_due_windows(db: AsyncSession, *, now: datetime | None = None) -> 
             ts <= ChoreOccurrence.due_at + _grace_interval(),
         )
         .values(status=OccurrenceStatus.open)
+        .returning(ChoreOccurrence.id)
         .execution_options(synchronize_session=False)
     )
+    ids = list(result.scalars().all())
     await db.flush()
-    return result.rowcount or 0
+    await _notify_each(db, ids, notifications.notify_window_open)
+    return len(ids)
+
+
+async def send_due_reminders(db: AsyncSession, *, now: datetime | None = None) -> int:
+    """Nudge every OPEN occurrence whose due time is inside REMINDER_LEAD_S (spec §4.5).
+
+    The marker is claimed by the same UPDATE that selects the rows, so the nudge is
+    exactly-once even if two ticks overlap, and a machine that was asleep past the lead
+    window still sends one late nudge rather than none — the kid would otherwise hear
+    nothing between "opened" and "missed".
+    """
+    now = _now(now)
+    ts = literal(now)
+    lead = literal(now + timedelta(seconds=REMINDER_LEAD_S))
+    result = await db.execute(
+        update(ChoreOccurrence)
+        .where(
+            ChoreOccurrence.status == OccurrenceStatus.open,
+            ChoreOccurrence.assignee_id.is_not(None),
+            ChoreOccurrence.reminder_sent_at.is_(None),
+            ChoreOccurrence.chore_id == Chore.id,
+            Chore.chore_kind == ChoreKind.scheduled,
+            ChoreOccurrence.due_at <= lead,
+            ts <= ChoreOccurrence.due_at + _grace_interval(),
+        )
+        .values(reminder_sent_at=now)
+        .returning(ChoreOccurrence.id)
+        .execution_options(synchronize_session=False)
+    )
+    ids = list(result.scalars().all())
+    await db.flush()
+    await _notify_each(db, ids, notifications.notify_due_soon)
+    return len(ids)
 
 
 async def detect_missed(db: AsyncSession, *, now: datetime | None = None) -> int:
@@ -180,10 +232,7 @@ async def detect_missed(db: AsyncSession, *, now: datetime | None = None) -> int
     )
     ids = list(result.scalars().all())
     await db.flush()
-    for occ in (
-        await db.execute(select(ChoreOccurrence).where(ChoreOccurrence.id.in_(ids)))
-    ).scalars():
-        await notifications.notify_missed(db, occ)
+    await _notify_each(db, ids, notifications.notify_missed)
     return len(ids)
 
 
@@ -193,19 +242,21 @@ async def reconcile(
     horizon_days: int = DEFAULT_HORIZON_DAYS,
     now: datetime | None = None,
 ) -> ReconcileReport:
-    """One full pass: generate, open windows, detect missed, settle the ones now due
-    (spec §8.3). Logs a summary."""
+    """One full pass: generate, open windows, nudge the ones due soon, detect missed,
+    settle the ones now due (spec §8.3). Logs a summary."""
     now = _now(now)
     report = ReconcileReport(
         generated=await generate_occurrences(db, horizon_days=horizon_days, now=now),
         opened=await open_due_windows(db, now=now),
+        reminded=await send_due_reminders(db, now=now),
         missed=await detect_missed(db, now=now),
         settled=await settle_missed(db, now=now),
     )
     log.info(
-        "reconcile: generated=%d opened=%d missed=%d settled=%d",
+        "reconcile: generated=%d opened=%d reminded=%d missed=%d settled=%d",
         report.generated,
         report.opened,
+        report.reminded,
         report.missed,
         report.settled,
     )

@@ -331,6 +331,24 @@ export interface JobsDashboard {
 export const useJobsDashboard = () =>
   useQuery({ queryKey: ['admin-jobs'], queryFn: () => api.get<JobsDashboard>('/admin/jobs') });
 
+// Every push attempt, sent or not. The status is the whole diagnostic when a phone says it
+// hears nothing: `skipped` = no VAPID keys, `no_subs` = nobody subscribed, `failed` = the
+// push service refused (docs/notifications.md).
+export interface NotificationRow {
+  kind: string;
+  title: string;
+  body: string;
+  status: string;
+  error: string | null;
+  created_at: string;
+}
+
+export const useNotificationLog = () =>
+  useQuery({
+    queryKey: ['admin-notifications'],
+    queryFn: () => api.get<NotificationRow[]>('/admin/notifications?limit=25'),
+  });
+
 export interface AdminSettings {
   llm: {
     base_url: string;
