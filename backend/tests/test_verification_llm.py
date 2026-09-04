@@ -10,7 +10,13 @@ import respx
 
 from app.config import Settings
 from app.services.verification import build_task_prompt, derive_verdict
-from app.services.verification.llm import LLMError, ModelResponse, run_vision
+from app.services.verification.llm import (
+    MAX_TOKENS,
+    LLMError,
+    ModelResponse,
+    _payload,
+    run_vision,
+)
 
 BASE = "http://vision.test/v1"
 URL = f"{BASE}/chat/completions"
@@ -25,9 +31,12 @@ def _settings() -> Settings:
     )
 
 
-def _completion(payload: dict | str) -> httpx.Response:
+def _completion(payload: dict | str, finish_reason: str = "stop") -> httpx.Response:
     content = payload if isinstance(payload, str) else json.dumps(payload)
-    return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+    return httpx.Response(
+        200,
+        json={"choices": [{"message": {"content": content}, "finish_reason": finish_reason}]},
+    )
 
 
 _GOOD = {
@@ -70,6 +79,49 @@ async def test_unparseable_twice_raises_llmerror():
     respx.post(URL).mock(side_effect=[_completion("nope"), _completion("still nope")])
     with pytest.raises(LLMError):
         await run_vision(task_prompt="x", images=[b"img"], settings=_settings())
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_truncated_output_fails_without_a_repair_round():
+    """A reasoning model can burn the whole token budget thinking and emit no JSON.
+
+    That is an infra failure, not a formatting mistake — re-asking replays the same run,
+    so it must cost exactly one generation and say what actually went wrong.
+    """
+    route = respx.post(URL).mock(return_value=_completion("", finish_reason="length"))
+    with pytest.raises(LLMError) as excinfo:
+        await run_vision(task_prompt="x", images=[b"img"], settings=_settings())
+    assert route.call_count == 1
+    assert "truncated at max_tokens" in str(excinfo.value)
+    assert excinfo.value.raw_request is not None
+    assert excinfo.value.raw_response is not None
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_empty_content_fails_without_a_repair_round():
+    route = respx.post(URL).mock(return_value=_completion("   "))
+    with pytest.raises(LLMError) as excinfo:
+        await run_vision(task_prompt="x", images=[b"img"], settings=_settings())
+    assert route.call_count == 1
+    assert "empty content" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_repair_round_echoes_the_real_content_not_an_empty_turn():
+    route = respx.post(URL).mock(side_effect=[_completion("not json at all"), _completion(_GOOD)])
+    await run_vision(task_prompt="x", images=[b"img"], settings=_settings())
+    repair_messages = json.loads(route.calls[1].request.content)["messages"]
+    assert repair_messages[-2] == {"role": "assistant", "content": "not json at all"}
+
+
+def test_payload_suppresses_thinking_and_budgets_for_it():
+    body = _payload("test-vlm", [])
+    assert body["chat_template_kwargs"] == {"enable_thinking": False}
+    assert body["max_tokens"] == MAX_TOKENS
+    assert MAX_TOKENS >= 2000  # has to clear a reasoning pass, not just the answer
 
 
 @pytest.mark.asyncio

@@ -103,6 +103,10 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
             Verdict.error,
             reasoning=str(exc),
             model_name=cfg.model,
+            # Whatever the client managed to send and receive: without it a failure here
+            # is only ever as legible as its message string (spec §6.3).
+            raw_request=exc.raw_request,
+            raw_response=exc.raw_response,
         )
         occ.status = OccurrenceStatus.needs_review
         occ.verification_error = str(exc)[:200]

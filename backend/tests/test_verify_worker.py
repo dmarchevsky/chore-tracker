@@ -49,9 +49,12 @@ def _textured_jpeg(seed: int, w: int = 800, h: int = 600) -> bytes:
     return buf.getvalue()
 
 
-def _completion(payload: dict | str) -> httpx.Response:
+def _completion(payload: dict | str, finish_reason: str = "stop") -> httpx.Response:
     content = payload if isinstance(payload, str) else json.dumps(payload)
-    return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+    return httpx.Response(
+        200,
+        json={"choices": [{"message": {"content": content}, "finish_reason": finish_reason}]},
+    )
 
 
 def _model_reply(checks: list[tuple[int, str, float]], overall=0.92, iq="none") -> dict:
@@ -204,6 +207,30 @@ async def test_llm_down_routes_to_needs_review_with_no_ledger(
     assert await _ledger_count(db_session, occ.id) == 0
     job = (await db_session.execute(select(VerificationJob))).scalar_one()
     assert job.state == JobState.done  # a human handles it, not a job retry
+
+
+@respx.mock
+async def test_llm_error_keeps_the_payloads_for_the_review_screen(
+    client, db_session, household, child_user
+):
+    """An error verification used to store only its message, so a bad run was diagnosable
+    from the worker log or not at all."""
+    respx.post(LLM_URL).mock(return_value=_completion("", finish_reason="length"))
+    occ = await _mk_occ(db_session, household, child_user, reward=200)
+    await db_session.commit()
+    await _kid_submit(client, occ.id)
+    await _make_media_look_real(db_session, occ.id)
+
+    await verify.drain(db_session)
+    await db_session.refresh(occ)
+    v = (
+        await db_session.execute(select(Verification).where(Verification.occurrence_id == occ.id))
+    ).scalar_one()
+    assert v.verdict == Verdict.error
+    assert v.raw_request is not None and v.raw_response is not None
+    assert "truncated at max_tokens" in v.reasoning
+    assert occ.status == OccurrenceStatus.needs_review
+    assert await _ledger_count(db_session, occ.id) == 0
 
 
 @respx.mock

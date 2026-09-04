@@ -19,7 +19,11 @@ from app.services.llm_config import LlmConfig, LlmConfigError, validate_base_url
 from app.services.verification.prompts import RESPONSE_SCHEMA, SYSTEM_PROMPT
 
 TEMPERATURE = 0.1
-MAX_TOKENS = 700
+# Reasoning models bill their thinking tokens against this budget even when the server
+# hands the thinking back in a separate ``reasoning_content`` field. A 4B-class model
+# spent all of a 700-token budget reasoning about three photos and never emitted the JSON
+# at all, so the budget has to clear the thinking as well as the answer.
+MAX_TOKENS = 2000
 
 _REPAIR = (
     "Your previous message was not valid JSON matching the schema. "
@@ -28,7 +32,22 @@ _REPAIR = (
 
 
 class LLMError(RuntimeError):
-    """Endpoint unreachable, timed out, or returned unparseable output after a retry."""
+    """Endpoint unreachable, timed out, or returned unparseable output after a retry.
+
+    Carries the request/response payloads when they exist so the failure is inspectable
+    from the verification record instead of only from the worker log.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        raw_request: dict | None = None,
+        raw_response: dict | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.raw_request = raw_request
+        self.raw_response = raw_response
 
 
 class Check(BaseModel):
@@ -54,6 +73,10 @@ def _payload(model: str, messages: list[dict]) -> dict[str, Any]:
         "model": model,
         "temperature": TEMPERATURE,
         "max_tokens": MAX_TOKENS,
+        # Ask reasoning models to skip the thinking pass: we want schema-shaped JSON, not
+        # deliberation, and the thinking otherwise eats the token budget. Servers that
+        # don't know the key ignore it, so this stays portable across llama.cpp/vLLM/Ollama.
+        "chat_template_kwargs": {"enable_thinking": False},
         "response_format": {
             "type": "json_schema",
             "json_schema": {"name": "chore_verification", "schema": RESPONSE_SCHEMA},
@@ -103,7 +126,7 @@ async def run_vision(
             try:
                 return _parse(raw["_content"]), raw_request, raw
             except (ValidationError, ValueError, json.JSONDecodeError):
-                pass
+                _reject_if_no_output(raw, raw_request)
             # one repair round (spec §7.2)
             messages.append({"role": "assistant", "content": raw["_content"]})
             messages.append({"role": "user", "content": _REPAIR})
@@ -111,9 +134,40 @@ async def run_vision(
             try:
                 return _parse(raw2["_content"]), raw_request, raw2
             except (ValidationError, ValueError, json.JSONDecodeError) as exc:
-                raise LLMError(f"unparseable model output after repair: {exc}") from exc
+                _reject_if_no_output(raw2, raw_request)
+                raise LLMError(
+                    f"unparseable model output after repair: {exc}",
+                    raw_request=raw_request,
+                    raw_response=raw2,
+                ) from exc
     except httpx.HTTPError as exc:
-        raise LLMError(f"vision endpoint error: {exc}") from exc
+        raise LLMError(f"vision endpoint error: {exc}", raw_request=raw_request) from exc
+
+
+def _reject_if_no_output(raw: dict, raw_request: dict) -> None:
+    """Bail out when the model emitted no JSON at all, rather than asking it to try again.
+
+    The repair round is for a model that answered in the wrong *shape*. A truncated or
+    empty completion is an infra failure: re-asking replays the same run and, on a slow
+    local endpoint, costs another full generation for a guaranteed second failure. It also
+    used to append ``{"role": "assistant", "content": ""}`` — an empty turn — to the
+    conversation, which is not a prompt any server handles usefully.
+    """
+    content = raw.get("_content") or ""
+    finish = raw.get("_finish_reason")
+    if finish != "length" and content.strip():
+        return
+    detail = (
+        f"truncated at max_tokens={MAX_TOKENS}"
+        if finish == "length"
+        else f"empty content with finish_reason={finish!r}"
+    )
+    raise LLMError(
+        f"model returned no usable output: {detail}. A reasoning model's thinking tokens "
+        "can consume the whole budget before it emits the JSON.",
+        raw_request=raw_request,
+        raw_response=raw,
+    )
 
 
 async def _post_and_read(client: httpx.AsyncClient, url: str, headers: dict, body: dict) -> dict:
@@ -121,10 +175,11 @@ async def _post_and_read(client: httpx.AsyncClient, url: str, headers: dict, bod
     resp.raise_for_status()
     data = resp.json()
     try:
-        content = data["choices"][0]["message"]["content"]
+        choice = data["choices"][0]
+        content = choice["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise LLMError(f"unexpected response shape: {exc}") from exc
-    return {**data, "_content": content}
+    return {**data, "_content": content, "_finish_reason": choice.get("finish_reason")}
 
 
 def _redact(messages: list[dict]) -> list[dict]:
