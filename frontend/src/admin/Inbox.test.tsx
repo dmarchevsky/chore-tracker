@@ -84,6 +84,14 @@ const pending = [
   },
 ];
 
+/** Two windows open right now: one on its own, and a second turn of the same chore for the
+ *  same kid — Current shows both, unlike Missed and Coming up. */
+const openNow = [
+  { ...occurrence, id: 'n1', chore_id: 'c20', status: 'open', due_at: tomorrow },
+  { ...occurrence, id: 'n2', chore_id: 'c21', status: 'open', due_at: tomorrow },
+  { ...occurrence, id: 'n3', chore_id: 'c21', status: 'open', due_at: nextWeek },
+];
+
 const submission = {
   id: 's1',
   kind: 'photo',
@@ -179,10 +187,15 @@ const penalty = {
 };
 const penaltyRetired = { ...penalty, id: 'p2', title: 'Old fine', active: false };
 
-function renderInbox(chores: unknown[] = [], route = '/admin', misses: unknown[] = missed) {
+function renderInbox(
+  chores: unknown[] = [],
+  route = '/admin',
+  misses: unknown[] = missed,
+  queue: unknown[] = [occurrence],
+) {
   vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
     const url = String(input);
-    if (url.includes('inbox=true')) return Promise.resolve(json([occurrence]));
+    if (url.includes('inbox=true')) return Promise.resolve(json(queue));
     if (url.includes('/state/history'))
       return Promise.resolve(
         json([
@@ -199,6 +212,8 @@ function renderInbox(chores: unknown[] = [], route = '/admin', misses: unknown[]
         ]),
       );
     if (url.includes('status=missed')) return Promise.resolve(json(misses));
+    if (url.includes('/occurrences?') && url.includes('status=open'))
+      return Promise.resolve(json(openNow));
     if (url.includes('status=pending')) return Promise.resolve(json(pending));
     if (url.includes('/penalties'))
       return Promise.resolve(json({ id: 'l1', amount_cents: -500, kind: 'penalty' }));
@@ -212,6 +227,8 @@ function renderInbox(chores: unknown[] = [], route = '/admin', misses: unknown[]
           { id: 'c3', title: 'Water the plants' },
           { id: 'c4', title: 'Fold laundry' },
           { id: 'c5', title: 'Rake leaves' },
+          { id: 'c20', title: 'Feed the cat' },
+          { id: 'c21', title: 'Wipe the table' },
           ...chores,
         ]),
       );
@@ -243,11 +260,22 @@ function renderInbox(chores: unknown[] = [], route = '/admin', misses: unknown[]
   );
 }
 
-beforeEach(() => renderInbox());
+beforeEach(() => {
+  // The collapse state is remembered in localStorage, so it would otherwise leak between
+  // tests and each one would inherit whatever the last one folded away.
+  localStorage.clear();
+  renderInbox();
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
+
+/** Standing, Penalties, Missed and Coming up start collapsed (DEFAULT_OPEN in Inbox.tsx), so
+ *  a test that reaches into one opens it first — the way a parent would. */
+async function expand(name: RegExp) {
+  fireEvent.click(await screen.findByRole('button', { name }));
+}
 
 /** The chore title appears in the disputes section too; the queue row is the last one. */
 async function queueRow() {
@@ -302,6 +330,7 @@ describe('admin Inbox', () => {
     cleanup();
     vi.restoreAllMocks();
     renderInbox([standingOn]);
+    await expand(/Standing/);
 
     expect(await screen.findByText('Missing assignments')).toBeInTheDocument();
     expect(screen.getByText("grounded until it's fixed")).toBeInTheDocument();
@@ -314,6 +343,7 @@ describe('admin Inbox', () => {
     cleanup();
     vi.restoreAllMocks();
     renderInbox([standingOff]);
+    await expand(/Standing/);
 
     expect(await screen.findByText('Late homework')).toBeInTheDocument();
     expect(screen.getByText('Off')).toBeInTheDocument();
@@ -332,6 +362,7 @@ describe('admin Inbox', () => {
     cleanup();
     vi.restoreAllMocks();
     renderInbox([standingOn]);
+    await expand(/Standing/);
 
     fireEvent.click(await screen.findByText('Missing assignments'));
 
@@ -347,6 +378,7 @@ describe('admin Inbox', () => {
     cleanup();
     vi.restoreAllMocks();
     renderInbox([standingOn]);
+    await expand(/Standing/);
 
     fireEvent.click(await screen.findByText('Missing assignments'));
 
@@ -367,8 +399,9 @@ describe('admin Inbox', () => {
     cleanup();
     vi.restoreAllMocks();
     renderInbox([penalty]);
+    await expand(/Penalties/);
 
-    expect(await screen.findByText('Penalties')).toBeInTheDocument();
+    expect(await screen.findByText('Penalties (1)')).toBeInTheDocument();
     expect(screen.getByText('Missed curfew')).toBeInTheDocument();
     expect(screen.getByText(/first time -\$2\.00/)).toBeInTheDocument();
     expect(screen.getByText(/again this week -\$5\.00/)).toBeInTheDocument();
@@ -381,13 +414,14 @@ describe('admin Inbox', () => {
 
     await waitFor(() => expect(screen.getAllByText('Empty the sink').length).toBeGreaterThan(0));
     expect(screen.queryByText('Old fine')).not.toBeInTheDocument();
-    expect(screen.queryByText('Penalties')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Penalties/)).not.toBeInTheDocument();
   });
 
   it('opens the charge form, offering only the kids the rule targets', async () => {
     cleanup();
     vi.restoreAllMocks();
     renderInbox([penalty]);
+    await expand(/Penalties/);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Charge' }));
 
@@ -403,6 +437,7 @@ describe('admin Inbox', () => {
     cleanup();
     vi.restoreAllMocks();
     renderInbox([penalty]);
+    await expand(/Penalties/);
     // renderInbox already spies on fetch; read the charge back off its calls rather than
     // wrapping the mock, which loses the stub's own routing.
     const charges = () =>
@@ -477,6 +512,7 @@ describe('admin Inbox', () => {
       </QueryClientProvider>,
     );
 
+    await expand(/Standing/);
     fireEvent.click(await screen.findByText('Late homework'));
     fireEvent.click(
       await screen.findByRole('button', { name: 'more than one missing assignment' }),
@@ -488,6 +524,7 @@ describe('admin Inbox', () => {
   });
 
   it('lists misses the parent has not settled yet, and opens one for a decision', async () => {
+    await expand(/Missed/);
     const row = await screen.findByText('Sweep the porch');
     expect(await screen.findByText('Missed (2)')).toBeInTheDocument();
     expect(row.parentElement!.parentElement!.textContent).toContain('Mo');
@@ -501,6 +538,7 @@ describe('admin Inbox', () => {
   });
 
   it('keeps one missed row per chore and kid, and says how many it stands for', async () => {
+    await expand(/Missed/);
     const row = await screen.findByText('Sweep the porch');
 
     // Mo missed it twice; the older one folds into the newer rather than repeating.
@@ -513,6 +551,7 @@ describe('admin Inbox', () => {
   });
 
   it('leaves misses older than a week to History, and links there for the rest', async () => {
+    await expand(/Missed/);
     await screen.findByText('Sweep the porch');
 
     expect(screen.queryByText('Rake leaves')).not.toBeInTheDocument();
@@ -528,11 +567,12 @@ describe('admin Inbox', () => {
     renderInbox([], '/admin', many);
 
     expect(await screen.findByText('Missed (5)')).toBeInTheDocument();
+    await expand(/Missed/);
     expect(screen.getByRole('link', { name: '3 more in History' })).toBeInTheDocument();
   });
 
   it('shows only the next turn of each chore and kid under Coming up, and leaves it inert', async () => {
-    await screen.findByText('Coming up');
+    await expand(/Coming up/);
     // o3 (Mo, tomorrow) and o5 (Ana) survive; o4 is Mo's second turn on the same chore.
     const rows = screen.getAllByText('Water the plants');
     expect(rows).toHaveLength(2);
@@ -543,8 +583,85 @@ describe('admin Inbox', () => {
     rows.forEach((r) => expect(r.closest('button')).toBeNull());
   });
 
+  it('shows windows that are open right now, which no other section covers', async () => {
+    // `open` is not in the API's inbox set, so before Current a chore in progress was
+    // invisible to a parent until the kid submitted or it went missed.
+    expect(await screen.findByText('Current (3)')).toBeInTheDocument();
+    expect(screen.getByText('Feed the cat')).toBeInTheDocument();
+  });
+
+  it('shows every open window, not just the next one per chore and kid', async () => {
+    // Missed and Coming up fold repeats because a daily chore fills them with a row per day.
+    // An open window is live work, so a second one must not be hidden.
+    await screen.findByText('Current (3)');
+    expect(screen.getAllByText('Wipe the table')).toHaveLength(2);
+  });
+
+  it('opens the detail pane from a Current row, so a chore can be excused in advance', async () => {
+    fireEvent.click(await screen.findByText('Feed the cat'));
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^excuse$/i })).toBeInTheDocument(),
+    );
+  });
+
+  it('gives the review queue a heading of its own rather than a loose run of cards', async () => {
+    const heading = await screen.findByRole('button', { name: /Needs review \(1\)/ });
+    expect(heading).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(heading);
+
+    expect(heading).toHaveAttribute('aria-expanded', 'false');
+    // The dispute card names the same chore, so count the queue's own bulk-approve
+    // checkboxes rather than the title.
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
+
+  it('says nothing is waiting inside the review section, not adrift between sections', async () => {
+    cleanup();
+    vi.restoreAllMocks();
+    renderInbox([], '/admin', missed, []);
+
+    const heading = await screen.findByRole('button', { name: /Needs review \(0\)/ });
+    expect(heading).toBeInTheDocument();
+    expect(screen.getByText('Nothing waiting. 🎉')).toBeInTheDocument();
+  });
+
+  it('starts the reference lists collapsed and the actionable ones open', async () => {
+    await screen.findByText('Current (3)');
+    const state = (name: RegExp) =>
+      screen.getByRole('button', { name }).getAttribute('aria-expanded');
+
+    expect(state(/Kids say something is wrong/)).toBe('true');
+    expect(state(/Needs review/)).toBe('true');
+    expect(state(/Current/)).toBe('true');
+    expect(state(/Missed/)).toBe('false');
+    expect(state(/Coming up/)).toBe('false');
+    // ...and a collapsed section still says how much is inside it.
+    expect(screen.getByText('Missed (2)')).toBeInTheDocument();
+    expect(screen.queryByText('Sweep the porch')).not.toBeInTheDocument();
+  });
+
+  it('remembers a section a parent folded away, across a remount', async () => {
+    // The state lives in localStorage, which sign-out never clears — so a reload and a
+    // re-login both land back here.
+    fireEvent.click(await screen.findByRole('button', { name: /Current \(3\)/ }));
+    expect(screen.queryByText('Feed the cat')).not.toBeInTheDocument();
+
+    cleanup();
+    renderInbox();
+
+    await screen.findByText('Current (3)');
+    expect(screen.getByRole('button', { name: /Current \(3\)/ })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(screen.queryByText('Feed the cat')).not.toBeInTheDocument();
+  });
+
   it('keeps missed and upcoming rows out of bulk approve', async () => {
-    await screen.findByText('Coming up');
+    await expand(/Missed/);
+    await expand(/Coming up/);
     expect(screen.getAllByRole('checkbox')).toHaveLength(1);
   });
 });

@@ -1,17 +1,18 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { useInbox, useDecision, useMissed, useUpcoming } from './api';
+import { useInbox, useDecision, useMissed, useOpenNow, useUpcoming } from './api';
 import { useAdminChores, useChildren, useOpenDisputes } from './api';
 import { ReviewDetail } from './ReviewDetail';
 import { StandingDetail } from './StandingDetail';
 import { PenaltyDetail } from './PenaltyDetail';
-import { Button, Card, Spinner } from '../shared/ui';
+import { Button, Card, Section, Spinner } from '../shared/ui';
 import { StatusBadge } from '../shared/StatusBadge';
 import { standingEntry, TONE_CLASS } from '../shared/status';
 import { occurrenceWorth } from '../shared/outcome';
 import { firstPerKey } from '../shared/occurrences';
 import { tierOutcome } from '../shared/format';
+import { useSectionState } from '../shared/collapsed';
 import type { Occurrence } from '../api/types';
 
 /** The right pane serves two kinds of thing now, so the selection has to say which.
@@ -23,6 +24,20 @@ type Selection = { kind: 'occurrence' | 'standing' | 'penalty'; id: string };
  *  grows. These three bounds keep the section to what a parent might still act on today. */
 const MISS_WINDOW_DAYS = 7;
 const MISS_ROWS = 5;
+
+/** Which sections start open for a parent who has never folded one away. The three that
+ *  want a decision are open; the reference lists start out of the way. A parent's own choice
+ *  is remembered per device and outranks this (shared/collapsed.ts). */
+const SECTIONS_KEY = 'chorekeeper.inbox.sections';
+const DEFAULT_OPEN: Record<string, boolean> = {
+  disputes: true,
+  review: true,
+  current: true,
+  standing: false,
+  penalties: false,
+  missed: false,
+  upcoming: false,
+};
 
 /** One row per chore per kid: a daily chore otherwise repeats down both lists. */
 const occKey = (o: Occurrence) => `${o.chore_id}:${o.assignee_id ?? ''}`;
@@ -99,6 +114,9 @@ export function Inbox() {
   // A miss never enters the review queue, and nothing else on this screen looks ahead —
   // so the parent gets the same three-part picture the kid's Today screen gives.
   const missed = useMissed();
+  // Windows open right now. Nothing else on this screen sees them: they are past `pending`
+  // and not yet in the review queue, so a chore in progress used to be invisible here.
+  const openNow = useOpenNow();
   const upcoming = useUpcoming();
   const chores = useAdminChores();
   const kids = useChildren();
@@ -109,6 +127,7 @@ export function Inbox() {
   const { id: routeId } = useParams();
   const [picked, setPicked] = useState<Selection | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const sections = useSectionState(SECTIONS_KEY, DEFAULT_OPEN);
   const selected: Selection | null =
     picked ?? (routeId ? { kind: 'occurrence', id: routeId } : null);
 
@@ -122,7 +141,13 @@ export function Inbox() {
     if (routeId) nav('/admin');
   }
 
-  if (inbox.isLoading || chores.isLoading || missed.isLoading || upcoming.isLoading)
+  if (
+    inbox.isLoading ||
+    chores.isLoading ||
+    missed.isLoading ||
+    openNow.isLoading ||
+    upcoming.isLoading
+  )
     return <Spinner />;
   const byId = new Map((chores.data ?? []).map((c) => [c.id, c]));
   const kidById = new Map((kids.data ?? []).map((k) => [k.id, k]));
@@ -141,6 +166,10 @@ export function Inbox() {
   // The query asks for 200, so a pathological backlog under-counts — the link goes to the
   // full list either way.
   const hiddenMisses = allMissed.length - misses.length;
+  // Deliberately not deduplicated the way Missed and Coming up are: those fold repeats
+  // because a daily chore otherwise fills the list with one row per day, but an open window
+  // is live work a parent might act on, so a second one must not be hidden.
+  const current = openNow.data ?? [];
   // A daily chore materialises a row per day across the horizon, per kid; the parent only
   // needs to know whose turn is next on each chore.
   const soon = (upcoming.data ?? []).filter(firstPerKey(occKey));
@@ -193,10 +222,12 @@ export function Inbox() {
           )}
         </div>
         {(openDisputes.data ?? []).length > 0 && (
-          <div className="flex flex-col gap-2">
-            <h2 className="text-sm font-semibold text-rose-400">
-              Kids say something is wrong ({openDisputes.data!.length})
-            </h2>
+          <Section
+            title={`Kids say something is wrong (${openDisputes.data!.length})`}
+            tone="text-rose-400"
+            open={sections.isOpen('disputes')}
+            onToggle={() => sections.toggle('disputes')}
+          >
             {openDisputes.data!.map((d) => (
               <Card key={d.id} className="cursor-pointer border-rose-800">
                 <button
@@ -211,13 +242,15 @@ export function Inbox() {
                 </button>
               </Card>
             ))}
-          </div>
+          </Section>
         )}
         {standing.length > 0 && (
-          <div className="flex flex-col gap-2">
-            <h2 className={`text-sm font-semibold ${inForce ? 'text-rose-400' : 'text-slate-400'}`}>
-              Standing{inForce > 0 && ` (${inForce} in force)`}
-            </h2>
+          <Section
+            title={inForce > 0 ? `Standing (${inForce} in force)` : `Standing (${standing.length})`}
+            tone={inForce ? 'text-rose-400' : 'text-slate-400'}
+            open={sections.isOpen('standing')}
+            onToggle={() => sections.toggle('standing')}
+          >
             {standing.map((c) => {
               const state = standingEntry(c.standing_on);
               const tier = (c.outcome_tiers ?? []).find((t) => t.id === c.standing_tier_id);
@@ -251,11 +284,14 @@ export function Inbox() {
                 </Card>
               );
             })}
-          </div>
+          </Section>
         )}
         {penalties.length > 0 && (
-          <div className="flex flex-col gap-2">
-            <h2 className="text-sm font-semibold text-slate-400">Penalties</h2>
+          <Section
+            title={`Penalties (${penalties.length})`}
+            open={sections.isOpen('penalties')}
+            onToggle={() => sections.toggle('penalties')}
+          >
             {penalties.map((c) => (
               <Card
                 key={c.id}
@@ -287,34 +323,66 @@ export function Inbox() {
                 </div>
               </Card>
             ))}
-          </div>
+          </Section>
         )}
-        {rows.length === 0 && <p className="text-slate-500">Nothing waiting. 🎉</p>}
-        {rows.map((o) => (
-          <OccCard
-            key={o.id}
-            o={o}
-            title={title(o)}
-            kid={kidName(o)}
-            subtitle={`due ${new Date(o.due_at).toLocaleString()}`}
-            selected={selected?.kind === 'occurrence' && selected.id === o.id}
-            onSelect={() => select({ kind: 'occurrence', id: o.id })}
+        <Section
+          title={`Needs review (${rows.length})`}
+          open={sections.isOpen('review')}
+          onToggle={() => sections.toggle('review')}
+        >
+          {rows.length === 0 && <p className="text-slate-500">Nothing waiting. 🎉</p>}
+          {rows.map((o) => (
+            <OccCard
+              key={o.id}
+              o={o}
+              title={title(o)}
+              kid={kidName(o)}
+              subtitle={`due ${new Date(o.due_at).toLocaleString()}`}
+              selected={selected?.kind === 'occurrence' && selected.id === o.id}
+              onSelect={() => select({ kind: 'occurrence', id: o.id })}
+            >
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={checked.has(o.id)}
+                onChange={() => toggle(o.id)}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </OccCard>
+          ))}
+        </Section>
+
+        {current.length > 0 && (
+          <Section
+            title={`Current (${current.length})`}
+            open={sections.isOpen('current')}
+            onToggle={() => sections.toggle('current')}
           >
-            <input
-              type="checkbox"
-              className="mt-1"
-              checked={checked.has(o.id)}
-              onChange={() => toggle(o.id)}
-              onClick={(e) => e.stopPropagation()}
-            />
-          </OccCard>
-        ))}
+            {/* Clickable, unlike Coming up: the window is open, so a parent can excuse
+                tonight's chore in advance instead of waiting for it to go missed. */}
+            {current.map((o) => (
+              <OccCard
+                key={o.id}
+                o={o}
+                title={title(o)}
+                kid={kidName(o)}
+                subtitle={`due ${new Date(o.due_at).toLocaleString()}`}
+                selected={selected?.kind === 'occurrence' && selected.id === o.id}
+                onSelect={() => select({ kind: 'occurrence', id: o.id })}
+              />
+            ))}
+          </Section>
+        )}
 
         {misses.length > 0 && (
-          <div className="flex flex-col gap-2">
+          <Section
+            title={`Missed (${misses.length})`}
+            tone="text-rose-400"
+            open={sections.isOpen('missed')}
+            onToggle={() => sections.toggle('missed')}
+          >
             {/* A miss is settled money the parent can still excuse (spec §4.2), and it never
                 reaches the review queue — this is the only place it surfaces unprompted. */}
-            <h2 className="mt-4 text-sm font-semibold text-rose-400">Missed ({misses.length})</h2>
             {misses.map((o) => {
               const also = (sameKey.get(occKey(o)) ?? 1) - 1;
               return (
@@ -336,12 +404,15 @@ export function Inbox() {
                 {hiddenMisses} more in History
               </Link>
             )}
-          </div>
+          </Section>
         )}
 
         {soon.length > 0 && (
-          <div className="flex flex-col gap-2">
-            <h2 className="mt-4 text-sm font-semibold text-slate-400">Coming up</h2>
+          <Section
+            title={`Coming up (${soon.length})`}
+            open={sections.isOpen('upcoming')}
+            onToggle={() => sections.toggle('upcoming')}
+          >
             {soon.map((o) => (
               <OccCard
                 key={o.id}
@@ -354,7 +425,7 @@ export function Inbox() {
                 muted
               />
             ))}
-          </div>
+          </Section>
         )}
       </div>
       <div>

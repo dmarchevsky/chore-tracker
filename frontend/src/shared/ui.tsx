@@ -42,3 +42,45 @@ export function Field({ label, children }: { label: string; children: ReactNode 
     </label>
   );
 }
+
+/** A collapsible group of rows.
+ *
+ * `title` arrives fully composed — "Missed (3)", "Standing (1 in force)" — because the
+ * inbox's headings say different things and a rigid count prop would flatten them. It is
+ * its own <span> so a test can still match the heading text exactly, with the chevron
+ * hidden from the accessible name.
+ */
+export function Section({
+  title,
+  open,
+  onToggle,
+  tone = 'text-slate-400',
+  children,
+}: {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  /** Standing and Missed colour their headings; everything else is muted. */
+  tone?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+        className={`mt-3 flex items-center gap-1.5 text-left text-sm font-semibold ${tone}`}
+      >
+        <span
+          aria-hidden="true"
+          className={`inline-block transition-transform ${open ? 'rotate-90' : ''}`}
+        >
+          ›
+        </span>
+        <span>{title}</span>
+      </button>
+      {open && children}
+    </div>
+  );
+}

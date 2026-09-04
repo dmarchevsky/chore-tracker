@@ -42,6 +42,15 @@ export const useMissed = () =>
     queryFn: () => api.get<Occurrence[]>('/occurrences?status=missed&order=desc&limit=200'),
   });
 
+/** Windows that are open right now, soonest due first: the kid can still submit and nothing
+ *  has arrived yet. `open` is not in the API's inbox set (needs_review, submitted,
+ *  verified_fail), so before this the parent had no sight of a chore in progress at all. */
+export const useOpenNow = () =>
+  useQuery({
+    queryKey: ['inbox', 'open'],
+    queryFn: () => api.get<Occurrence[]>('/occurrences?status=open&order=asc&limit=200'),
+  });
+
 /** Everything still scheduled, soonest first; the view keeps the next one per chore and kid. */
 export const useUpcoming = () =>
   useQuery({
