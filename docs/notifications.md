@@ -48,6 +48,12 @@ Open ChoreKeeper **from the installed icon**, not a browser tab, then:
 The phone asks once whether to allow notifications; say yes. The card then reads *Notifications
 are on for this device*, and a **Turn off** button appears next to it.
 
+A parent's card also has **Send a test**, which pushes a notification to that parent's own
+devices and says what happened — how many devices it reached, or why it reached none. Press it
+first whenever someone reports that notifications stopped: it separates a server with no VAPID
+keys from a phone that never subscribed from a push service that refused the message, which
+from the phone all look identical.
+
 This is **per device**. A kid with a phone and an iPad has to do it on both, and each gets its
 own copy of every notification.
 
@@ -98,7 +104,10 @@ notifications off and on again. Back them up with the rest of your secrets.
 
 ## Troubleshooting
 
-**Check the log first.** Parent → **Ops** → *Recent notifications*. Each row carries a status:
+**Press Send a test first** (Parent → **Settings** → **Notifications**). It tells you in one
+click which layer is broken, and its answers map onto the statuses below.
+
+**Then check the log.** Parent → **Ops** → *Recent notifications*. Each row carries a status:
 
 | Status | Meaning |
 |---|---|

@@ -5,19 +5,31 @@
 import { useEffect, useState } from 'react';
 import { Button, Card, Spinner } from '../shared/ui';
 import { isIos } from './install';
-import { pushState, subscribeToPush, unsubscribeFromPush, type PushState } from './push';
+import {
+  describeTest,
+  pushState,
+  sendTestPush,
+  subscribeToPush,
+  unsubscribeFromPush,
+  type PushState,
+} from './push';
 
 export function PushCard({
   heading,
   pitch,
   installReason,
+  offerTest = false,
 }: {
   heading: string;
   pitch: string;
   installReason: string;
+  /** Show the "Send a test" button. A push that silently never arrives is the failure this
+   *  catches, and the parent is the one who has to diagnose it for the whole household. */
+  offerTest?: boolean;
 }) {
   const [push, setPush] = useState<PushState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [test, setTest] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     void pushState().then(setPush);
@@ -31,7 +43,21 @@ export function PushCard({
 
   async function turnOff() {
     setBusy(true);
+    setTest(null);
     setPush(await unsubscribeFromPush());
+    setBusy(false);
+  }
+
+  async function runTest() {
+    setBusy(true);
+    setTest(null);
+    try {
+      setTest(describeTest(await sendTestPush()));
+    } catch (e) {
+      // A network or auth failure never reached the sender at all, which is a different
+      // diagnosis from a push the server tried and could not deliver.
+      setTest({ ok: false, text: `Couldn’t ask the server to send: ${(e as Error).message}` });
+    }
     setBusy(false);
   }
 
@@ -43,14 +69,31 @@ export function PushCard({
       ) : push === 'subscribed' ? (
         <>
           <p className="mt-1 text-sm text-emerald-400">Notifications are on for this device.</p>
-          <Button
-            className="mt-3 min-h-0 px-3 py-2 text-sm"
-            variant="ghost"
-            onClick={() => void turnOff()}
-            disabled={busy}
-          >
-            Turn off
-          </Button>
+          <div className="mt-3 flex gap-2">
+            {offerTest && (
+              <Button
+                className="min-h-0 px-3 py-2 text-sm"
+                variant="ghost"
+                onClick={() => void runTest()}
+                disabled={busy}
+              >
+                Send a test
+              </Button>
+            )}
+            <Button
+              className="min-h-0 px-3 py-2 text-sm"
+              variant="ghost"
+              onClick={() => void turnOff()}
+              disabled={busy}
+            >
+              Turn off
+            </Button>
+          </div>
+          {test && (
+            <p className={`mt-2 text-sm ${test.ok ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {test.text}
+            </p>
+          )}
         </>
       ) : push === 'denied' ? (
         // subscribeToPush cannot recover from a denial, so don't offer a button that

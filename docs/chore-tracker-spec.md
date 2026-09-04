@@ -608,6 +608,7 @@ POST   /checkin/{kid_token}               public — the token IS the credential
 GET    /push/vapid-key                    any session
 POST   /push/subscribe                    any session
 DELETE /push/subscribe                    any session
+POST   /push/test                         any session — push to your own devices, reports the outcome
 
 GET    /health                            public — liveness probe
 GET    /health/llm                        admin — VLM reachability + model list

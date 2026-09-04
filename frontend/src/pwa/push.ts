@@ -53,3 +53,38 @@ export async function unsubscribeFromPush(): Promise<PushState> {
   await sub.unsubscribe();
   return 'ready';
 }
+
+export interface PushTestResult {
+  status: string;
+  devices: number;
+  error: string | null;
+}
+
+export async function sendTestPush(): Promise<PushTestResult> {
+  return api.post<PushTestResult>('/push/test');
+}
+
+/** Plain English for a status the server reports — the whole point of the test button.
+ *  Ordered by what has to be fixed first: a server with no keys sends nothing to anyone, so
+ *  it outranks "no device subscribed", which the server cannot even see until keys exist. */
+export function describeTest(r: PushTestResult): { ok: boolean; text: string } {
+  if (r.status === 'skipped')
+    return {
+      ok: false,
+      text: 'The server has no VAPID keys, so nothing was sent. Generate a pair with `just vapid-keys` and restart the api and worker — see docs/notifications.md.',
+    };
+  if (r.status === 'no_subs' || r.devices === 0)
+    return {
+      ok: false,
+      text: 'No device is subscribed for you yet — turn notifications on, on each device you want them.',
+    };
+  if (r.status === 'sent')
+    return {
+      ok: true,
+      text: `Sent to ${r.devices} device${r.devices === 1 ? '' : 's'}. If nothing appears within a few seconds, check this device’s notification settings.`,
+    };
+  return {
+    ok: false,
+    text: r.error ? `The push service refused it: ${r.error}` : 'The send failed.',
+  };
+}

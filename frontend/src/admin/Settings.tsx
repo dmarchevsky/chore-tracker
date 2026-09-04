@@ -67,6 +67,7 @@ export function Settings() {
         heading="Notifications"
         pitch="Hear about it when a chore is handed in and when one is missed."
         installReason="Notifications only work once ChoreKeeper is installed on this device."
+        offerTest
       />
 
       <Card className="flex flex-col gap-3">

@@ -1,25 +1,35 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { PushCard } from './PushCard';
-import { pushState, subscribeToPush, unsubscribeFromPush } from './push';
+import {
+  describeTest,
+  pushState,
+  sendTestPush,
+  subscribeToPush,
+  unsubscribeFromPush,
+} from './push';
 import { isIos } from './install';
 
-vi.mock('./push', () => ({
+vi.mock('./push', async (orig) => ({
+  // describeTest is the copy under test in the last block — keep the real one.
+  ...(await orig<typeof import('./push')>()),
   pushState: vi.fn(),
   subscribeToPush: vi.fn(),
   unsubscribeFromPush: vi.fn(),
+  sendTestPush: vi.fn(),
 }));
 vi.mock('./install', () => ({
   isIos: vi.fn(() => false),
   isStandalone: vi.fn(() => true),
 }));
 
-const show = () =>
+const show = (offerTest = false) =>
   render(
     <PushCard
       heading="Reminders"
       pitch="Get a nudge when a chore opens."
       installReason="Reminders only work once ChoreKeeper is on your Home Screen."
+      offerTest={offerTest}
     />,
   );
 
@@ -91,5 +101,60 @@ describe('the notifications card', () => {
     show();
 
     expect(await screen.findByText(/can’t show notifications/)).toBeInTheDocument();
+  });
+});
+
+describe('the test-notification button', () => {
+  it('is offered only where the caller asked for it', async () => {
+    vi.mocked(pushState).mockResolvedValue('subscribed');
+    show();
+
+    expect(await screen.findByRole('button', { name: /turn off/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /send a test/i })).not.toBeInTheDocument();
+  });
+
+  it('reports how many devices the server actually reached', async () => {
+    vi.mocked(pushState).mockResolvedValue('subscribed');
+    vi.mocked(sendTestPush).mockResolvedValue({ status: 'sent', devices: 2, error: null });
+    show(true);
+
+    fireEvent.click(await screen.findByRole('button', { name: /send a test/i }));
+
+    expect(await screen.findByText(/Sent to 2 devices/)).toBeInTheDocument();
+  });
+
+  it('names the server-side fix rather than blaming the phone', async () => {
+    // The failure this button exists for: nothing arrives and the phone looks broken when
+    // it is the server that has no keys.
+    vi.mocked(pushState).mockResolvedValue('subscribed');
+    vi.mocked(sendTestPush).mockResolvedValue({ status: 'skipped', devices: 1, error: null });
+    show(true);
+
+    fireEvent.click(await screen.findByRole('button', { name: /send a test/i }));
+
+    expect(await screen.findByText(/no VAPID keys/)).toBeInTheDocument();
+  });
+
+  it('says when the request never reached the server at all', async () => {
+    vi.mocked(pushState).mockResolvedValue('subscribed');
+    vi.mocked(sendTestPush).mockRejectedValue(new Error('could not reach ChoreKeeper'));
+    show(true);
+
+    fireEvent.click(await screen.findByRole('button', { name: /send a test/i }));
+
+    expect(await screen.findByText(/could not reach ChoreKeeper/)).toBeInTheDocument();
+  });
+});
+
+describe('describeTest', () => {
+  it('puts the missing server keys ahead of the missing subscription', () => {
+    // Both are true on a fresh stack; only one of them blocks everyone at once.
+    expect(describeTest({ status: 'skipped', devices: 0, error: null }).text).toMatch(/VAPID/);
+  });
+
+  it('surfaces the push service’s own words on a failure', () => {
+    const r = describeTest({ status: 'failed', devices: 1, error: 'WebPushException: 403' });
+    expect(r.ok).toBe(false);
+    expect(r.text).toMatch(/403/);
   });
 });

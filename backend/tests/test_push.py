@@ -148,3 +148,42 @@ async def test_dispute_notifies_admins(client, db_session, household, admin_user
     assert r.status_code == 201  # the dispute row is created and returned
     logs = (await db_session.execute(select(NotificationLog))).scalars().all()
     assert any(log.kind == "admin.dispute" for log in logs)
+
+
+async def test_test_push_says_the_server_has_no_vapid_keys(client, admin_user):
+    # The button's whole job is telling the parent *why* nothing arrived: an unconfigured
+    # server and a phone that never subscribed are indistinguishable from the phone.
+    h = await _admin_login(client)
+    r = await client.post("/api/v1/push/test", headers=h)
+
+    assert r.status_code == 200
+    assert r.json() == {"status": "skipped", "devices": 0, "error": None}
+
+
+async def test_test_push_says_when_no_device_is_subscribed(client, admin_user, monkeypatch):
+    # Reachable only once VAPID is configured — until then `notify` skips before it ever
+    # looks for subscriptions, which is why the case above wins on a bare dev stack.
+    monkeypatch.setattr("app.services.notifications._vapid_ready", lambda: True)
+    h = await _admin_login(client)
+
+    r = await client.post("/api/v1/push/test", headers=h)
+
+    assert r.json() == {"status": "no_subs", "devices": 0, "error": None}
+
+
+async def test_test_push_counts_the_devices_it_tried(client, db_session, admin_user):
+    h = await _admin_login(client)
+    await client.post("/api/v1/push/subscribe", json=SUB, headers=h)
+
+    r = await client.post("/api/v1/push/test", headers=h)
+
+    # No VAPID keys in tests, so the send is skipped — but the device count is still the
+    # honest answer to "is this phone even registered?".
+    assert r.json()["devices"] == 1
+    assert r.json()["status"] == "skipped"
+    logged = (await db_session.execute(select(NotificationLog))).scalars().all()
+    assert [x.kind for x in logged] == ["test"]
+
+
+async def test_test_push_needs_a_session(client):
+    assert (await client.post("/api/v1/push/test")).status_code == 401
