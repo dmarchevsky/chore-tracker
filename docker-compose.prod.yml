@@ -90,6 +90,9 @@ services:
       # --- web push (empty pair = push disabled) ---
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      # Contact address in the VAPID `sub` claim. Empty derives mailto:admin@<hostname>,
+      # which is valid; a real address is what a push service would use to reach you.
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
     depends_on:
       db:
         condition: service_healthy

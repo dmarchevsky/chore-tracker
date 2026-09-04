@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     # --- Web Push (Phase 5) ------------------------------------------------
     vapid_public_key: str = Field(default="", alias="VAPID_PUBLIC_KEY")
     vapid_private_key: str = Field(default="", alias="VAPID_PRIVATE_KEY")
+    # The VAPID `sub` claim: who to contact about this application server. Push services
+    # require a real `mailto:` (or https URL) and reject anything else outright — so it
+    # cannot be derived from PUBLIC_BASE_URL by pasting it after an "@". Left empty, a
+    # mailto is built from that URL's *hostname*, which is valid; set it to a real address
+    # so a push service with a problem can reach a person.
+    vapid_subject: str = Field(default="", alias="VAPID_SUBJECT")
 
     # --- Auth / sessions --------------------------------------------------
     session_secret: str = Field(default=DEFAULT_SESSION_SECRET, alias="SESSION_SECRET")

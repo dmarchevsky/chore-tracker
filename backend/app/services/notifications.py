@@ -13,6 +13,7 @@ import logging
 import uuid
 from collections.abc import Sequence
 from datetime import UTC
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -38,6 +39,26 @@ def _vapid_ready() -> bool:
     return bool(s.vapid_private_key and s.vapid_public_key)
 
 
+def vapid_subject() -> str:
+    """The VAPID ``sub`` claim: a contact for whoever runs this application server.
+
+    Push services validate it and refuse the whole request if it is not a real ``mailto:``
+    (or https URL) — Apple and Mozilla both do. This used to be built as
+    ``f"mailto:admin@{public_base_url}"``, which yields
+    ``mailto:admin@https://chores.example.net``: a URL pasted where an email address goes,
+    rejected by pywebpush before a byte left the machine, and reported as the confusing
+    "Missing 'sub' from claims". Falling back to the *hostname* keeps it valid without
+    configuration; VAPID_SUBJECT sets a real address.
+    """
+    s = get_settings()
+    if s.vapid_subject:
+        subject = s.vapid_subject.strip()
+        # An address on its own is the easy thing to write in an env file; make it a URI.
+        return subject if ":" in subject.split("@")[0] else f"mailto:{subject}"
+    host = urlparse(s.public_base_url).hostname or "localhost"
+    return f"mailto:admin@{host}"
+
+
 def _send_one(sub: PushSubscription, payload: dict) -> None:
     """Sync pywebpush call — run via asyncio.to_thread. Raises on transport failure."""
     from pywebpush import webpush
@@ -50,7 +71,7 @@ def _send_one(sub: PushSubscription, payload: dict) -> None:
         },
         data=json.dumps(payload),
         vapid_private_key=s.vapid_private_key,
-        vapid_claims={"sub": f"mailto:admin@{get_settings().public_base_url}"},
+        vapid_claims={"sub": vapid_subject()},
     )
 
 

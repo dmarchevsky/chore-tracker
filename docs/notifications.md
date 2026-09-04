@@ -98,6 +98,11 @@ docker compose up -d api worker              # dev
 docker compose -f docker-compose.prod.yml up -d api worker   # prod
 ```
 
+Optionally set `VAPID_SUBJECT` to a real contact address (`parent@example.com`, or a full
+`mailto:`/`https:` URI). It goes in the `sub` claim every push carries — the address a push
+service would use to reach whoever runs the server. Left empty it is derived from
+`PUBLIC_BASE_URL`'s hostname, which is valid and needs no thought.
+
 **The keys are permanent.** Every existing subscription is bound to the public key that
 created it, so rotating the pair silently breaks every phone in the house until each one turns
 notifications off and on again. Back them up with the rest of your secrets.
@@ -115,6 +120,11 @@ click which layer is broken, and its answers map onto the statuses below.
 | `no_subs` | that person has no device subscribed; they never turned it on, or turned it off |
 | `skipped` | the server has no VAPID keys (step 3) |
 | `failed` | the push service rejected it; the error is on the row |
+
+A `failed` row saying **`VapidException: Missing 'sub' from claims`** means the contact claim
+is malformed rather than absent — check `VAPID_SUBJECT` is an address or a `mailto:`/`https:`
+URI, not a bare URL. (Before this was fixed the server built one by pasting `PUBLIC_BASE_URL`
+after an `@`, which produced `mailto:admin@https://host` and was refused every time.)
 
 A subscription the push service reports as gone (404/410) is deleted automatically, so a phone
 that was wiped or reinstalled stops producing failures on its own.
