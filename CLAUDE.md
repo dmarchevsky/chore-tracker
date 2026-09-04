@@ -109,8 +109,6 @@ History on `main` is **linear** (rebase + fast-forward, no merge commits).
    <phase-tag>: <imperative summary>
 
    <what & why; cite spec §section / [D] where relevant>
-
-   Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
    ```
    e.g. `phase2: add cadence parser for daily/weekly/monthly rules`.
 6. **Rebase onto `main`, re-verify:** in the worktree `git rebase main`, resolve, then
