@@ -82,6 +82,17 @@ describe('admin Kids', () => {
     });
   });
 
+  it('is the one place the check-in webhook lives, warning when it goes quiet', async () => {
+    setup();
+    await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Alice'));
+
+    expect(await screen.findByText('http://x/api/v1/checkin/t')).toBeInTheDocument();
+    // The mock's token has never been used, so the row says so and flags the automation.
+    expect(screen.getByText(/never used — automation may be broken/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /rotate token/i })).toBeInTheDocument();
+  });
+
   it('deactivates a kid', async () => {
     const calls = setup();
     await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());

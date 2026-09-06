@@ -58,10 +58,6 @@ function setup(ledger: unknown[] = [PENALTY]) {
     if (url.includes('/ledger')) return Promise.resolve(json(ledger));
     if (url.includes('/balance'))
       return Promise.resolve(json({ child_id: 'k1', balance_cents: -500, currency: 'USD' }));
-    if (url.includes('/checkin-token'))
-      return Promise.resolve(
-        json({ token: 't', webhook_url: 'http://x/t', last_used_at: null, stale: false }),
-      );
     if (url.endsWith('/children')) return Promise.resolve(json([ALICE]));
     return Promise.resolve(json([]));
   });
@@ -80,6 +76,17 @@ function setup(ledger: unknown[] = [PENALTY]) {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+});
+
+describe('admin Money', () => {
+  it('leaves the check-in webhook to the Kids screen', async () => {
+    setup();
+    await screen.findByText(/Walk the dog/);
+
+    // A per-kid credential is not money, and Kids is where it can be rotated.
+    expect(screen.queryByText(/Check-in webhook/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/checkin/)).not.toBeInTheDocument();
+  });
 });
 
 describe('admin Money statement', () => {

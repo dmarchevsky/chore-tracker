@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import {
   useChildBalance,
   useChildLedger,
-  useCheckinToken,
   useChildren,
   useDecision,
   usePayout,
@@ -46,14 +45,13 @@ export function Money() {
 function ChildPanel({ childId }: { childId: string }) {
   const balance = useChildBalance(childId);
   const ledger = useChildLedger(childId);
-  const token = useCheckinToken(childId);
   const payout = usePayout();
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('cash');
   const [note, setNote] = useState('');
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
+    <div className="grid gap-4">
       <Card>
         <p className="text-sm text-slate-400">Balance</p>
         <p
@@ -106,24 +104,7 @@ function ChildPanel({ childId }: { childId: string }) {
         </div>
       </Card>
 
-      <Card>
-        <p className="text-sm font-semibold">Check-in webhook</p>
-        {token.data && (
-          <>
-            <code className="mt-1 block break-all rounded bg-slate-800 p-2 text-xs">
-              {token.data.webhook_url}
-            </code>
-            <p className={`mt-1 text-xs ${token.data.stale ? 'text-amber-400' : 'text-slate-400'}`}>
-              {token.data.last_used_at
-                ? `last seen ${new Date(token.data.last_used_at).toLocaleString()}`
-                : 'never used'}
-              {token.data.stale && ' — automation may be broken'}
-            </p>
-          </>
-        )}
-      </Card>
-
-      <div className="md:col-span-2">
+      <div>
         <p className="mb-1 text-sm font-semibold">Statement</p>
         {(ledger.data ?? []).map((e) => (
           <StatementRow key={e.id} entry={e} />

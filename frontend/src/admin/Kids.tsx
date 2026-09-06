@@ -171,9 +171,23 @@ function KidRow({ kid }: { kid: Child }) {
           <div>
             <p className="text-slate-400">Check-in webhook</p>
             {token.data && (
-              <code className="mt-1 block break-all rounded bg-slate-800 p-2 text-xs">
-                {token.data.webhook_url}
-              </code>
+              <>
+                <code className="mt-1 block break-all rounded bg-slate-800 p-2 text-xs">
+                  {token.data.webhook_url}
+                </code>
+                {/* The one place this is now said: a token that stops being used means the
+                    kid's automation is broken, and nothing else on this screen would show it. */}
+                <p
+                  className={`mt-1 text-xs ${
+                    token.data.stale ? 'text-amber-400' : 'text-slate-400'
+                  }`}
+                >
+                  {token.data.last_used_at
+                    ? `last seen ${new Date(token.data.last_used_at).toLocaleString()}`
+                    : 'never used'}
+                  {token.data.stale && ' — automation may be broken'}
+                </p>
+              </>
             )}
             <Button
               className="mt-2 min-h-0 px-3 py-2 text-xs"
