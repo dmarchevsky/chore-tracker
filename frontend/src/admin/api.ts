@@ -58,6 +58,31 @@ export const useUpcoming = () =>
     queryFn: () => api.get<Occurrence[]>('/occurrences?status=pending&order=asc&limit=500'),
   });
 
+/** Local midnight either side of today. The API filters `from`/`to` on `due_at`, and a
+ *  parent's "today" is the household clock, not UTC (spec §8.4). Midnight is stable for the
+ *  rest of the day, so it can key the query without refetching on every render. */
+function today() {
+  const from = new Date();
+  from.setHours(0, 0, 0, 0);
+  const to = new Date(from);
+  to.setDate(to.getDate() + 1);
+  return { from: from.toISOString(), to: to.toISOString() };
+}
+
+/** Today's finished chores, latest due first. Neither status is in the API's inbox set: an
+ *  approval leaves the queue and `verified_pass` never enters it, so the parent could see
+ *  everything still owed and nothing actually done. */
+export const useCompletedToday = () => {
+  const { from, to } = today();
+  const qs = new URLSearchParams({ from, to, order: 'desc', limit: '200' });
+  qs.append('status', 'approved');
+  qs.append('status', 'verified_pass');
+  return useQuery({
+    queryKey: ['inbox', 'done', from],
+    queryFn: () => api.get<Occurrence[]>(`/occurrences?${qs}`),
+  });
+};
+
 export const useAdminOccurrence = (id: string) =>
   useQuery({
     queryKey: ['occurrence', id],

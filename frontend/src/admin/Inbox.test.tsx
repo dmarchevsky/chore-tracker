@@ -92,6 +92,18 @@ const openNow = [
   { ...occurrence, id: 'n3', chore_id: 'c21', status: 'open', due_at: nextWeek },
 ];
 
+/** Today's finished work: one the parent approved, one the model passed on its own. */
+const finishedToday = [
+  { ...occurrence, id: 'd1', chore_id: 'c30', status: 'approved' },
+  { ...occurrence, id: 'd2', chore_id: 'c31', assignee_id: 'k2', status: 'verified_pass' },
+];
+
+/** Chores of their own, so a finished row can't be confused with an open or missed one. */
+const doneChores = [
+  { id: 'c30', title: 'Set the table' },
+  { id: 'c31', title: 'Walk the dog' },
+];
+
 const submission = {
   id: 's1',
   kind: 'photo',
@@ -192,6 +204,7 @@ function renderInbox(
   route = '/admin',
   misses: unknown[] = missed,
   queue: unknown[] = [occurrence],
+  finished: unknown[] = [],
 ) {
   vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
     const url = String(input);
@@ -212,6 +225,7 @@ function renderInbox(
         ]),
       );
     if (url.includes('status=missed')) return Promise.resolve(json(misses));
+    if (url.includes('status=verified_pass')) return Promise.resolve(json(finished));
     if (url.includes('/occurrences?') && url.includes('status=open'))
       return Promise.resolve(json(openNow));
     if (url.includes('status=pending')) return Promise.resolve(json(pending));
@@ -240,6 +254,7 @@ function renderInbox(
         ]),
       );
     if (url.endsWith('/occurrences/o1')) return Promise.resolve(json(occurrence));
+    if (url.endsWith('/occurrences/d1')) return Promise.resolve(json(finished[0]));
     if (url.endsWith('/occurrences/o2')) return Promise.resolve(json(missed[0]));
     if (url.includes('/disputes')) return Promise.resolve(json([dispute]));
     if (url.includes('/submissions')) return Promise.resolve(json([submission]));
@@ -315,6 +330,48 @@ describe('admin Inbox', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('shows what the kids finished today, model-passed work included', async () => {
+    cleanup();
+    renderInbox(doneChores, '/admin', missed, [occurrence], finishedToday);
+
+    // Open on arrival: what got done today is the half of the day the queue never shows.
+    expect(await screen.findByText('Set the table')).toBeInTheDocument();
+    expect(screen.getByText(/^Complete \(2\)/)).toBeInTheDocument();
+    expect(screen.getByText('Walk the dog')).toBeInTheDocument();
+    // A parent's two ways of being done, not one raw enum apiece.
+    expect(screen.getByText('Approved')).toBeInTheDocument();
+    expect(screen.getByText('AI passed')).toBeInTheDocument();
+    expect(screen.queryByText('verified_pass')).not.toBeInTheDocument();
+  });
+
+  it('opens a finished chore, so an approval can be looked at again', async () => {
+    cleanup();
+    renderInbox(doneChores, '/admin', missed, [occurrence], finishedToday);
+
+    fireEvent.click((await screen.findByText('Set the table')).closest('button')!);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^approve$/i })).toBeInTheDocument(),
+    );
+  });
+
+  it('leaves the section out entirely when nothing is done yet', async () => {
+    await queueRow();
+    expect(screen.queryByText(/^Complete/)).not.toBeInTheDocument();
+  });
+
+  it('asks only for today, so yesterday’s approvals stay in History', async () => {
+    cleanup();
+    const urls: string[] = [];
+    renderInbox(doneChores, '/admin', missed, [occurrence], finishedToday);
+    for (const call of vi.mocked(globalThis.fetch).mock.calls) urls.push(String(call[0]));
+
+    const done = urls.find((u) => u.includes('status=verified_pass'))!;
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    expect(done).toContain(`from=${encodeURIComponent(midnight.toISOString())}`);
+    expect(done).toContain('status=approved');
   });
 
   it('names the status and the kid instead of printing the raw enum', async () => {

@@ -1,7 +1,14 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { useInbox, useDecision, useMissed, useOpenNow, useUpcoming } from './api';
+import {
+  useCompletedToday,
+  useInbox,
+  useDecision,
+  useMissed,
+  useOpenNow,
+  useUpcoming,
+} from './api';
 import { useAdminChores, useChildren, useOpenDisputes } from './api';
 import { ReviewDetail } from './ReviewDetail';
 import { StandingDetail } from './StandingDetail';
@@ -34,6 +41,7 @@ const DEFAULT_OPEN: Record<string, boolean> = {
   disputes: true,
   review: true,
   current: true,
+  done: true,
   standing: false,
   penalties: false,
   missed: false,
@@ -118,6 +126,9 @@ export function Inbox() {
   // Windows open right now. Nothing else on this screen sees them: they are past `pending`
   // and not yet in the review queue, so a chore in progress used to be invisible here.
   const openNow = useOpenNow();
+  // What the kids actually finished today. `verified_pass` is terminal and never reaches the
+  // review queue, so this work was invisible here however much of it got done.
+  const done = useCompletedToday();
   const upcoming = useUpcoming();
   const chores = useAdminChores();
   const kids = useChildren();
@@ -147,6 +158,7 @@ export function Inbox() {
     chores.isLoading ||
     missed.isLoading ||
     openNow.isLoading ||
+    done.isLoading ||
     upcoming.isLoading
   )
     return <Spinner />;
@@ -171,6 +183,8 @@ export function Inbox() {
   // because a daily chore otherwise fills the list with one row per day, but an open window
   // is live work a parent might act on, so a second one must not be hidden.
   const current = openNow.data ?? [];
+  // Every row is today's, so it needs neither the dedupe nor the cap the backlog lists want.
+  const completed = done.data ?? [];
   // A daily chore materialises a row per day across the horizon, per kid; the parent only
   // needs to know whose turn is next on each chore.
   const soon = (upcoming.data ?? []).filter(firstPerKey(occKey));
@@ -368,6 +382,32 @@ export function Inbox() {
                 title={title(o)}
                 kid={kidName(o)}
                 subtitle={`due ${new Date(o.due_at).toLocaleString()}`}
+                selected={selected?.kind === 'occurrence' && selected.id === o.id}
+                onSelect={() => select({ kind: 'occurrence', id: o.id })}
+              />
+            ))}
+          </Section>
+        )}
+
+        {completed.length > 0 && (
+          <Section
+            title={`Complete (${completed.length})`}
+            tone="text-emerald-400"
+            open={sections.isOpen('done')}
+            onToggle={() => sections.toggle('done')}
+          >
+            {/* Clickable like the rest: a parent who wants a closer look at what passed —
+                or wants to take an approval back — starts from the same row. */}
+            {completed.map((o) => (
+              <OccCard
+                key={o.id}
+                o={o}
+                title={title(o)}
+                kid={kidName(o)}
+                subtitle={`due ${new Date(o.due_at).toLocaleTimeString([], {
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}`}
                 selected={selected?.kind === 'occurrence' && selected.id === o.id}
                 onSelect={() => select({ kind: 'occurrence', id: o.id })}
               />
