@@ -5,7 +5,8 @@ from __future__ import annotations
 import enum
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,6 +44,13 @@ class User(TimestampMixin, Base):
     password_hash: Mapped[str | None] = mapped_column(String(255), default=None)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Notification categories this user has switched off (app/services/notifications.py).
+    # Only the mutes are stored, never the whole set: a category added later starts on for
+    # everyone, which is the safe direction for something a household relies on hearing.
+    notification_mutes: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb")
+    )
 
     @property
     def is_admin(self) -> bool:

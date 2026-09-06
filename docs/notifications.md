@@ -57,26 +57,48 @@ from the phone all look identical.
 This is **per device**. A kid with a phone and an iPad has to do it on both, and each gets its
 own copy of every notification.
 
+## Choose what to send
+
+Under the same card, **What to send me** lists the kinds of notification that account can get,
+each one on until you switch it off. That part is **per person, not per device**: switching one
+off silences it everywhere that person is signed in.
+
+Everyone sees only their own list — a kid is never offered a parent's categories, and nobody can
+change anyone else's. Parents get *chores needing my review*, *chores my kids finished*, *missed
+chores*, *disputes my kids file*. Kids get *a chore opens*, *due soon*, *how my check-in went*,
+*a parent asks for a redo, or replies*, and *missed chores, fines and standing rules*.
+
+**Send a test ignores all of it.** It is the diagnostic for whether push works on a device at
+all, so it goes through even with everything switched off.
+
 If the phone was told "no" at some point, the card says so and offers no button — a refusal
 cannot be undone from inside the page. Clear it in **iOS Settings → Notifications →
 ChoreKeeper**, or Chrome's **Site settings → Notifications**, then come back.
 
 ## What gets sent
 
-| Who | When | Lands on |
-|---|---|---|
-| Kid | a chore's window opens | that chore |
-| Kid | 30 minutes before it is due, if still not handed in | that chore |
-| Kid | the window closed without a check-in | that chore |
-| Kid | a parent approves, rejects or asks for a redo — carrying the parent's note | that chore |
-| Parent | a chore is handed in and needs a look | the review screen |
-| Parent | a chore was missed | the review screen |
+The **Category** column is the switch in *What to send me* that turns each row off.
+
+| Who | When | Category | Lands on |
+|---|---|---|---|
+| Kid | a chore's window opens | A chore opens | that chore |
+| Kid | 30 minutes before it is due, if still not handed in | Due soon | that chore |
+| Kid | a check-in is graded — passed, failed, sent to a parent, or needs a retake | How my check-in went | that chore |
+| Kid | a parent asks for a redo, or replies to a dispute — carrying their note | A parent asks for a redo, or replies | that chore |
+| Kid | the window closed without a check-in, a fine is charged, or a standing rule starts or ends | Missed chores, fines and standing rules | that chore, or the home screen |
+| Parent | a chore is handed in and needs a look | Chores needing my review | the review screen |
+| Parent | a chore finished on its own — auto-accepted, or passed by the model | Chores my kids finished | the inbox |
+| Parent | a chore was missed | Missed chores | the review screen |
+| Parent | a kid files a dispute | Disputes my kids file | the review screen |
 
 Tapping one opens the app on the thing it is about.
 
 Two deliberate quiet spots: an **unassigned** ("anyone") chore nudges nobody, because there is
 no one person it belongs to — but a parent is still told when it is missed. And a chore already
 handed in is never nudged at T-30.
+
+A parent approving a chore themselves sends **no** "chores my kids finished" push — they just
+made that decision. That category is for the work that completes without them.
 
 Every send — successful or not — is written to the notification log, whether or not any phone
 was subscribed.
@@ -118,6 +140,7 @@ click which layer is broken, and its answers map onto the statuses below.
 |---|---|
 | `sent` | it left the building — anything after this is the phone or its push service |
 | `no_subs` | that person has no device subscribed; they never turned it on, or turned it off |
+| `muted` | that person switched this category off in *What to send me* |
 | `skipped` | the server has no VAPID keys (step 3) |
 | `failed` | the push service rejected it; the error is on the row |
 

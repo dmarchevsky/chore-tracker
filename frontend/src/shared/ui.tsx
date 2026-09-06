@@ -84,3 +84,44 @@ export function Section({
     </div>
   );
 }
+
+/** An on/off switch with its label, sized for a thumb like Button.
+ *
+ * A real <input type="checkbox">, not a styled div: it is what a screen reader and a
+ * keyboard already know how to operate, and the visible track is drawn from its state. */
+export function Toggle({
+  label,
+  checked,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="flex min-h-[48px] cursor-pointer items-center justify-between gap-3 text-sm">
+      <span>{label}</span>
+      <input
+        type="checkbox"
+        className="peer sr-only"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span
+        aria-hidden="true"
+        className={`relative h-6 w-11 shrink-0 rounded-full transition peer-disabled:opacity-40 ${
+          checked ? 'bg-sky-500' : 'bg-slate-700'
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+            checked ? 'left-[22px]' : 'left-0.5'
+          }`}
+        />
+      </span>
+    </label>
+  );
+}

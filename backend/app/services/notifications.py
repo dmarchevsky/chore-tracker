@@ -12,6 +12,7 @@ import json
 import logging
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -75,6 +76,63 @@ def _send_one(sub: PushSubscription, payload: dict) -> None:
     )
 
 
+# --- categories -------------------------------------------------------------
+#
+# What a user can switch off, one step coarser than `kind`: nobody wants to decide about
+# `verdict.retake` separately from `verdict.pass`, and the `admin.*` / `verdict.*` /
+# `standing.*` prefixes already group most of it. A kind with no category here can never be
+# muted — `test` is deliberately one of those, since it is the diagnostic for whether any of
+# this works at all.
+
+
+@dataclass(frozen=True)
+class Category:
+    key: str
+    label: str
+    role: UserRole
+    #: exact kinds, or a `prefix.*` that matches a family of them
+    kinds: tuple[str, ...]
+
+
+CATEGORIES: tuple[Category, ...] = (
+    Category("chore_open", "A chore opens", UserRole.child, ("window_open",)),
+    Category("due_soon", "Due soon (30 minutes before)", UserRole.child, ("due_soon",)),
+    Category("results", "How my check-in went", UserRole.child, ("verdict.*",)),
+    Category(
+        "messages",
+        "A parent asks for a redo, or replies",
+        UserRole.child,
+        ("redo", "dispute.resolved"),
+    ),
+    Category(
+        "money_rules",
+        "Missed chores, fines and standing rules",
+        UserRole.child,
+        ("missed", "penalty.applied", "standing.*"),
+    ),
+    Category("review", "Chores needing my review", UserRole.admin, ("admin.needs_review",)),
+    Category("completed", "Chores my kids finished", UserRole.admin, ("admin.completed",)),
+    Category("misses", "Missed chores", UserRole.admin, ("admin.missed",)),
+    Category("disputes", "Disputes my kids file", UserRole.admin, ("admin.dispute",)),
+)
+
+
+def categories_for(role: UserRole) -> list[Category]:
+    return [c for c in CATEGORIES if c.role == role]
+
+
+def category_for(kind: str) -> Category | None:
+    """Which category owns this kind, or None when it is not something anyone can mute."""
+    for c in CATEGORIES:
+        for pattern in c.kinds:
+            if pattern.endswith("*"):
+                if kind.startswith(pattern[:-1]):
+                    return c
+            elif kind == pattern:
+                return c
+    return None
+
+
 async def notify(
     db: AsyncSession,
     *,
@@ -88,7 +146,25 @@ async def notify(
     db.add(entry)
 
     try:
-        if user_id is None or not _vapid_ready():
+        if user_id is None:
+            entry.status = "skipped"
+            await db.flush()
+            return entry
+
+        # Every sender funnels through here, so one lookup covers all of them — including
+        # the per-recipient fan-outs. A muted send is still logged: the ops list is the only
+        # place anyone can see why a notification never arrived (spec §4.5). Checked ahead of
+        # the VAPID guard on purpose — when someone has switched a category off, that is the
+        # reason it did not go, whatever the server happens to be configured with.
+        recipient = await db.get(User, user_id)
+        category = category_for(kind)
+        if recipient is not None and category is not None:
+            if category.key in (recipient.notification_mutes or []):
+                entry.status = "muted"
+                await db.flush()
+                return entry
+
+        if not _vapid_ready():
             entry.status = "skipped"
             await db.flush()
             return entry
@@ -172,6 +248,26 @@ async def notify_needs_review(db: AsyncSession, occ: ChoreOccurrence) -> None:
         title="A chore needs your review",
         body=chore.title if chore else "Open the review inbox",
         url=f"/admin/review/{occ.id}",
+    )
+
+
+async def notify_completed(db: AsyncSession, occ: ChoreOccurrence) -> None:
+    """Tell the parents a chore finished without them (spec §6.3).
+
+    Only for work that completes on its own — an auto-accepted check-in, or one the model
+    passed under `llm_auto`. A chore the parent approved themselves sends nothing: they just
+    made that decision, and a push saying so is noise. This is the other half of the day from
+    `admin.needs_review`, which is why the Inbox grew a Complete section to match.
+    """
+    chore = await db.get(Chore, occ.chore_id)
+    kid = await db.get(User, occ.assignee_id) if occ.assignee_id else None
+    title = chore.title if chore else "A chore"
+    await notify_admins(
+        db,
+        kind="admin.completed",
+        title="A chore was done",
+        body=f"{kid.display_name} finished {title}." if kid else f"{title} was checked in.",
+        url="/admin",
     )
 
 

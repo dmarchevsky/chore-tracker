@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { Settings } from './Settings';
 import { pushState } from '../pwa/push';
@@ -21,16 +22,30 @@ vi.mock('../auth/AuthContext', () => ({
   useAuth: () => ({ me: { email: 'alice@example.com' }, logout: vi.fn() }),
 }));
 
-const show = () =>
-  render(
-    <MemoryRouter>
-      <Settings />
-    </MemoryRouter>,
+const show = () => {
+  // The page asks the server which notification categories this kid has; the card itself is
+  // covered in src/pwa/NotificationPrefs.test.tsx.
+  vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+    Promise.resolve(
+      new Response(JSON.stringify({ categories: [{ key: 'due_soon', label: 'Due soon' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    ),
   );
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <Settings />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+};
 
 afterEach(() => {
   cleanup();
-  vi.clearAllMocks();
+  vi.restoreAllMocks();
 });
 
 describe('kid settings', () => {
@@ -40,6 +55,14 @@ describe('kid settings', () => {
 
     expect(await screen.findByText('Reminders')).toBeInTheDocument();
     expect(screen.getByText(/nudge when a chore opens/)).toBeInTheDocument();
+  });
+
+  it('lets a kid pick what to hear about, not just whether to hear anything', async () => {
+    vi.mocked(pushState).mockResolvedValue('subscribed');
+    show();
+
+    expect(await screen.findByLabelText('Due soon')).toBeChecked();
+    expect(screen.getByText(/per person, not per device/)).toBeInTheDocument();
   });
 
   it('says whether the app is installed', async () => {

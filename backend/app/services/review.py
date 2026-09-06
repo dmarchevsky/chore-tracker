@@ -184,6 +184,7 @@ async def route_submission(
         occurrence.status = OccurrenceStatus.verified_pass
         await ledger.credit_earning(db, occurrence=occurrence, reason="auto-accepted")
         await notifications.notify_verdict(db, occurrence, v)
+        await notifications.notify_completed(db, occurrence)
         return
 
     occurrence.status = OccurrenceStatus.submitted  # manual -> waits for a human

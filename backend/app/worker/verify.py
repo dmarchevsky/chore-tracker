@@ -143,6 +143,9 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
     await notifications.notify_verdict(db, occ, v)
     if occ.status == OccurrenceStatus.needs_review:
         await notifications.notify_needs_review(db, occ)
+    # Passed on its own: nobody would otherwise hear that the chore is done.
+    if occ.status == OccurrenceStatus.verified_pass:
+        await notifications.notify_completed(db, occ)
     log.info("verify job %s -> %s (conf %.2f)", job.id, result.outcome, result.confidence)
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, func, select
 
@@ -107,3 +107,51 @@ async def send_test(db: DbDep, user: CurrentUser) -> PushTestOut:
         url="/admin/settings" if user.is_admin else "/me/settings",
     )
     return PushTestOut(status=entry.status, devices=devices, error=entry.error)
+
+
+class NotificationCategoryOut(BaseModel):
+    key: str
+    label: str
+
+
+class PushSettingsOut(BaseModel):
+    """The categories this caller can switch off, and which ones they have."""
+
+    categories: list[NotificationCategoryOut]
+    muted: list[str]
+
+
+class PushSettingsIn(BaseModel):
+    muted: list[str]
+
+
+def _settings_out(user) -> PushSettingsOut:
+    cats = notifications.categories_for(user.role)
+    return PushSettingsOut(
+        categories=[NotificationCategoryOut(key=c.key, label=c.label) for c in cats],
+        muted=[k for k in (user.notification_mutes or []) if k in {c.key for c in cats}],
+    )
+
+
+@router.get("/settings")
+async def get_push_settings(user: CurrentUser) -> PushSettingsOut:
+    """Only the caller's own role's categories — a kid is never offered a parent's."""
+    return _settings_out(user)
+
+
+@router.patch("/settings")
+async def set_push_settings(
+    payload: PushSettingsIn, db: DbDep, user: CurrentUser
+) -> PushSettingsOut:
+    """Replace the muted set. Self-scoped: there is no path to anyone else's settings."""
+    allowed = {c.key for c in notifications.categories_for(user.role)}
+    unknown = sorted(set(payload.muted) - allowed)
+    if unknown:
+        raise HTTPException(
+            422,
+            f"not a notification category for this account: {', '.join(unknown)}",
+        )
+    # A new list, not an in-place edit: SQLAlchemy tracks JSONB by assignment.
+    user.notification_mutes = sorted(set(payload.muted))
+    await db.flush()
+    return _settings_out(user)

@@ -12,6 +12,7 @@ import { setCsrfToken } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { Button, Card, Spinner } from '../shared/ui';
 import { PushCard } from '../pwa/PushCard';
+import { NotificationPrefs } from '../pwa/NotificationPrefs';
 
 export function Settings() {
   const settings = useSettings();
@@ -69,6 +70,8 @@ export function Settings() {
         installReason="Notifications only work once ChoreKeeper is installed on this device."
         offerTest
       />
+
+      <NotificationPrefs />
 
       <Card className="flex flex-col gap-3">
         <h2 className="font-bold">Vision model &amp; connection</h2>

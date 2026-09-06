@@ -57,6 +57,10 @@ function setup() {
     if (url.includes('/admin/profile'))
       return Promise.resolve(json({ email: 'moved@example.com', signed_out: true }));
     if (url.includes('/auth/me')) return Promise.resolve(json(ME));
+    if (url.includes('/push/settings'))
+      return Promise.resolve(
+        json({ categories: [{ key: 'review', label: 'Chores needing my review' }], muted: [] }),
+      );
     if (method === 'PATCH') return Promise.resolve(json(SETTINGS));
     if (url.includes('/admin/llm/models'))
       return Promise.resolve(json({ reachable: true, models: ['gemma3', 'qwen3-vl'] }));

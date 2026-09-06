@@ -5,6 +5,7 @@ import { Card, Button } from '../shared/ui';
 import { useAuth } from '../auth/AuthContext';
 import { isStandalone } from '../pwa/install';
 import { PushCard } from '../pwa/PushCard';
+import { NotificationPrefs } from '../pwa/NotificationPrefs';
 
 export function Settings() {
   const { me, logout } = useAuth();
@@ -18,6 +19,8 @@ export function Settings() {
         pitch="Get a nudge when a chore opens, when it’s nearly due, and when a parent replies."
         installReason="Reminders only work once ChoreKeeper is on your Home Screen."
       />
+
+      <NotificationPrefs />
 
       <Card>
         <h2 className="font-semibold">This device</h2>
