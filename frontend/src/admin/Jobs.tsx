@@ -44,12 +44,17 @@ export function Jobs() {
 
       <Card>
         <p className="text-sm font-semibold">Recent notifications</p>
+        {/* "sent" means the push service accepted it, which is as far as this server can
+            ever see — not that a phone displayed it. Worth remembering: with no TTL these
+            were accepted and then discarded whenever the device was asleep. */}
+        <p className="text-xs text-slate-500">delivered/devices · accepted by the push service</p>
         {pushes.data?.length === 0 && <p className="text-sm text-slate-500">Nothing sent yet.</p>}
         {pushes.data?.map((n) => (
           <p key={n.created_at + n.kind} className="text-xs text-slate-400">
             <span className={n.status === 'sent' ? 'text-emerald-400' : 'text-amber-400'}>
               {n.status}
             </span>{' '}
+            {n.devices !== null && <span>{`${n.delivered ?? 0}/${n.devices} `}</span>}
             {new Date(n.created_at).toLocaleString()} — {n.kind}: {n.title}
             {n.error && <span className="text-rose-400"> — {n.error}</span>}
           </p>

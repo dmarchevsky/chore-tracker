@@ -60,7 +60,34 @@ def vapid_subject() -> str:
     return f"mailto:admin@{host}"
 
 
-def _send_one(sub: PushSubscription, payload: dict) -> None:
+# How long a push service should hold a message for a device it cannot reach right now.
+#
+# This is not a tuning knob, it is the difference between working and not. pywebpush
+# defaults to `ttl=0`, which means "deliver only if the device is connected this instant,
+# otherwise throw it away" — and the service still answers 201, so the send is recorded as a
+# success. Every notification this app sent was discarded unless the phone happened to be
+# awake at that exact second: pressing the test button while holding the phone worked every
+# time, while a chore missed at 8:15am reached nobody. Never call webpush without a ttl.
+DEFAULT_TTL_S = 24 * 3600
+_TTL_S = {
+    # Expires when the chore is due. A nudge that lands after the window closed is noise,
+    # and `missed` already covers what happens next.
+    "due_soon": 30 * 60,
+    # Worth having while there is still time to do the chore.
+    "window_open": 4 * 3600,
+    # The diagnostic: if this one takes longer than a few minutes, something really is wrong
+    # and a late arrival would only muddy the answer.
+    "test": 5 * 60,
+}
+
+
+def ttl_for(kind: str) -> int:
+    """Seconds a push service should keep retrying this kind. Everything not listed still
+    matters hours later — a miss, a verdict, a review request — and appeals run for days."""
+    return _TTL_S.get(kind, DEFAULT_TTL_S)
+
+
+def _send_one(sub: PushSubscription, payload: dict, ttl: int) -> None:
     """Sync pywebpush call — run via asyncio.to_thread. Raises on transport failure."""
     from pywebpush import webpush
 
@@ -73,6 +100,7 @@ def _send_one(sub: PushSubscription, payload: dict) -> None:
         data=json.dumps(payload),
         vapid_private_key=s.vapid_private_key,
         vapid_claims={"sub": vapid_subject()},
+        ttl=ttl,
     )
 
 
@@ -180,17 +208,26 @@ async def notify(
             return entry
 
         payload = {"title": title, "body": body, "url": url}
-        sent = failed = 0
+        ttl = ttl_for(kind)
+        sent = 0
+        entry.devices = len(subs)
         for sub in subs:
             try:
-                await asyncio.to_thread(_send_one, sub, payload)
+                await asyncio.to_thread(_send_one, sub, payload, ttl)
                 sent += 1
             except Exception as exc:
-                failed += 1
                 if getattr(getattr(exc, "response", None), "status_code", None) in (404, 410):
                     await db.delete(sub)
                 entry.error = (entry.error or "") + f"{type(exc).__name__}: {exc}\n"
-        entry.status = "sent" if sent else "failed"
+        entry.delivered = sent
+        # `sent` used to mean "at least one device worked", which hid every other device's
+        # failure behind the one that succeeded. Say which it was.
+        if sent == 0:
+            entry.status = "failed"
+        elif sent < len(subs):
+            entry.status = "partial"
+        else:
+            entry.status = "sent"
     except Exception as exc:
         log.exception("notify failed")
         entry.status = "failed"

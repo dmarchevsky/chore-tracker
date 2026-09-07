@@ -107,6 +107,10 @@ async def recent_notifications(db: DbDep, _: AdminUser, limit: int = 50) -> list
             # Why a `failed` row failed — the only thing that tells an operator whether the
             # push service refused the message or the subscription is dead.
             "error": n.error,
+            # How many devices were tried and how many the push service took. "sent" alone
+            # never distinguished one device from five, nor a partial failure from a clean run.
+            "devices": n.devices,
+            "delivered": n.delivered,
             "created_at": n.created_at.isoformat(),
         }
         for n in rows

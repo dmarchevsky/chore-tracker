@@ -142,12 +142,27 @@ click which layer is broken, and its answers map onto the statuses below.
 | `no_subs` | that person has no device subscribed; they never turned it on, or turned it off |
 | `muted` | that person switched this category off in *What to send me* |
 | `skipped` | the server has no VAPID keys (step 3) |
-| `failed` | the push service rejected it; the error is on the row |
+| `partial` | some of that person's devices took it and some did not; the error is on the row |
+| `failed` | no device took it; the push service's error is on the row |
 
 A `failed` row saying **`VapidException: Missing 'sub' from claims`** means the contact claim
 is malformed rather than absent — check `VAPID_SUBJECT` is an address or a `mailto:`/`https:`
 URI, not a bare URL. (Before this was fixed the server built one by pasting `PUBLIC_BASE_URL`
 after an `@`, which produced `mailto:admin@https://host` and was refused every time.)
+
+Each row also shows `delivered/devices`. **`sent` means the push service accepted the
+message, not that a phone displayed it** — that is the furthest this server can ever see.
+
+**A row says `sent` but nothing appeared on the phone.** Every push now carries a TTL, so a
+service that cannot reach the device holds the message and retries — up to 24 hours for a
+miss, a verdict or a review request, 30 minutes for a "due soon" nudge (pointless once the
+chore is due), 5 minutes for a test. Before that, pushes went out with pywebpush's default
+`ttl=0`, which means *deliver this instant or discard it*: the service accepted every message
+and threw it away whenever the phone was asleep or idle, so pressing the test button while
+holding the phone worked every time and a chore missed at 8:15am reached nobody. If you see
+this on a current deployment, the phone itself is suppressing them — check Focus modes,
+notification settings for ChoreKeeper, and whether the app was reinstalled (which invalidates
+the subscription).
 
 A subscription the push service reports as gone (404/410) is deleted automatically, so a phone
 that was wiped or reinstalled stops producing failures on its own.

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,6 +40,11 @@ class NotificationLog(TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(160))
     body: Mapped[str] = mapped_column(Text, default="")
     url: Mapped[str | None] = mapped_column(String(255), default=None)
-    # sent | failed | skipped (no VAPID) | no_subs
+    # sent | partial | failed | muted | skipped (no VAPID) | no_subs
     status: Mapped[str] = mapped_column(String(24), default="pending")
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    # How many of this person's devices the push was attempted on, and how many the push
+    # service accepted. Nullable because rows written before this existed genuinely do not
+    # know — recording 0 for them would be a fact nobody established.
+    devices: Mapped[int | None] = mapped_column(Integer, default=None)
+    delivered: Mapped[int | None] = mapped_column(Integer, default=None)

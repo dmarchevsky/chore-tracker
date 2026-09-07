@@ -374,6 +374,10 @@ export interface NotificationRow {
   body: string;
   status: string;
   error: string | null;
+  /** Devices tried / accepted by the push service. Null on rows written before this was
+   *  recorded — "sent" then meant only that at least one device worked. */
+  devices: number | null;
+  delivered: number | null;
   created_at: string;
 }
 

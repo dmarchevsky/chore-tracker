@@ -48,6 +48,8 @@ describe('the ops notification log', () => {
         title: 'Due soon',
         body: 'Kitchen is due at 8:00 am.',
         status: 'sent',
+        devices: 1,
+        delivered: 1,
         created_at: '2025-06-02T09:00:00Z',
       },
     ]);
@@ -65,6 +67,8 @@ describe('the ops notification log', () => {
         title: 'You missed one',
         body: '',
         status: 'skipped',
+        devices: null,
+        delivered: null,
         created_at: '2025-06-02T09:00:00Z',
       },
     ]);
@@ -76,5 +80,33 @@ describe('the ops notification log', () => {
     setup([]);
 
     expect(await screen.findByText('Nothing sent yet.')).toBeInTheDocument();
+  });
+});
+
+describe('the delivered/devices count', () => {
+  it('shows how many devices took a push, so one dead phone cannot hide', async () => {
+    // "sent" alone meant "at least one device worked", which is what let a phone that
+    // received nothing for days look identical to one that was fine.
+    setup([
+      {
+        kind: 'admin.missed',
+        title: 'A chore was missed',
+        body: '',
+        status: 'partial',
+        error: 'WebPushException: 410',
+        devices: 2,
+        delivered: 1,
+        created_at: '2025-06-02T09:00:00Z',
+      },
+    ]);
+
+    expect(await screen.findByText(/1\/2/)).toBeInTheDocument();
+    expect(screen.getByText('partial')).toBeInTheDocument();
+  });
+
+  it('says plainly that acceptance is not delivery', async () => {
+    setup([]);
+
+    expect(await screen.findByText(/accepted by the push service/)).toBeInTheDocument();
   });
 });
