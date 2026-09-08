@@ -8,6 +8,7 @@ import {
   useReversePenalty,
 } from './api';
 import { Button, Card, Spinner } from '../shared/ui';
+import { KidTabs } from '../shared/KidTabs';
 import { money } from '../shared/format';
 import { entryLabel, isManualPenalty } from '../shared/status';
 import type { LedgerEntry } from '../api/types';
@@ -25,17 +26,7 @@ export function Money() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
         <h1 className="text-lg font-bold">Money</h1>
-        <select
-          className="inp max-w-xs"
-          value={childId}
-          onChange={(e) => setChildId(e.target.value)}
-        >
-          {(kids.data ?? []).map((k) => (
-            <option key={k.id} value={k.id}>
-              {k.display_name}
-            </option>
-          ))}
-        </select>
+        <KidTabs kids={kids.data ?? []} value={childId} onChange={setChildId} />
       </div>
       {childId && <ChildPanel childId={childId} />}
     </div>
@@ -47,7 +38,7 @@ function ChildPanel({ childId }: { childId: string }) {
   const ledger = useChildLedger(childId);
   const payout = usePayout();
   const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState('cash');
+  const [method, setMethod] = useState('Cash');
   const [note, setNote] = useState('');
 
   return (
@@ -76,7 +67,15 @@ function ChildPanel({ childId }: { childId: string }) {
             onChange={(e) => setAmount(e.target.value)}
           />
           <div className="flex gap-2">
-            <input className="inp" value={method} onChange={(e) => setMethod(e.target.value)} />
+            <select
+              className="inp"
+              aria-label="Method"
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+            >
+              <option value="Cash">Cash</option>
+              <option value="GreenLight">GreenLight</option>
+            </select>
             <input
               className="inp"
               placeholder="note"

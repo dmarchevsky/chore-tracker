@@ -8,6 +8,7 @@ import { StatusBadge } from '../shared/StatusBadge';
 import { ADMIN_STATUS } from '../shared/status';
 import { occurrenceWorth } from '../shared/outcome';
 import { DetailSheet } from '../shared/DetailSheet';
+import { KidTabs } from '../shared/KidTabs';
 
 const DECIDED = [
   'approved',
@@ -79,19 +80,13 @@ export function History() {
         <h1 className="text-lg font-bold">History</h1>
 
         <div className="flex flex-wrap gap-2">
-          <select
-            className={select}
+          <KidTabs
+            kids={kids.data ?? []}
             value={child}
-            onChange={(e) => reset(setChild)(e.target.value)}
-            aria-label="Kid"
-          >
-            <option value="">Everyone</option>
-            {(kids.data ?? []).map((k) => (
-              <option key={k.id} value={k.id}>
-                {k.display_name}
-              </option>
-            ))}
-          </select>
+            onChange={reset(setChild)}
+            allowAll
+            label="Kid"
+          />
           <select
             className={select}
             value={chore}

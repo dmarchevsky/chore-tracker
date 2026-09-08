@@ -20,6 +20,15 @@ const ALICE = {
   totp_enrolled: false,
 };
 
+const BOBBY = {
+  id: 'k2',
+  username: 'bobby',
+  display_name: 'Bobby',
+  role: 'child',
+  is_active: true,
+  totp_enrolled: false,
+};
+
 const PENALTY = {
   id: 'l1',
   kind: 'penalty',
@@ -46,11 +55,13 @@ const MANUAL = {
   occurrence_due_at: null,
 };
 
-function setup(ledger: unknown[] = [PENALTY]) {
+function setup(ledger: unknown[] = [PENALTY], kids: unknown[] = [ALICE]) {
   const calls: { url: string; method: string; body: unknown }[] = [];
+  const urls: string[] = [];
   vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
+    urls.push(url);
     if (method !== 'GET')
       calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
 
@@ -58,7 +69,7 @@ function setup(ledger: unknown[] = [PENALTY]) {
     if (url.includes('/ledger')) return Promise.resolve(json(ledger));
     if (url.includes('/balance'))
       return Promise.resolve(json({ child_id: 'k1', balance_cents: -500, currency: 'USD' }));
-    if (url.endsWith('/children')) return Promise.resolve(json([ALICE]));
+    if (url.endsWith('/children')) return Promise.resolve(json(kids));
     return Promise.resolve(json([]));
   });
 
@@ -70,7 +81,7 @@ function setup(ledger: unknown[] = [PENALTY]) {
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  return calls;
+  return { calls, urls };
 }
 
 afterEach(() => {
@@ -98,7 +109,7 @@ describe('admin Money statement', () => {
   });
 
   it('excuses a missed chore from the statement, with a reason', async () => {
-    const calls = setup();
+    const { calls } = setup();
 
     fireEvent.click(await screen.findByText('Excuse this'));
     fireEvent.change(screen.getByPlaceholderText(/Why\?/), {
@@ -119,7 +130,7 @@ describe('admin Money statement', () => {
   });
 
   it('undoes a hand-applied penalty, which has no occurrence to excuse', async () => {
-    const calls = setup([MANUAL]);
+    const { calls } = setup([MANUAL]);
 
     // Excusing forgives a missed chore; this charge was never a chore, so the wording and
     // the endpoint both differ (spec §4.8).
@@ -161,5 +172,37 @@ describe('admin Money statement', () => {
     expect(await screen.findByText(/cash/)).toBeInTheDocument();
     expect(screen.queryByText('Excuse this')).not.toBeInTheDocument();
     expect(screen.queryByText('Undo this')).not.toBeInTheDocument();
+  });
+});
+
+describe('admin Money kid pills', () => {
+  it('switches the statement to the kid whose pill was pressed', async () => {
+    const { urls } = setup([PENALTY], [ALICE, BOBBY]);
+
+    // Defaults to the first kid, then a pill press repoints the balance/ledger fetches.
+    await screen.findByText(/Walk the dog/);
+    fireEvent.click(screen.getByRole('button', { name: 'Bobby' }));
+
+    await waitFor(() => expect(urls.some((u) => u.includes('/children/k2/ledger'))).toBe(true));
+    expect(urls.some((u) => u.includes('/children/k2/balance'))).toBe(true);
+  });
+});
+
+describe('admin Money payout method', () => {
+  it('sends the chosen method with the payout', async () => {
+    const { calls } = setup();
+    await screen.findByText(/Walk the dog/);
+
+    fireEvent.change(screen.getByPlaceholderText('Amount ($)'), { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Record payout' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].url).toContain('/payouts');
+    expect(calls[0].body).toMatchObject({ method: 'Cash', amount_cents: 500 });
+
+    fireEvent.change(screen.getByLabelText('Method'), { target: { value: 'GreenLight' } });
+    fireEvent.change(screen.getByPlaceholderText('Amount ($)'), { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Record payout' }));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1].body).toMatchObject({ method: 'GreenLight' });
   });
 });

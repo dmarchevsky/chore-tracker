@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAdminChores } from './api';
 import { Button, Card, Spinner } from '../shared/ui';
+import { DetailSheet } from '../shared/DetailSheet';
 import { money } from '../shared/format';
 import { ChoreForm } from './chores/ChoreForm';
 import type { FormState } from './chores/useChoreForm';
@@ -52,14 +53,22 @@ export function Chores() {
         ))}
       </div>
 
-      {form && (
-        <ChoreForm
-          key={form.mode === 'edit' ? form.chore.id : 'new'}
-          state={form}
-          onDone={() => setForm(null)}
-          onDuplicated={(copy) => setForm({ mode: 'edit', chore: copy })}
-        />
-      )}
+      {/* On a phone the editor is a sheet over the list, not grid cell #2 far below the fold —
+          same shape as the Inbox and History detail panes (shared/DetailSheet.tsx). */}
+      <div>
+        <DetailSheet open={!!form} onClose={() => setForm(null)} label="Edit chore">
+          {form ? (
+            <ChoreForm
+              key={form.mode === 'edit' ? form.chore.id : 'new'}
+              state={form}
+              onDone={() => setForm(null)}
+              onDuplicated={(copy) => setForm({ mode: 'edit', chore: copy })}
+            />
+          ) : (
+            <p className="text-slate-500">Pick a chore to edit, or add a new one.</p>
+          )}
+        </DetailSheet>
+      </div>
     </div>
   );
 }

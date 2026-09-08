@@ -132,8 +132,7 @@ describe('admin History', () => {
     renderHistory();
     await waitFor(() => expect(urls.length).toBeGreaterThan(0));
 
-    await waitFor(() => expect(screen.getByRole('option', { name: 'Mo' })).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText('Kid'), { target: { value: 'k1' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Mo' }));
     await waitFor(() => expect(urls.at(-1)).toContain('child=k1'));
 
     // 2 of 7 loaded, so there is more to fetch.
