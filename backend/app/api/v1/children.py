@@ -163,7 +163,10 @@ async def _ledger_rows(
         .outerjoin(ChoreOccurrence, ChoreOccurrence.id == LedgerEntry.occurrence_id)
         .outerjoin(Chore, Chore.id == func.coalesce(ChoreOccurrence.chore_id, LedgerEntry.chore_id))
         .where(LedgerEntry.child_id == child_id)
-        .order_by(LedgerEntry.created_at)
+        # `id` breaks the tie: a reversal and the earning that replaces it are written in
+        # one transaction and share a timestamp, so without it the two rows come back in a
+        # different order run to run and the CSV disagrees with the screen.
+        .order_by(LedgerEntry.created_at, LedgerEntry.id)
     )
     if from_ is not None:
         stmt = stmt.where(LedgerEntry.created_at >= from_)

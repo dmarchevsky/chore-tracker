@@ -44,6 +44,21 @@ export function useChores() {
   return useQuery({ queryKey: ['chores'], queryFn: () => api.get<Chore[]>('/chores') });
 }
 
+export interface LedgerRange {
+  /** ISO instants; the API filters `created_at >= from` and `created_at <= to`. */
+  from?: string;
+  to?: string;
+}
+
+/** `?from&to` for the statement and its CSV, which must always agree. */
+export function ledgerQs(range: LedgerRange): string {
+  const qs = new URLSearchParams();
+  if (range.from) qs.set('from', range.from);
+  if (range.to) qs.set('to', range.to);
+  const s = qs.toString();
+  return s ? `?${s}` : '';
+}
+
 export function useBalance(childId: string) {
   return useQuery({
     enabled: !!childId,
@@ -52,11 +67,13 @@ export function useBalance(childId: string) {
   });
 }
 
-export function useLedger(childId: string) {
+export function useLedger(childId: string, range: LedgerRange = {}) {
   return useQuery({
     enabled: !!childId,
-    queryKey: ['ledger', childId],
-    queryFn: () => api.get<LedgerEntry[]>(`/children/${childId}/ledger`),
+    // Widened past ['ledger', childId] so two ranges don't share a cache slot. Every
+    // invalidation in the app targets the ['ledger'] prefix, so they all still match.
+    queryKey: ['ledger', childId, range],
+    queryFn: () => api.get<LedgerEntry[]>(`/children/${childId}/ledger${ledgerQs(range)}`),
   });
 }
 

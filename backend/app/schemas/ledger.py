@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class LedgerEntryOut(BaseModel):
@@ -26,12 +26,30 @@ class LedgerEntryOut(BaseModel):
     reversed_by_entry_id: uuid.UUID | None
     created_at: datetime
 
+    # Carried only to derive `reverses_entry_id` below; never serialized. `meta` also holds
+    # payout method/note and tier snapshots, which are not the statement's business.
+    meta: dict | None = Field(default=None, exclude=True)
+
     # Which chore the money was for, resolved from the occurrence (spec §4.3). "chore missed"
     # on its own tells a parent nothing about *which* chore, and the statement is where they
     # notice a wrong charge. NULL for entries that aren't tied to an occurrence — payouts,
     # hand-entered adjustments.
     chore_title: str | None = None
     occurrence_due_at: datetime | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def reverses_entry_id(self) -> uuid.UUID | None:
+        """The entry this one undoes, lifted out of ``meta`` (spec §9).
+
+        The mirror of ``reversed_by_entry_id``, and not redundant with it: that one says this
+        row *was* undone, this one says the row *is* the undoing. Without it a compensating
+        adjustment is indistinguishable from an earning — both are a positive row on the same
+        occurrence carrying the parent's decision text as their reason — and the statement
+        shows what looks like being paid twice for one chore.
+        """
+        raw = (self.meta or {}).get("reverses_entry_id")
+        return uuid.UUID(raw) if raw else None
 
 
 class BalanceOut(BaseModel):

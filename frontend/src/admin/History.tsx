@@ -9,6 +9,7 @@ import { ADMIN_STATUS } from '../shared/status';
 import { occurrenceWorth } from '../shared/outcome';
 import { DetailSheet } from '../shared/DetailSheet';
 import { KidTabs } from '../shared/KidTabs';
+import { daysAgo, endOfDay, startOfDay } from '../shared/dates';
 
 const DECIDED = [
   'approved',
@@ -19,10 +20,6 @@ const DECIDED = [
   'verified_fail',
 ] as const;
 const PAGE = 50;
-
-function daysAgo(n: number): string {
-  return new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
-}
 
 export function History() {
   const kids = useChildren();
@@ -46,8 +43,9 @@ export function History() {
       child: child || undefined,
       chore: chore || undefined,
       statuses,
-      from: from ? new Date(from).toISOString() : undefined,
-      to: to ? new Date(to).toISOString() : undefined,
+      from: startOfDay(from),
+      // endOfDay, not midnight: `<=` against a bare date dropped the day just asked for.
+      to: endOfDay(to),
       limit: PAGE * pages,
       offset: 0,
     }),

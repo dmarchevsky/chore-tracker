@@ -152,6 +152,11 @@ export interface LedgerEntry {
   created_at: string;
   occurrence_id: string | null;
   reversed_by_entry_id: string | null;
+  /** The entry this one undoes. The mirror of `reversed_by_entry_id`, and not the same thing:
+   *  that one says this row *was* undone, this one says the row *is* the undoing. A reversal
+   *  and an earning are both a positive row on the same occurrence carrying the parent's
+   *  decision text, so without this the statement can't tell them apart. */
+  reverses_entry_id: string | null;
   /** The penalty rule a parent charged this against; null for everything else. With no
    *  occurrence_id it is what separates a manual penalty from a missed chore — both are
    *  `penalty` kind, but only one is undone from the statement. */

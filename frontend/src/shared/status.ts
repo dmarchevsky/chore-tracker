@@ -2,6 +2,7 @@
 // can't drift and neither one ever shows a raw enum value.
 
 import type { LedgerEntry, OccurrenceStatus } from '../api/types';
+import type { StatementOutcome } from './statement';
 
 export type Tone = 'go' | 'wait' | 'good' | 'bad' | 'idle';
 
@@ -105,7 +106,24 @@ export const isManualPenalty = (e: Pick<LedgerEntry, 'kind' | 'occurrence_id' | 
   e.kind === 'penalty' && !e.occurrence_id && !!e.chore_id;
 
 /** What kind of entry this is, when there is no reason text to show instead. */
-export function entryLabel(e: Pick<LedgerEntry, 'kind' | 'occurrence_id' | 'chore_id'>): string {
+export function entryLabel(
+  e: Pick<LedgerEntry, 'kind' | 'occurrence_id' | 'chore_id' | 'reverses_entry_id'>,
+): string {
+  // A reversal is an `adjustment` like any other, but calling it one hides the only thing a
+  // parent needs to know about it: it cancels a charge, it is not a second reward.
+  if (e.reverses_entry_id) return 'Reversed';
   if (isManualPenalty(e)) return 'Penalty';
   return KIND_LABEL[e.kind] ?? e.kind;
 }
+
+/** What a whole occurrence came to, once its charge, reversal and reward are read together
+ *  (see `shared/statement.ts`). A different axis from OCCURRENCE status: this is what the
+ *  money did, which is all the ledger knows. */
+export const OUTCOME_LABEL: Record<StatementOutcome, Label> = {
+  earned: { label: 'Earned', tone: 'good' },
+  missed: { label: 'Missed', tone: 'bad' },
+  excused: { label: 'Excused', tone: 'idle' },
+  payout: { label: 'Paid out', tone: 'idle' },
+  penalty: { label: 'Penalty', tone: 'bad' },
+  adjusted: { label: 'Adjusted', tone: 'idle' },
+};

@@ -37,6 +37,7 @@ const PENALTY = {
   created_at: '2025-06-02T09:00:00Z',
   occurrence_id: 'o1',
   reversed_by_entry_id: null,
+  reverses_entry_id: null,
   chore_title: 'Walk the dog',
   occurrence_due_at: '2025-06-01T15:00:00Z',
 };
@@ -51,6 +52,7 @@ const MANUAL = {
   occurrence_id: null,
   chore_id: 'c4',
   reversed_by_entry_id: null,
+  reverses_entry_id: null,
   chore_title: 'Bike left out',
   occurrence_due_at: null,
 };
@@ -106,6 +108,57 @@ describe('admin Money statement', () => {
 
     expect(await screen.findByText(/Walk the dog/)).toBeInTheDocument();
     expect(screen.getByText(/chore missed/)).toBeInTheDocument();
+    expect(screen.getByText('Missed')).toBeInTheDocument();
+  });
+
+  it('folds one chore\u2019s charge, reversal and reward into a single net line', async () => {
+    // The reported confusion: the model failed the photo, the parent approved anyway, and
+    // the three append-only rows read as a penalty plus *two* rewards (spec \u00a79).
+    const occ = { occurrence_id: 'o9', chore_title: 'Kitchen', occurrence_due_at: null };
+    setup([
+      {
+        ...occ,
+        id: 'p',
+        kind: 'penalty',
+        amount_cents: -500,
+        reason: 'auto-verified fail',
+        created_at: '2026-09-09T08:00:00Z',
+        reversed_by_entry_id: 'r',
+        reverses_entry_id: null,
+      },
+      {
+        ...occ,
+        id: 'e',
+        kind: 'earning',
+        amount_cents: 500,
+        reason: 'Ok',
+        created_at: '2026-09-09T09:00:00Z',
+        reversed_by_entry_id: null,
+        reverses_entry_id: null,
+      },
+      {
+        ...occ,
+        id: 'r',
+        kind: 'adjustment',
+        amount_cents: 500,
+        reason: 'approved: Ok',
+        created_at: '2026-09-09T09:00:00Z',
+        reversed_by_entry_id: null,
+        reverses_entry_id: 'p',
+      },
+    ]);
+
+    // One line, paid once, and no offer to excuse a charge that no longer stands.
+    const group = await screen.findByRole('button', { expanded: false });
+    expect(group).toHaveTextContent('Kitchen');
+    expect(group).toHaveTextContent('Earned');
+    expect(group).toHaveTextContent('+$5.00');
+    expect(screen.queryByText('Excuse this')).not.toBeInTheDocument();
+
+    // The append-only rows are still there, one tap away, and the reversal says so.
+    fireEvent.click(group);
+    expect(screen.getByText(/Reversed/)).toBeInTheDocument();
+    expect(screen.getByText(/auto-verified fail/)).toBeInTheDocument();
   });
 
   it('excuses a missed chore from the statement, with a reason', async () => {
@@ -127,6 +180,26 @@ describe('admin Money statement', () => {
 
     expect(await screen.findByText('(reversed)')).toBeInTheDocument();
     expect(screen.queryByText('Excuse this')).not.toBeInTheDocument();
+  });
+
+  it('bounds the statement to the last 30 days, and follows the pills', async () => {
+    const { urls } = setup();
+    await screen.findByText(/Walk the dog/);
+    const ledgerUrl = () => urls.filter((u) => u.includes('/ledger')).at(-1) as string;
+
+    // A year of chores is mostly not what the parent came to look at.
+    expect(ledgerUrl()).toContain('from=');
+    // The download has to agree with the screen, or it is worse than no download.
+    expect(screen.getByText('export CSV')).toHaveAttribute(
+      'href',
+      expect.stringContaining('ledger.csv?from='),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+    await waitFor(() => expect(ledgerUrl()).not.toContain('from='));
+
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-09-01' } });
+    await waitFor(() => expect(ledgerUrl()).toContain('from=2026-09-01'));
   });
 
   it('undoes a hand-applied penalty, which has no occurrence to excuse', async () => {

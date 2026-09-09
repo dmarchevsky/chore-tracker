@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import io
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
+from urllib.parse import quote
 
 import pytest
 from PIL import Image
+from sqlalchemy import select
 from tests.helpers import sign_in
 
-from app.models import Chore, ChoreOccurrence, OccurrenceStatus
+from app.models import Chore, ChoreOccurrence, LedgerEntry, LedgerKind, OccurrenceStatus
 from app.services.settlement import settle_missed
 
 pytestmark = pytest.mark.asyncio
@@ -145,6 +147,57 @@ async def test_a_penalty_can_be_excused_from_the_statement(
     assert next(e for e in after if e["id"] == penalty["id"])["reversed_by_entry_id"] is not None
     bal = await client.get(f"/api/v1/children/{child_user.id}/balance", headers=h)
     assert bal.json()["balance_cents"] == 0
+
+    # Both halves of the link, so the statement can pair the two rows and show the excused
+    # chore as one net-zero line instead of a charge and a mystery credit.
+    comp = next(e for e in after if e["kind"] == "adjustment")
+    assert comp["reverses_entry_id"] == penalty["id"]
+    assert comp["occurrence_id"] == str(occ.id)
+
+
+async def test_only_a_reversal_carries_reverses_entry_id(
+    client, db_session, household, admin_user, child_user
+):
+    """An earning and the adjustment that cancels a penalty are both positive rows on the
+    same occurrence; only one of them is undoing something (spec §9)."""
+    h = await _earn(client, db_session, household, admin_user, child_user, 250)
+    led = (await client.get(f"/api/v1/children/{child_user.id}/ledger", headers=h)).json()
+    assert [e["reverses_entry_id"] for e in led] == [None]
+
+
+async def test_the_statement_can_be_bounded_by_date(
+    client, db_session, household, admin_user, child_user
+):
+    """`from`/`to` bound the statement so a long history can be read a month at a time
+    (spec §10). The CSV takes the same bounds — a download that disagreed with the screen
+    would be worse than no download."""
+    h = await _earn(client, db_session, household, admin_user, child_user, 250)
+    await client.post(
+        "/api/v1/payouts",
+        json={"child_id": str(child_user.id), "amount_cents": 100, "method": "cash"},
+        headers=h,
+    )
+    # Age the earning out of the window; the payout stays inside it.
+    earning = (
+        await db_session.execute(select(LedgerEntry).where(LedgerEntry.kind == LedgerKind.earning))
+    ).scalar_one()
+    earning.created_at = datetime.now(UTC) - timedelta(days=60)
+    await db_session.commit()
+
+    # quote(): a bare "+00:00" in a query string decodes to a space and 422s.
+    cutoff = quote((datetime.now(UTC) - timedelta(days=30)).isoformat())
+    url = f"/api/v1/children/{child_user.id}/ledger"
+    led = (await client.get(f"{url}?from={cutoff}", headers=h)).json()
+    assert [e["kind"] for e in led] == ["payout"]
+
+    csv_resp = await client.get(f"{url}.csv?from={cutoff}", headers=h)
+    assert "payout" in csv_resp.text and "earning" not in csv_resp.text
+
+    # `to` bounds the other end, and the balance stays all-time either way.
+    before = (await client.get(f"{url}?to={cutoff}", headers=h)).json()
+    assert [e["kind"] for e in before] == ["earning"]
+    bal = await client.get(f"/api/v1/children/{child_user.id}/balance", headers=h)
+    assert bal.json()["balance_cents"] == 150
 
 
 async def test_child_sees_own_balance_but_not_siblings(

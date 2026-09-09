@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { AuthProvider } from '../auth/AuthContext';
@@ -85,7 +85,99 @@ describe('kid Money', () => {
     );
 
     expect(await screen.findByText(/Walk the dog/)).toBeInTheDocument();
-    expect(screen.getByText('Missed chore')).toBeInTheDocument();
+    // The outcome word carries what the kind label used to: this one cost money.
+    expect(screen.getByText('Missed')).toBeInTheDocument();
+  });
+
+  it('folds a chore\u2019s charge, reversal and reward into one line', async () => {
+    // Three append-only rows for one chore (spec \u00a79). Shown flat it reads as being paid
+    // twice; the kid should see what the chore was actually worth.
+    const occ = { occurrence_id: 'o9', chore_title: 'Kitchen', occurrence_due_at: null };
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes('/auth/me')) return Promise.resolve(json(ME));
+      if (url.includes('/balance')) return Promise.resolve(json({ balance_cents: 500 }));
+      if (url.includes('/ledger'))
+        return Promise.resolve(
+          json([
+            {
+              ...occ,
+              id: 'p',
+              kind: 'penalty',
+              amount_cents: -500,
+              reason: 'auto-verified fail',
+              created_at: '2026-09-09T08:00:00Z',
+              reversed_by_entry_id: 'r',
+              reverses_entry_id: null,
+            },
+            {
+              ...occ,
+              id: 'e',
+              kind: 'earning',
+              amount_cents: 500,
+              reason: 'Ok',
+              created_at: '2026-09-09T09:00:00Z',
+              reversed_by_entry_id: null,
+              reverses_entry_id: null,
+            },
+            {
+              ...occ,
+              id: 'r',
+              kind: 'adjustment',
+              amount_cents: 500,
+              reason: 'approved: Ok',
+              created_at: '2026-09-09T09:00:00Z',
+              reversed_by_entry_id: null,
+              reverses_entry_id: 'p',
+            },
+          ]),
+        );
+      return Promise.resolve(json([]));
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider>
+          <MemoryRouter>
+            <Money />
+          </MemoryRouter>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('Earned')).toBeInTheDocument();
+    expect(screen.getByText('+$5.00')).toBeInTheDocument();
+    expect(screen.queryByText('+$10.00')).not.toBeInTheDocument();
+
+    // The rows are still reachable, and the reversal is named as one.
+    fireEvent.click(screen.getByRole('button', { name: 'How this adds up' }));
+    expect(screen.getByText(/Reversed/)).toBeInTheDocument();
+  });
+
+  it('asks for the last 30 days, and widens when the pill says so', async () => {
+    const urls: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes('/auth/me')) return Promise.resolve(json(ME));
+      if (url.includes('/balance')) return Promise.resolve(json({ balance_cents: 0 }));
+      return Promise.resolve(json([]));
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider>
+          <MemoryRouter>
+            <Money />
+          </MemoryRouter>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    const ledgerUrl = () => urls.filter((u) => u.includes('/ledger')).at(-1) as string;
+    await waitFor(() => expect(ledgerUrl()).toContain('from='));
+    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+    await waitFor(() => expect(ledgerUrl()).not.toContain('from='));
   });
 
   it('opens the chore behind an entry, and leaves entries with no chore alone', async () => {

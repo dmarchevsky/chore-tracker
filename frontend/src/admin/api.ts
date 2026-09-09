@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, getPage } from '../api/client';
+import { ledgerQs, type LedgerRange } from '../api/hooks';
 import type { Child, Chore, ChoreStateEvent, Dispute, LedgerEntry, Occurrence } from '../api/types';
 
 export interface AdminSubmission {
@@ -330,11 +331,13 @@ export const useChildBalance = (childId: string) =>
     queryFn: () => api.get<{ balance_cents: number }>(`/children/${childId}/balance`),
   });
 
-export const useChildLedger = (childId: string) =>
+export const useChildLedger = (childId: string, range: LedgerRange = {}) =>
   useQuery({
     enabled: !!childId,
-    queryKey: ['ledger', childId],
-    queryFn: () => api.get<LedgerEntry[]>(`/children/${childId}/ledger`),
+    // See the kid-side hook: the range joins the key, and every invalidation in this file
+    // targets the ['ledger'] prefix so they keep matching.
+    queryKey: ['ledger', childId, range],
+    queryFn: () => api.get<LedgerEntry[]>(`/children/${childId}/ledger${ledgerQs(range)}`),
   });
 
 export function usePayout() {
