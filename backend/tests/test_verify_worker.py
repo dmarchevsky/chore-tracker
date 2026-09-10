@@ -19,6 +19,7 @@ from app.models import (
     ChoreOccurrence,
     JobState,
     LedgerEntry,
+    NotificationLog,
     OccurrenceStatus,
     Submission,
     SubmissionMedia,
@@ -245,6 +246,81 @@ async def test_llm_assist_always_routes_to_review(client, db_session, household,
     await db_session.refresh(occ)
     assert occ.status == OccurrenceStatus.needs_review
     assert await _ledger_count(db_session, occ.id) == 0
+
+
+async def _review_pings(db) -> int:
+    return int(
+        await db.scalar(
+            select(func.count())
+            .select_from(NotificationLog)
+            .where(NotificationLog.kind == "admin.needs_review")
+        )
+        or 0
+    )
+
+
+@respx.mock
+async def test_no_review_ping_while_the_model_still_has_it(
+    client, db_session, household, admin_user, child_user
+):
+    """ "A chore needs your review" is a lie until a human is actually wanted.
+
+    Submitting to an LLM-checked chore used to notify the parents immediately, while the
+    status was SUBMITTED — "Checking…", the model's turn. Under llm_assist that also meant
+    two pings for one submission: this one, then the real one after the model ran.
+    """
+    respx.post(LLM_URL).mock(return_value=_completion(_model_reply([(1, "yes", 0.99)])))
+    occ = await _mk_occ(db_session, household, child_user, mode="llm_auto", reward=200)
+    await db_session.commit()
+    await _kid_submit(client, occ.id)
+    await _make_media_look_real(db_session, occ.id)
+
+    await db_session.refresh(occ)
+    assert occ.status == OccurrenceStatus.submitted
+    assert await _review_pings(db_session) == 0
+
+    # The model passed it on its own — a human is never wanted, so none is ever asked.
+    await verify.drain(db_session)
+    await db_session.refresh(occ)
+    assert occ.status == OccurrenceStatus.verified_pass
+    assert await _review_pings(db_session) == 0
+
+
+@respx.mock
+async def test_the_review_ping_arrives_when_a_human_is_really_needed(
+    client, db_session, household, admin_user, child_user
+):
+    """The other half: llm_assist hands every submission to a parent, and that is exactly
+    when the ping should land — once, after the model has had its look (spec §4.1)."""
+    respx.post(LLM_URL).mock(return_value=_completion(_model_reply([(1, "yes", 0.99)])))
+    occ = await _mk_occ(db_session, household, child_user, mode="llm_assist", reward=200)
+    await db_session.commit()
+    await _kid_submit(client, occ.id)
+    await _make_media_look_real(db_session, occ.id)
+    assert await _review_pings(db_session) == 0
+
+    await verify.drain(db_session)
+    await db_session.refresh(occ)
+    assert occ.status == OccurrenceStatus.needs_review
+    assert await _review_pings(db_session) == 1
+
+
+@respx.mock
+async def test_a_model_error_still_asks_for_a_human(
+    client, db_session, household, admin_user, child_user
+):
+    """Fail-open (spec §6.3): if the model cannot answer, the parent must hear about it —
+    otherwise dropping the submit-time ping would leave the chore silently stuck."""
+    respx.post(LLM_URL).mock(side_effect=httpx.ConnectError("no route to llm"))
+    occ = await _mk_occ(db_session, household, child_user, mode="llm_auto", reward=200)
+    await db_session.commit()
+    await _kid_submit(client, occ.id)
+    await _make_media_look_real(db_session, occ.id)
+
+    await verify.drain(db_session)
+    await db_session.refresh(occ)
+    assert occ.status == OccurrenceStatus.needs_review
+    assert await _review_pings(db_session) == 1
 
 
 @respx.mock

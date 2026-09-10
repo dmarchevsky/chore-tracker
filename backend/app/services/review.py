@@ -164,8 +164,14 @@ async def route_submission(
         # Flagged or not, let the model look: derive_verdict routes any flag to review
         # regardless of what it says (spec §6.3 rule 2), and a parent reviewing a flag is
         # much better off seeing the model's read of the photo than the flag alone.
+        #
+        # Deliberately silent here. The status is SUBMITTED — "Checking…", the model's turn,
+        # not the parent's — and "A chore needs your review" is a lie until the model has
+        # actually asked for a human. The worker sends it the moment one is really needed:
+        # llm_assist always, llm_auto when confidence lands in the middle band, and either
+        # mode when the model errors (fail-open, spec §6.3). Under llm_assist this used to
+        # fire twice for one submission, once here and once for real.
         occurrence.status = OccurrenceStatus.submitted
-        await notifications.notify_needs_review(db, occurrence)
         from app.worker.queue import enqueue
 
         await enqueue(db, occurrence_id=occurrence.id, submission_id=submission.id)
