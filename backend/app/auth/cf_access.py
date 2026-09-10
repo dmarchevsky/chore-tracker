@@ -23,6 +23,14 @@ reachable from nothing but those two Caddy sites and the host's own loopback, so
 request always arrives stamped ``tunnel``. Enforcement is the default and only an explicit
 ``lan`` skips it, so a missing or unrecognised value fails closed.
 
+A token this app **rejects** and a token this app **could not check** are different
+failures, and only the first one is the visitor's to fix. Verification needs Cloudflare's
+JWKS, fetched over the network; when that fetch fails PyJWT raises
+``PyJWKClientConnectionError``, which is a ``PyJWTError`` like every rejection reason. Caught
+together they become "invalid Cloudflare Access token" — a 403 that tells the visitor their
+identity is wrong and sends them back to Google, which cannot help, while the actual fault is
+at the origin. So the unreachable case is caught first and answered 503.
+
 Never trust ``CF-Access-Authenticated-User-Email``: it is a plain header that anything
 able to reach the origin can set. Only the signature-verified ``email`` claim counts.
 
@@ -59,8 +67,63 @@ def _guarded(path: str) -> bool:
     return not path.startswith(_EXEMPT_PREFIX)
 
 
+def build_jwks_client(team_domain: str) -> jwt.PyJWKClient:
+    """Cloudflare's key endpoint for a Zero Trust team.
+
+    ``timeout``: PyJWT's default is 30s, and this fetch sits in the request path — a
+    blackholed route would hang every signed-in request for half a minute before failing
+    anyway. Cloudflare's certs endpoint answers in milliseconds.
+    """
+    return jwt.PyJWKClient(
+        f"https://{team_domain}/cdn-cgi/access/certs",
+        cache_keys=True,
+        lifespan=600,
+        timeout=5,
+    )
+
+
+def warm_jwks(client: jwt.PyJWKClient) -> None:
+    """Fetch the key set once at startup. Never raises — the app must start regardless.
+
+    Two things fall out of it. The cache is filled, so a container that restarts *into* a
+    brief outage still verifies tokens instead of locking the household out: PyJWT keeps the
+    set for ``lifespan`` and each ``kid`` for the life of the process, and only a cold start
+    has nothing to fall back on. And an endpoint that is already unreachable says so in one
+    line at boot, instead of being discovered hours later by somebody who cannot sign in —
+    nothing else in the stack reports this fault (see ``_log_unavailable``).
+
+    Starting anyway is the point, not a compromise: the LAN door needs no key set at all,
+    and it is the way back in when this is exactly what has gone wrong.
+    """
+    try:
+        client.get_jwk_set()
+    except Exception as exc:
+        log.error(
+            "could not reach Cloudflare's key endpoint at startup; sign-in through the "
+            "tunnel will fail until it is reachable",
+            extra={
+                "event": "cf_access.jwks_unavailable",
+                "jwks_url": client.uri,
+                "error": str(exc),
+            },
+        )
+    else:
+        log.info(
+            "Cloudflare Access key set loaded",
+            extra={"event": "cf_access.jwks_ready", "jwks_url": client.uri},
+        )
+
+
 class CfAccessMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, *, team_domain: str, aud: str, issuer: str = "") -> None:
+    def __init__(
+        self,
+        app,
+        *,
+        team_domain: str,
+        aud: str,
+        issuer: str = "",
+        jwks_client: jwt.PyJWKClient | None = None,
+    ) -> None:
         super().__init__(app)
         # Normally the issuer is the team domain. It stops being so the moment a Zero Trust
         # team is renamed: Cloudflare serves login and JWKS from the new name but keeps
@@ -73,9 +136,9 @@ class CfAccessMiddleware(BaseHTTPMiddleware):
         # One AUD tag per Access application, and the deployment runs more than one (the
         # whole-host app and the stricter admin-scoped app), so this is a list.
         self._aud = [a.strip() for a in aud.split(",") if a.strip()]
-        self._jwks = jwt.PyJWKClient(
-            f"https://{team_domain}/cdn-cgi/access/certs", cache_keys=True, lifespan=600
-        )
+        # Injected by create_app() so the boot probe warms the very client that serves
+        # requests; built here for tests and for anyone constructing the middleware alone.
+        self._jwks = jwks_client or build_jwks_client(team_domain)
 
     def _verify(self, token: str) -> dict[str, Any]:
         key = self._jwks.get_signing_key_from_jwt(token).key
@@ -113,6 +176,25 @@ class CfAccessMiddleware(BaseHTTPMiddleware):
             },
         )
 
+    def _log_unavailable(self, request: Request, exc: Exception) -> None:
+        """An outage, logged as one — at ERROR, because nothing else reports it.
+
+        Deliberately not ``_log_rejection``: that one prints the token's iss/aud beside the
+        expected values, which reads as a mismatch and sets an operator comparing two
+        strings that are both fine. Nothing was compared here. And the stack shows no other
+        symptom — ``/api/v1/health`` is loopback and Access-exempt, so the container keeps
+        reporting healthy while every signed-in request fails.
+        """
+        log.error(
+            "could not reach Cloudflare's key endpoint; the assertion was never checked",
+            extra={
+                "event": "cf_access.jwks_unavailable",
+                "path": request.url.path,
+                "jwks_url": self._jwks.uri,
+                "error": str(exc),
+            },
+        )
+
     async def dispatch(self, request: Request, call_next) -> Response:
         if not _guarded(request.url.path):
             return await call_next(request)
@@ -136,6 +218,20 @@ class CfAccessMiddleware(BaseHTTPMiddleware):
             )
         try:
             claims = await run_in_threadpool(self._verify, token)
+        except jwt.PyJWKClientConnectionError as exc:
+            # MUST stay above the PyJWTError arm: this is a subclass of it, and below it
+            # this whole branch is dead code. 503, not 403 — the token was never read, so
+            # saying it is invalid names the wrong party and hides the real fault.
+            self._log_unavailable(request, exc)
+            return JSONResponse(
+                {
+                    "detail": "ChoreKeeper cannot reach Cloudflare right now, so it cannot "
+                    "check your sign-in. This is a problem at the server, not with your "
+                    "account — try again shortly."
+                },
+                status_code=503,
+                headers={"Retry-After": "30"},
+            )
         except jwt.PyJWTError as exc:
             self._log_rejection(request, token, exc)
             return JSONResponse(

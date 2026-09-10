@@ -96,6 +96,17 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Docker snapshots the host's /etc/resolv.conf into the container when it STARTS. On a
+    # reboot where dockerd beats dhcpcd to writing that file, the snapshot names no upstream
+    # at all and the embedded resolver answers EAI_AGAIN for every external name. Container
+    # names keep resolving, so `db` works, the health probe is loopback and stays green, and
+    # the tunnel stays up — while the Access JWKS fetch fails and every signed-in request is
+    # rejected as an invalid token. That is a four-hour household lockout with nothing in the
+    # stack reporting a fault (2026-09-10). Naming the forwarders here removes the race;
+    # 127.0.0.11 still serves `db` and `api` as before.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     # Migrations run here, before uvicorn; worker waits on api: service_healthy.
     # The bootstrap creates the household + parent-admin on a brand-new database from
     # ADMIN_EMAIL/ADMIN_PASSWORD, so a fresh deploy is signed-in-able without a shell. It is
@@ -133,6 +144,12 @@ services:
         condition: service_healthy
       api:
         condition: service_healthy   # api-healthy ⇒ alembic upgrade head has run
+    # Same boot race as the api above — the worker reaches the vision LLM by name when
+    # LLM_VISION_BASE_URL is a hostname. `environment: *app-env` is an anchor for env only;
+    # this has to be written out again rather than inherited.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     command: ["python", "-m", "app.worker"]
     volumes:
       - media_data:/data/media

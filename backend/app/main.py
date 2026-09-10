@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request
@@ -16,7 +19,7 @@ from starlette.responses import Response
 
 from app import obs
 from app.api.v1 import api_router
-from app.auth.cf_access import CfAccessMiddleware
+from app.auth.cf_access import CfAccessMiddleware, build_jwks_client, warm_jwks
 from app.config import DEFAULT_SESSION_SECRET, get_settings
 
 log = logging.getLogger("chorekeeper.api")
@@ -68,7 +71,20 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 def create_app() -> FastAPI:
     obs.configure_logging()
     settings = get_settings()
+
+    # Filled in below when Access is configured, and run once the port is about to be
+    # served. A holder rather than a reordering of this function: the refuse-to-boot guards
+    # further down must keep running before anything here reaches the network.
+    on_start: list[Callable[[], None]] = []
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        for probe in on_start:
+            await run_in_threadpool(probe)
+        yield
+
     app = FastAPI(
+        lifespan=lifespan,
         title="ChoreKeeper API",
         version="0.1.0",
         docs_url=None if settings.is_prod else "/docs",
@@ -102,12 +118,17 @@ def create_app() -> FastAPI:
             raise RuntimeError(
                 "DEV_AUTH is on with CF_ACCESS_* set: pick one identity source, not both."
             )
+        # Built here, not inside the middleware, so the boot probe warms the very client
+        # that will serve requests rather than a second one with a cold cache.
+        jwks = build_jwks_client(settings.cf_access_team_domain)
         app.add_middleware(
             CfAccessMiddleware,
             team_domain=settings.cf_access_team_domain,
             aud=settings.cf_access_aud,
             issuer=settings.cf_access_issuer,
+            jwks_client=jwks,
         )
+        on_start.append(lambda: warm_jwks(jwks))
     if settings.allowed_hosts:
         hosts = [h.strip() for h in settings.allowed_hosts.split(",") if h.strip()]
         app.add_middleware(

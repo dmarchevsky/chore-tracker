@@ -10,7 +10,8 @@ interface AuthState {
   error: string | null;
   /** True only when Access vouched for a Google account the household does not know —
    *  the one case where ending the edge session and picking another account helps. A
-   *  network failure also sets `error`, and offering it there would just fail again. */
+   *  network failure also sets `error`, and offering it there would just fail again; so
+   *  does a 5xx, where the origin could not check the assertion at all. */
   canSwitchAccount: boolean;
   /** The probe never got an HTTP status back. Retrying it as another `fetch` cannot help:
    *  the usual cause is the edge redirecting to Google, and only a top-level navigation
@@ -62,11 +63,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // thing that lets the parent fix it. A NetworkError produced no status at all, so
       // saying "not signed in" would be a guess — and was, when a stale service worker
       // served the shell offline and every call died on a cross-origin redirect.
+      //
+      // A 5xx is the server's own fault and never the visitor's, so it says so and does
+      // NOT offer to switch account. That offer is the wrong advice loudly given: when the
+      // origin could not reach Cloudflare to check the assertion, signing in again with a
+      // different Google account is the one thing guaranteed not to help.
       const notAMember = e instanceof ApiError && e.status === 403;
+      const serverFault = e instanceof ApiError && e.status >= 500;
       setCanSwitch(notAMember);
       setUnreachable(e instanceof NetworkError);
       if (e instanceof NetworkError) {
         setError('Could not reach ChoreKeeper. Check your connection, then try again.');
+      } else if (serverFault) {
+        setError(e.message);
       } else {
         setError(notAMember ? e.message : null);
       }

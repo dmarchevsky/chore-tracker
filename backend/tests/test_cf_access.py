@@ -35,6 +35,16 @@ def _token(*, aud: str = AUD, iss: str = f"https://{TEAM}", exp_delta: int = 300
     )
 
 
+def _raises(exc: Exception):
+    """A stand-in for a PyJWKClient method that always fails. Signature-agnostic: it
+    replaces both a bound-style ``(self, token)`` and a plain ``(self)``."""
+
+    def _boom(*_args, **_kwargs):
+        raise exc
+
+    return _boom
+
+
 @pytest.fixture
 def client():
     app = FastAPI()
@@ -187,6 +197,77 @@ async def test_a_rejection_logs_what_the_token_actually_claimed(client, caplog):
     assert rec.token_iss == "https://someone-else.example"
     assert rec.expected_iss == [f"https://{TEAM}"]
     assert ADMIN_AUD in rec.expected_aud
+
+
+async def test_an_unreachable_jwks_endpoint_is_503_not_403(client, monkeypatch):
+    """The lockout of 2026-09-10: a reboot left the container's resolver with no upstream,
+    so the JWKS fetch failed and every valid assertion came back "invalid token".
+
+    PyJWKClientConnectionError is a PyJWTError, so without its own arm above the rejection
+    handler an origin-side outage is reported as the visitor's identity being wrong.
+    """
+    monkeypatch.setattr(
+        "app.auth.cf_access.jwt.PyJWKClient.get_signing_key_from_jwt",
+        _raises(jwt.PyJWKClientConnectionError('Fail to fetch data from the url, err: "..."')),
+    )
+    async with client as c:
+        r = await c.get("/api/v1/occurrences", headers={"Cf-Access-Jwt-Assertion": _token()})
+    assert r.status_code == 503
+    assert r.headers["Retry-After"] == "30"
+    # The visitor must not be told to go and re-authenticate: nothing can come of it.
+    assert "invalid" not in r.json()["detail"].lower()
+
+
+async def test_an_outage_is_not_logged_as_a_rejected_token(client, caplog, monkeypatch):
+    """cf_access.rejected prints token_iss/expected_iss side by side, which reads as a
+    mismatch. Nothing was compared here, and following that lead costs an operator the
+    whole outage."""
+    import logging
+
+    monkeypatch.setattr(
+        "app.auth.cf_access.jwt.PyJWKClient.get_signing_key_from_jwt",
+        _raises(jwt.PyJWKClientConnectionError("name resolution")),
+    )
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="chorekeeper.api"):
+        async with client as c:
+            await c.get("/api/v1/occurrences", headers={"Cf-Access-Jwt-Assertion": _token()})
+    events = [getattr(r, "event", "") for r in caplog.records]
+    assert "cf_access.jwks_unavailable" in events
+    assert "cf_access.rejected" not in events
+
+
+async def test_the_lan_door_still_opens_while_the_jwks_endpoint_is_down(client, monkeypatch):
+    """The way back in must not depend on the thing that is down (spec §12.1)."""
+    monkeypatch.setattr(
+        "app.auth.cf_access.jwt.PyJWKClient.get_signing_key_from_jwt",
+        _raises(jwt.PyJWKClientConnectionError("name resolution")),
+    )
+    async with client as c:
+        lan = await c.get("/api/v1/occurrences", headers={"X-CK-Door": "lan"})
+        health = await c.get("/api/v1/health")
+    assert lan.status_code == 200
+    assert health.status_code == 200
+
+
+def test_warming_an_unreachable_key_set_does_not_stop_the_boot(caplog, monkeypatch):
+    """A boot probe that can refuse the boot would turn a DNS blip into a dead stack —
+    including the LAN door, which needs no key set at all."""
+    import logging
+
+    from app.auth.cf_access import build_jwks_client, warm_jwks
+
+    client = build_jwks_client(TEAM)
+    monkeypatch.setattr(
+        type(client),
+        "get_jwk_set",
+        _raises(jwt.PyJWKClientConnectionError("name resolution")),
+    )
+    caplog.clear()
+    with caplog.at_level(logging.ERROR, logger="chorekeeper.api"):
+        warm_jwks(client)  # must not raise
+    (rec,) = [r for r in caplog.records if getattr(r, "event", "") == "cf_access.jwks_unavailable"]
+    assert rec.jwks_url == f"https://{TEAM}/cdn-cgi/access/certs"
 
 
 async def test_a_renamed_team_can_pin_the_issuer_it_actually_mints():
