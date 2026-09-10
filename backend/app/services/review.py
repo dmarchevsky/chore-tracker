@@ -16,7 +16,6 @@ from app.models import (
     Chore,
     ChoreOccurrence,
     LedgerEntry,
-    LedgerKind,
     OccurrenceStatus,
     Submission,
     SubmissionKind,
@@ -223,9 +222,13 @@ async def apply_decision(
     # not the enum member — `is` silently matched nothing and a changed decision left the
     # original entry standing.
     if action == "approve":
-        for e in existing:
-            if e.kind == LedgerKind.penalty and e.reversed_by_entry_id is None:
-                await ledger.reverse_entry(db, entry=e, actor=admin, reason=f"approved: {reason}")
+        # What this approve is worth, before anything is written — the same arithmetic
+        # `credit_earning` will do, needed here to tell a double click from a re-decision.
+        target = ledger.earning_amount_cents(occurrence, amount_override_cents)
+        if occurrence.status == OccurrenceStatus.approved and _live_net(existing) == target:
+            return  # the same decision for the same money: nothing to record
+        for e in _live_money(existing):
+            await ledger.reverse_entry(db, entry=e, actor=admin, reason=f"approved: {reason}")
         await ledger.credit_earning(
             db,
             occurrence=occurrence,
@@ -236,9 +239,11 @@ async def apply_decision(
         occurrence.status = OccurrenceStatus.approved
         verdict = Verdict.pass_
     elif action == "reject":
-        for e in existing:
-            if e.kind == LedgerKind.earning and e.reversed_by_entry_id is None:
-                await ledger.reverse_entry(db, entry=e, actor=admin, reason=f"rejected: {reason}")
+        target = -abs(occurrence.penalty_cents or 0)
+        if occurrence.status == OccurrenceStatus.rejected and _live_net(existing) == target:
+            return
+        for e in _live_money(existing):
+            await ledger.reverse_entry(db, entry=e, actor=admin, reason=f"rejected: {reason}")
         await ledger.debit_penalty(db, occurrence=occurrence, actor=admin, reason=reason)
         occurrence.status = OccurrenceStatus.rejected
         verdict = Verdict.fail
@@ -255,14 +260,10 @@ async def apply_decision(
             return
 
         # Re-deciding: unwind whatever the previous tier posted, then post the new amount.
-        for e in existing:
-            if e.reversed_by_entry_id is None and e.kind in (
-                LedgerKind.earning,
-                LedgerKind.penalty,
-            ):
-                await ledger.reverse_entry(
-                    db, entry=e, actor=admin, reason=f"outcome changed: {reason}"
-                )
+        for e in _live_money(existing):
+            await ledger.reverse_entry(
+                db, entry=e, actor=admin, reason=f"outcome changed: {reason}"
+            )
         await ledger.post_tier_outcome(
             db, occurrence=occurrence, tier=tier, actor=admin, reason=reason
         )
@@ -273,12 +274,8 @@ async def apply_decision(
         occurrence.status = OccurrenceStatus.approved
         verdict = Verdict.fail if (tier.get("amount_cents") or 0) < 0 else Verdict.pass_
     elif action == "excuse":
-        for e in existing:
-            if e.reversed_by_entry_id is None and e.kind in (
-                LedgerKind.earning,
-                LedgerKind.penalty,
-            ):
-                await ledger.reverse_entry(db, entry=e, actor=admin, reason=f"excused: {reason}")
+        for e in _live_money(existing):
+            await ledger.reverse_entry(db, entry=e, actor=admin, reason=f"excused: {reason}")
         # Clear any chosen tier: otherwise the idempotency guard above would treat a later
         # re-pick of that same tier as a no-op and the money would never be re-posted.
         occurrence.outcome_tier_id = None
@@ -313,6 +310,30 @@ async def apply_decision(
         await notifications.notify_redo(db, occurrence, reason)
     else:
         await notifications.notify_verdict(db, occurrence, v)
+
+
+def _is_reversal(e: LedgerEntry) -> bool:
+    """Is this row the undoing of another, rather than money in its own right?
+
+    A reversal is an ``adjustment`` like any other, so kind cannot tell them apart — only
+    ``meta`` can. Unwinding one would re-apply the charge it cancelled.
+    """
+    return bool((e.meta or {}).get("reverses_entry_id"))
+
+
+def _live_money(entries: list[LedgerEntry]) -> list[LedgerEntry]:
+    """Every row on this occurrence that still moves money.
+
+    Deliberately not filtered to ``earning``/``penalty``: once a re-decision has posted its
+    amount as an ``adjustment`` (spec §9, and see ``ledger._insert_earn_kind``), the money in
+    force lives in that adjustment, and a unwind that only looked at the two earn kinds would
+    leave it standing and charge or pay twice.
+    """
+    return [e for e in entries if e.reversed_by_entry_id is None and not _is_reversal(e)]
+
+
+def _live_net(entries: list[LedgerEntry]) -> int:
+    return sum(e.amount_cents for e in _live_money(entries))
 
 
 async def _earn_entries(db: AsyncSession, occurrence_id) -> list[LedgerEntry]:

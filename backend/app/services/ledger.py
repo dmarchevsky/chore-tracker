@@ -66,17 +66,49 @@ async def _insert_earn_kind(
     )
     new_id = await db.scalar(stmt)
     if new_id is None:
-        return (
+        held = (
             await db.execute(
                 select(LedgerEntry).where(
                     LedgerEntry.occurrence_id == occ.id, LedgerEntry.kind == kind
                 )
             )
         ).scalar_one()
+        if held.reversed_by_entry_id is None:
+            return held  # a double-clicked decision: exactly-once still holds
+        # The slot is held by a row that has since been reversed, so this is a *re*-decision,
+        # not a double click — and ON CONFLICT DO NOTHING would hand back the dead row and
+        # move no money at all, leaving an approved chore unpaid. The index cannot take a
+        # second earning, so post the amount as an adjustment, exactly as a re-graded tier
+        # does (spec §9).
+        return await record_adjustment(
+            db,
+            child_id=occ.assignee_id,
+            household_id=occ.household_id,
+            amount_cents=amount_cents,
+            actor=actor,
+            reason=reason,
+            occurrence_id=occ.id,
+            meta={"redecided_kind": str(kind)},
+        )
     await db.flush()
     entry = await db.get(LedgerEntry, new_id)
     obs.log_ledger_entry(entry)
     return entry
+
+
+def earning_amount_cents(
+    occurrence: ChoreOccurrence, amount_override_cents: int | None = None
+) -> int:
+    """What approving this occurrence is worth, before anything is written.
+
+    Split out of ``credit_earning`` so a caller can compare the money a decision *would*
+    move against the money already standing — the only way to tell a double-clicked approve
+    (post nothing) from a re-decision or an amount adjustment (post the difference).
+    An override is taken at face value; the late multiplier already priced it.
+    """
+    if amount_override_cents is not None:
+        return amount_override_cents
+    return _late_adjusted(occurrence.reward_cents, occurrence)
 
 
 async def credit_earning(
@@ -87,8 +119,7 @@ async def credit_earning(
     amount_override_cents: int | None = None,
     reason: str = "chore approved",
 ) -> LedgerEntry:
-    base = amount_override_cents if amount_override_cents is not None else occurrence.reward_cents
-    amount = base if amount_override_cents is not None else _late_adjusted(base, occurrence)
+    amount = earning_amount_cents(occurrence, amount_override_cents)
     return await _insert_earn_kind(
         db, occ=occurrence, kind=LedgerKind.earning, amount_cents=amount, reason=reason, actor=actor
     )

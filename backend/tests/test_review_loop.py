@@ -314,6 +314,138 @@ async def test_a_past_decision_can_be_changed_and_the_money_follows(
     assert await balance_cents(db_session, child_user.id) == -100
 
 
+async def test_approving_again_after_a_reject_actually_pays(
+    client, db_session, household, admin_user, child_user
+):
+    """approve -> reject -> approve used to leave the kid unpaid.
+
+    The earning slot was already taken by the reversed first earning, so
+    ``ON CONFLICT DO NOTHING`` handed that dead row back and moved no money: the balance
+    settled at 0 while the occurrence read ``approved``. The index still cannot take a
+    second earning, so the re-decision posts its amount as an adjustment (spec §9).
+    """
+    occ = await _mk_occ(db_session, household, child_user, reward=300, penalty=100)
+    await db_session.commit()
+
+    kh = await _kid_login(client)
+    await _submit_photo(client, occ.id, kh)
+    ah = await _admin_login(client)
+
+    async def decide(action: str, reason: str, **extra):
+        r = await client.post(
+            f"/api/v1/occurrences/{occ.id}/decision",
+            json={"action": action, "reason": reason, **extra},
+            headers=ah,
+        )
+        assert r.status_code == 200, r.text
+        return r
+
+    await decide("approve", "looked fine")
+    assert await balance_cents(db_session, child_user.id) == 300
+
+    await decide("reject", "second look")
+    assert await balance_cents(db_session, child_user.id) == -100
+
+    r = await decide("approve", "kid was right after all")
+    assert r.json()["status"] == "approved"
+    # The whole point: an approved chore pays what it is worth.
+    assert await balance_cents(db_session, child_user.id) == 300
+
+    # And it keeps working, in both directions, rather than only surviving one round trip.
+    await decide("reject", "no, really")
+    assert await balance_cents(db_session, child_user.id) == -100
+    await decide("approve", "final answer")
+    assert await balance_cents(db_session, child_user.id) == 300
+
+
+async def test_a_double_clicked_decision_still_moves_money_once(
+    client, db_session, household, admin_user, child_user
+):
+    """The re-decision path must not cost the exactly-once guarantee it routes around.
+
+    A second identical approve is a double click, not a new decision: same action, same
+    amount, so there is nothing to record and the balance must not move.
+    """
+    occ = await _mk_occ(db_session, household, child_user, reward=300, penalty=100)
+    await db_session.commit()
+
+    kh = await _kid_login(client)
+    await _submit_photo(client, occ.id, kh)
+    ah = await _admin_login(client)
+
+    for _ in range(3):
+        r = await client.post(
+            f"/api/v1/occurrences/{occ.id}/decision",
+            json={"action": "approve", "reason": "looked fine"},
+            headers=ah,
+        )
+        assert r.status_code == 200
+    assert await balance_cents(db_session, child_user.id) == 300
+    assert await _ledger_rows(db_session, occ.id) == 1
+
+    # Same for a repeated reject.
+    for _ in range(3):
+        await client.post(
+            f"/api/v1/occurrences/{occ.id}/decision",
+            json={"action": "reject", "reason": "not done"},
+            headers=ah,
+        )
+    assert await balance_cents(db_session, child_user.id) == -100
+
+
+async def test_changing_the_amount_on_an_approved_chore_posts_the_difference(
+    client, db_session, household, admin_user, child_user
+):
+    """ "Adjust amount" (spec §4.2) is an approve carrying a new number. Same action, but
+    not the same decision — the guard keys on the money, not just the verb."""
+    occ = await _mk_occ(db_session, household, child_user, reward=300, penalty=100)
+    await db_session.commit()
+
+    kh = await _kid_login(client)
+    await _submit_photo(client, occ.id, kh)
+    ah = await _admin_login(client)
+
+    await client.post(
+        f"/api/v1/occurrences/{occ.id}/decision",
+        json={"action": "approve", "reason": "fine"},
+        headers=ah,
+    )
+    await client.post(
+        f"/api/v1/occurrences/{occ.id}/decision",
+        json={"action": "approve", "reason": "worth more", "amount_override_cents": 500},
+        headers=ah,
+    )
+    assert await balance_cents(db_session, child_user.id) == 500
+
+
+async def test_excusing_a_re_decided_chore_clears_every_standing_row(
+    client, db_session, household, admin_user, child_user
+):
+    """The unwind has to see the adjustment a re-decision posted, not just the two earn
+    kinds — otherwise excusing leaves the money it was meant to forgive standing."""
+    occ = await _mk_occ(db_session, household, child_user, reward=300, penalty=100)
+    await db_session.commit()
+
+    kh = await _kid_login(client)
+    await _submit_photo(client, occ.id, kh)
+    ah = await _admin_login(client)
+
+    for action, why in (("approve", "fine"), ("reject", "no"), ("approve", "yes")):
+        await client.post(
+            f"/api/v1/occurrences/{occ.id}/decision",
+            json={"action": action, "reason": why},
+            headers=ah,
+        )
+    assert await balance_cents(db_session, child_user.id) == 300
+
+    await client.post(
+        f"/api/v1/occurrences/{occ.id}/decision",
+        json={"action": "excuse", "reason": "we were away"},
+        headers=ah,
+    )
+    assert await balance_cents(db_session, child_user.id) == 0
+
+
 async def test_auto_accept_photo_is_deduped_before_it_pays(
     client, db_session, household, admin_user, child_user
 ):
