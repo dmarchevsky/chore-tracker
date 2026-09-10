@@ -183,10 +183,12 @@ describe('admin Chores', () => {
     await screen.findByDisplayValue('Empty the sink');
     expect(screen.queryByRole('slider')).not.toBeInTheDocument();
 
-    // ...a location chore does.
+    // ...a location chore does. findBy, not getBy: the map is a lazy chunk behind a
+    // Suspense boundary, and the title lands on the first synchronous check — so the
+    // assertion raced the dynamic import and lost on a loaded CI runner.
     fireEvent.click(screen.getByText('Arrive at school'));
     await screen.findByDisplayValue('Arrive at school');
-    expect(screen.getByTestId('map')).toBeInTheDocument();
+    expect(await screen.findByTestId('map')).toBeInTheDocument();
     expect(screen.getByDisplayValue('37.7749')).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole('slider'), { target: { value: '300' } });
