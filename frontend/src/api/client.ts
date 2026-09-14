@@ -1,6 +1,8 @@
 // Thin fetch wrapper for /api/v1. Sends the session cookie automatically and echoes
 // the CSRF token on mutations (spec §10).
 
+import type { Me } from './types';
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -117,29 +119,113 @@ function reloadIfAccessExpired(resp: Response): void {
   throw new NetworkError('could not reach ChoreKeeper');
 }
 
+/** Who the session belongs to, so recovery can tell a refresh from a change of person.
+ *  Set by AuthContext on every successful probe. */
+let currentUserId: string | null = null;
+export function setCurrentUserId(id: string | null) {
+  currentUserId = id;
+}
+
+/** Paths that must never trigger a recovery attempt: probing from inside the probe, or
+ *  from a sign-in that is itself establishing the session, recurses forever. */
+const NO_RECOVERY = ['/auth/me', '/auth/login', '/auth/dev/login', '/auth/logout'];
+
+/** One shared attempt. On resume every query on the screen fires at once and they all get
+ *  401 together; letting each one probe would mint a session row per caller, each setting
+ *  its own cookie. Last write would win and every other replay would carry a CSRF token
+ *  that no longer matches the cookie — so the recovery would itself cause 403s. */
+let recovering: Promise<Me | null> | null = null;
+
+/** Re-establish the app session without involving the visitor.
+ *
+ * The app's own session is much shorter than the Cloudflare Access one (12 hours for a
+ * parent, against a month at the edge), so the ordinary case is an expired cookie behind a
+ * perfectly good Access assertion. `/auth/me` mints a fresh session straight from that
+ * assertion, which makes this recoverable in the background — the alternative was the
+ * parent meeting a dead screen every morning with nothing to do but reload.
+ *
+ * Distinct from `reloadIfAccessExpired` above, which handles the *edge* session ending: that
+ * answers with HTML and can only be fixed by a top-level navigation. This one is our own
+ * session ending, which answers 401 JSON and can be fixed silently.
+ */
+async function recoverSession(): Promise<Me | null> {
+  recovering ??= (async () => {
+    try {
+      const resp = await send('/auth/me', { method: 'GET', credentials: 'same-origin' });
+      if (!resp.ok) return null;
+      const me = (await resp.json()) as Me;
+      // The new session carries a NEW csrf token; replaying a mutation with the old one is
+      // a guaranteed 403, so adopt it before anything is retried.
+      setCsrfToken(me.csrf_token ?? '');
+      return me;
+    } catch {
+      return null; // offline, or the edge answered — nothing to recover to
+    } finally {
+      // Cleared on the next tick so everyone who joined this attempt reads its result,
+      // and a later expiry still gets an attempt of its own.
+      queueMicrotask(() => {
+        recovering = null;
+      });
+    }
+  })();
+  return recovering;
+}
+
+/** Should this 401 be retried, and is the session we recovered still the same person? */
+async function canReplay(path: string, resp: Response): Promise<boolean> {
+  if (resp.status !== 401) return false;
+  if (NO_RECOVERY.some((p) => path.startsWith(p))) return false;
+
+  const before = currentUserId;
+  const me = await recoverSession();
+  if (me === null) return false;
+
+  // A different person is signed in at the edge now — a shared tablet where someone else
+  // picked their Google account. Replaying would paint their data into a shell built for
+  // whoever was here before, so start the document again instead.
+  if (before !== null && me.id !== before) {
+    window.location.reload();
+    return false;
+  }
+  currentUserId = me.id;
+  return true;
+}
+
 /** A GET that also needs a response header — used for paged lists (X-Total-Count). */
 export async function getPage<T>(path: string): Promise<{ items: T; total: number }> {
-  const resp = await send(path, { method: 'GET', credentials: 'same-origin' });
+  let resp = await send(path, { method: 'GET', credentials: 'same-origin' });
   reloadIfAccessExpired(resp);
+  if (await canReplay(path, resp)) {
+    resp = await send(path, { method: 'GET', credentials: 'same-origin' });
+    reloadIfAccessExpired(resp);
+  }
   if (!resp.ok) throw await apiError(resp);
   const items = (await resp.json()) as T;
   return { items, total: Number(resp.headers.get('X-Total-Count') ?? 0) };
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = {};
-  const init: RequestInit = { method, credentials: 'same-origin', headers };
-  if (!SAFE.has(method)) headers['X-CSRF-Token'] = csrfToken;
+  // Rebuilt per attempt: a replay has to pick up the csrf token the recovered session
+  // minted, and reuse the same body.
+  const build = (): RequestInit => {
+    const headers: Record<string, string> = {};
+    const init: RequestInit = { method, credentials: 'same-origin', headers };
+    if (!SAFE.has(method)) headers['X-CSRF-Token'] = csrfToken;
+    if (body instanceof FormData) {
+      init.body = body;
+    } else if (body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      init.body = JSON.stringify(body);
+    }
+    return init;
+  };
 
-  if (body instanceof FormData) {
-    init.body = body;
-  } else if (body !== undefined) {
-    headers['Content-Type'] = 'application/json';
-    init.body = JSON.stringify(body);
-  }
-
-  const resp = await send(path, init);
+  let resp = await send(path, build());
   reloadIfAccessExpired(resp);
+  if (await canReplay(path, resp)) {
+    resp = await send(path, build());
+    reloadIfAccessExpired(resp);
+  }
   if (!resp.ok) throw await apiError(resp);
   if (resp.status === 204) return undefined as T;
   const ct = resp.headers.get('content-type') ?? '';

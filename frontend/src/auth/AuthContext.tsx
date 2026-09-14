@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { api, ApiError, NetworkError, setCsrfToken } from '../api/client';
+import { api, ApiError, NetworkError, setCsrfToken, setCurrentUserId } from '../api/client';
 import type { DevUser, Me } from '../api/types';
 
 interface AuthState {
@@ -46,6 +46,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const apply = useCallback((m: Me | null) => {
     setMe(m);
     setCsrfToken(m?.csrf_token ?? '');
+    // The wrapper recovers an expired session on its own; it needs to know who was signed
+    // in so it can tell that apart from somebody else signing in on a shared tablet.
+    setCurrentUserId(m?.id ?? null);
   }, []);
 
   // Behind Cloudflare Access this probe *is* the sign-in: the edge has already proved the

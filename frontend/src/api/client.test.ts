@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, NetworkError, api, getPage } from './client';
+import { ApiError, NetworkError, api, getPage, setCsrfToken, setCurrentUserId } from './client';
 
 function res(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -153,5 +153,119 @@ describe('an HTML answer from the edge', () => {
     stub(html(200));
     await expect(getPage('/occurrences')).rejects.toBeInstanceOf(NetworkError);
     expect(reload).toHaveBeenCalledOnce();
+  });
+});
+
+describe('silent session recovery', () => {
+  // The app's own session is 12 hours for a parent; the Cloudflare Access session is a
+  // month. So the ordinary case is an expired cookie behind a perfectly good Access
+  // assertion, which /auth/me can turn back into a session with nobody being asked
+  // anything. Before this, the parent met a dead screen every morning.
+  const ME = { id: 'u1', role: 'admin', csrf_token: 'fresh' };
+
+  function router(handlers: { probe: () => Response; api: () => Response }) {
+    const seen: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      seen.push(url);
+      return Promise.resolve(url.includes('/auth/me') ? handlers.probe() : handlers.api());
+    });
+    return seen;
+  }
+
+  beforeEach(() => setCurrentUserId('u1'));
+
+  it('re-establishes the session on a 401 and replays the call', async () => {
+    let n = 0;
+    const seen = router({
+      probe: () => res(200, ME),
+      api: () => (++n === 1 ? res(401, { detail: 'expired' }) : res(200, [{ id: 'o1' }])),
+    });
+
+    await expect(api.get('/occurrences')).resolves.toEqual([{ id: 'o1' }]);
+    expect(seen.filter((u) => u.includes('/auth/me'))).toHaveLength(1);
+  });
+
+  it('probes once for a screenful of simultaneous 401s', async () => {
+    // Every query on the screen refires together when the app is resumed. One probe per
+    // caller would mint a session row each, and all but the last replay would carry a CSRF
+    // token that no longer matches the cookie.
+    let n = 0;
+    const seen = router({
+      probe: () => res(200, ME),
+      api: () => (++n <= 4 ? res(401, { detail: 'expired' }) : res(200, [])),
+    });
+
+    await Promise.all([
+      api.get('/occurrences'),
+      api.get('/chores'),
+      api.get('/children'),
+      api.get('/disputes'),
+    ]);
+    expect(seen.filter((u) => u.includes('/auth/me'))).toHaveLength(1);
+  });
+
+  it('replays a mutation with the csrf token the new session minted', async () => {
+    const sent: (string | null)[] = [];
+    let n = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes('/auth/me')) return Promise.resolve(res(200, ME));
+      sent.push(new Headers(init?.headers).get('X-CSRF-Token'));
+      return Promise.resolve(++n === 1 ? res(401, { detail: 'expired' }) : res(200, {}));
+    });
+
+    setCsrfToken('stale');
+    await api.post('/occurrences/o1/decision', { action: 'approve' });
+    expect(sent).toEqual(['stale', 'fresh']);
+  });
+
+  it('never probes from inside the probe', async () => {
+    const seen = router({ probe: () => res(401, { detail: 'no' }), api: () => res(401, {}) });
+
+    await expect(api.get('/auth/me')).rejects.toBeInstanceOf(ApiError);
+    expect(seen).toHaveLength(1);
+  });
+
+  it('surfaces the original error when there is no session to recover', async () => {
+    // The dev stack has no Access assertion, so /auth/me legitimately 401s. The app must
+    // fall through to Login rather than loop.
+    let n = 0;
+    router({
+      probe: () => res(401, { detail: 'not authenticated' }),
+      api: () => (++n === 1 ? res(401, { detail: 'expired' }) : res(200, [])),
+    });
+
+    await expect(api.get('/occurrences')).rejects.toMatchObject({ status: 401 });
+  });
+
+  it('reloads instead of replaying when somebody else is now signed in', async () => {
+    // Shared family tablet: replaying would paint one kid's data into the other's shell.
+    const reload = vi.fn();
+    vi.spyOn(window, 'location', 'get').mockReturnValue({
+      ...window.location,
+      reload,
+    } as unknown as Location);
+
+    let n = 0;
+    router({
+      probe: () => res(200, { ...ME, id: 'u2' }),
+      api: () => (++n === 1 ? res(401, { detail: 'expired' }) : res(200, [])),
+    });
+
+    await expect(api.get('/occurrences')).rejects.toMatchObject({ status: 401 });
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it('recovers a paged list too', async () => {
+    let n = 0;
+    router({
+      probe: () => res(200, ME),
+      api: () => (++n === 1 ? res(401, { detail: 'expired' }) : res(200, [{ id: 'h1' }])),
+    });
+
+    const page = await getPage<{ id: string }[]>('/occurrences?limit=50');
+    expect(page.items).toEqual([{ id: 'h1' }]);
+    expect(page.total).toBe(7);
   });
 });
