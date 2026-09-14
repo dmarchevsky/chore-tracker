@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './AuthContext';
 
@@ -20,12 +20,13 @@ function stubProbe(me: Response) {
 }
 
 function Probe() {
-  const { error, canSwitchAccount, loading } = useAuth();
+  const { error, canSwitchAccount, loading, refresh } = useAuth();
   if (loading) return <div>loading</div>;
   return (
     <div>
       <span data-testid="error">{error ?? ''}</span>
       <span data-testid="can-switch">{String(canSwitchAccount)}</span>
+      <button onClick={() => void refresh()}>re-probe</button>
     </div>
   );
 }
@@ -84,14 +85,39 @@ describe('the cache when the person changes', () => {
   // and me/Settings.tsx exists precisely because a tablet gets handed between kids.
   const ME = (id: string) => ({ id, role: 'child', csrf_token: 'c' });
 
-  it('drops the previous kid\u2019s data when someone else signs in', async () => {
-    stubProbe(json(200, ME('k1')));
+  it('drops the previous kid\u2019s data when someone else takes over', async () => {
+    // The only way one person's cache can reach another is inside a single document — a
+    // reload builds a new QueryClient anyway. So: same provider, second probe, new person.
     const qc = new QueryClient();
-    qc.setQueryData(['chores'], [{ id: 'c1', title: "Kira's chore" }]);
+    let who = 'k1';
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes('/auth/dev/users')) return Promise.resolve(json(404, {}));
+      return Promise.resolve(json(200, ME(who)));
+    });
 
     mount(<Probe />, qc);
+    await waitFor(() => expect(screen.getByTestId('can-switch')).toHaveTextContent('false'));
+    qc.setQueryData(['chores'], [{ id: 'c1', title: "Kira's chore" }]);
+
+    who = 'k2';
+    fireEvent.click(screen.getByRole('button', { name: 're-probe' }));
 
     await waitFor(() => expect(qc.getQueryData(['chores'])).toBeUndefined());
+  });
+
+  it('leaves a cold start alone', async () => {
+    // null -> someone is a fresh sign-in: nothing cached belongs to anyone, and clearing
+    // resets an already-mounted query to pending without refetching it — a spinner that
+    // never resolves.
+    stubProbe(json(200, ME('k1')));
+    const qc = new QueryClient();
+    qc.setQueryData(['chores'], [{ id: 'c1' }]);
+
+    mount(<Probe />, qc);
+    await waitFor(() => expect(screen.getByTestId('can-switch')).toHaveTextContent('false'));
+
+    expect(qc.getQueryData(['chores'])).toEqual([{ id: 'c1' }]);
   });
 
   it('keeps the cache when the same person is re-probed', async () => {

@@ -64,10 +64,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // straight out of the cache. Drop it whenever the person changes, which covers
       // sign-out, sign-in and one account replacing another in a single place.
       const next = m?.id ?? null;
-      if (signedInAs.current !== next) {
-        signedInAs.current = next;
-        qc.clear();
-      }
+      const was = signedInAs.current;
+      signedInAs.current = next;
+      // Only when somebody was already signed in. A cold start going null -> someone has
+      // nothing to protect — nothing in the cache belongs to anyone yet — and clearing
+      // there is actively harmful: qc.clear() resets any query that happens to be mounted
+      // back to pending without refetching it, so a screen already on its way up hangs on
+      // its spinner forever.
+      if (was !== null && was !== next) qc.clear();
       setMe(m);
       setCsrfToken(m?.csrf_token ?? '');
       // The wrapper recovers an expired session on its own; it needs to know who was signed
