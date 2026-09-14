@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QUERY_CONFIG } from './api/queryConfig';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { Login } from './pages/Login';
 import { Spinner } from './shared/ui';
@@ -19,9 +20,7 @@ import { Money as AdminMoney } from './admin/Money';
 import { Jobs } from './admin/Jobs';
 import { Settings } from './admin/Settings';
 
-const qc = new QueryClient({
-  defaultOptions: { queries: { staleTime: 15_000, retry: 1, refetchOnWindowFocus: false } },
-});
+const qc = new QueryClient(QUERY_CONFIG);
 
 function Shell() {
   const { me, loading } = useAuth();
