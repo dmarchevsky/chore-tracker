@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './AuthContext';
 
 function json(status: number, body: unknown) {
@@ -29,12 +30,17 @@ function Probe() {
   );
 }
 
-const show = () =>
-  render(
-    <AuthProvider>
-      <Probe />
-    </AuthProvider>,
+/** AuthProvider now reads the query client (it clears the cache when the person changes),
+ *  so it has to be mounted the way App.tsx mounts it — inside the provider. */
+function mount(ui: React.ReactNode, qc = new QueryClient()) {
+  return render(
+    <QueryClientProvider client={qc}>
+      <AuthProvider>{ui}</AuthProvider>
+    </QueryClientProvider>,
   );
+}
+
+const show = () => mount(<Probe />);
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -70,5 +76,42 @@ describe('the sign-in probe', () => {
 
     await waitFor(() => expect(screen.getByTestId('can-switch')).toHaveTextContent('false'));
     expect(screen.getByTestId('error')).toHaveTextContent('');
+  });
+});
+
+describe('the cache when the person changes', () => {
+  // Most query keys are not scoped by user — ['chores'], ['inbox'], ['occurrences', …] —
+  // and me/Settings.tsx exists precisely because a tablet gets handed between kids.
+  const ME = (id: string) => ({ id, role: 'child', csrf_token: 'c' });
+
+  it('drops the previous kid\u2019s data when someone else signs in', async () => {
+    stubProbe(json(200, ME('k1')));
+    const qc = new QueryClient();
+    qc.setQueryData(['chores'], [{ id: 'c1', title: "Kira's chore" }]);
+
+    mount(<Probe />, qc);
+
+    await waitFor(() => expect(qc.getQueryData(['chores'])).toBeUndefined());
+  });
+
+  it('keeps the cache when the same person is re-probed', async () => {
+    // A recovered session is not a new person, and clearing there would throw away every
+    // screen the parent was looking at for no reason.
+    stubProbe(json(200, ME('k1')));
+    const qc = new QueryClient();
+    const { rerender } = mount(<Probe />, qc);
+    await waitFor(() => expect(screen.getByTestId('can-switch')).toHaveTextContent('false'));
+
+    qc.setQueryData(['chores'], [{ id: 'c1' }]);
+    rerender(
+      <QueryClientProvider client={qc}>
+        <AuthProvider>
+          <Probe />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(qc.getQueryData(['chores'])).toEqual([{ id: 'c1' }]);
   });
 });

@@ -1,5 +1,14 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, NetworkError, setCsrfToken, setCurrentUserId } from '../api/client';
 import type { DevUser, Me } from '../api/types';
 
@@ -36,6 +45,10 @@ interface LogoutResult {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  // AuthProvider is rendered inside QueryClientProvider (App.tsx), so the client is
+  // reachable here without exporting it.
+  const qc = useQueryClient();
+  const signedInAs = useRef<string | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,13 +56,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [unreachable, setUnreachable] = useState(false);
   const [devUsers, setDevUsers] = useState<DevUser[] | null>(null);
 
-  const apply = useCallback((m: Me | null) => {
-    setMe(m);
-    setCsrfToken(m?.csrf_token ?? '');
-    // The wrapper recovers an expired session on its own; it needs to know who was signed
-    // in so it can tell that apart from somebody else signing in on a shared tablet.
-    setCurrentUserId(m?.id ?? null);
-  }, []);
+  const apply = useCallback(
+    (m: Me | null) => {
+      // Whose data is in the cache? Most query keys are not scoped by user — ['chores'],
+      // ['inbox'], ['occurrences', …] — so on the shared family tablet that me/Settings
+      // exists for, the next kid's first paint would render the previous kid's chores
+      // straight out of the cache. Drop it whenever the person changes, which covers
+      // sign-out, sign-in and one account replacing another in a single place.
+      const next = m?.id ?? null;
+      if (signedInAs.current !== next) {
+        signedInAs.current = next;
+        qc.clear();
+      }
+      setMe(m);
+      setCsrfToken(m?.csrf_token ?? '');
+      // The wrapper recovers an expired session on its own; it needs to know who was signed
+      // in so it can tell that apart from somebody else signing in on a shared tablet.
+      setCurrentUserId(next);
+    },
+    [qc],
+  );
 
   // Behind Cloudflare Access this probe *is* the sign-in: the edge has already proved the
   // visitor owns a Google address, so /auth/me answers with a session rather than a form.
