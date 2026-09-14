@@ -55,6 +55,33 @@ describe('offline queue', () => {
     expect(await pendingCount()).toBe(0);
   });
 
+  it.each([
+    [401, 'an expired session'],
+    [403, 'a stale CSRF token'],
+    [429, 'a rate limit'],
+  ])('keeps the photos when the server answers %i (%s)', async (status) => {
+    // These are "not now", not "never". Deleting on the whole 4xx class threw away work a
+    // kid actually did and cannot redo — the sink has been used since.
+    await enqueue(input());
+    post.mockRejectedValue(new ApiError(status, 'nope'));
+
+    expect(await flushQueue()).toEqual({ sent: 0, kept: 1 });
+    expect(await pendingCount()).toBe(1);
+
+    // And it goes out once the condition clears.
+    post.mockReset();
+    post.mockResolvedValue(undefined);
+    expect((await flushQueue()).sent).toBe(1);
+    expect(await pendingCount()).toBe(0);
+  });
+
+  it.each([400, 404, 422])('discards on %i, which will never succeed', async (status) => {
+    await enqueue(input());
+    post.mockRejectedValue(new ApiError(status, 'nope'));
+    expect((await flushQueue()).sent).toBe(1);
+    expect(await pendingCount()).toBe(0);
+  });
+
   it('no-ops without IndexedDB', async () => {
     const real = globalThis.indexedDB;
     // @ts-expect-error simulate a restricted context

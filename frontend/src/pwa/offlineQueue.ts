@@ -115,18 +115,34 @@ function buildForm(item: StoredSubmission): FormData {
   return fd;
 }
 
-/** POST one item. Returns true if it left the queue (sent, or a 4xx rejection). */
+/** Statuses that say "not now", not "never".
+ *
+ * The 4xx class is not the right line to draw. An expired session (401), a stale CSRF
+ * token (403) and a rate limit (429) are all temporary conditions that the very next
+ * attempt may clear — and treating them as rejections deleted photos a kid actually took
+ * and cannot retake, because the sink has been used since. 408 is the same story.
+ *
+ * Deleting is for the answers that will never change however often they are retried: a
+ * malformed body (400/422), an occurrence that is gone (404), or a window that has closed
+ * or is already settled (409).
+ */
+const RETRYABLE = new Set([401, 403, 408, 429]);
+
+export const isPermanentRejection = (e: unknown): e is ApiError =>
+  e instanceof ApiError && e.status >= 400 && e.status < 500 && !RETRYABLE.has(e.status);
+
+/** POST one item. Returns true if it left the queue (sent, or refused for good). */
 async function trySend(item: StoredSubmission): Promise<boolean> {
   try {
     await api.post(`/occurrences/${item.occurrenceId}/submissions`, buildForm(item));
     await remove(item.id);
     return true;
   } catch (e) {
-    if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
-      await remove(item.id); // server rejected it — stop retrying forever
+    if (isPermanentRejection(e)) {
+      await remove(item.id); // the server will never take it — stop retrying forever
       return true;
     }
-    return false; // offline / 5xx — keep it for the next flush
+    return false; // offline, 5xx, or a session that can be recovered — keep it
   }
 }
 

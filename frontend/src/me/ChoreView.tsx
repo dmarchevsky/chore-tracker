@@ -6,7 +6,7 @@ import { useChore, useDispute, useDisputes, useOccurrence } from '../api/hooks';
 import { Button, Card, Spinner } from '../shared/ui';
 import { Capture } from './Capture';
 import { LocationCheckin } from './LocationCheckin';
-import { enqueue } from '../pwa/offlineQueue';
+import { enqueue, isPermanentRejection } from '../pwa/offlineQueue';
 import { occurrenceWorth } from '../shared/outcome';
 import { money } from '../shared/format';
 
@@ -105,7 +105,10 @@ export function ChoreView() {
       setFlash('Sent! ✅');
       await afterSubmit();
     } catch (e) {
-      if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
+      // Same line as the offline queue draws: only an answer that will never change
+      // discards the photos. A recoverable one (expired session, stale CSRF, rate limit)
+      // keeps them, because the kid cannot retake a sink they have since used.
+      if (isPermanentRejection(e)) {
         setFlash(e.message);
       } else {
         await enqueue({ occurrenceId: id, note, source, files, geo: null });
