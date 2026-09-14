@@ -5,9 +5,9 @@ import { MemoryRouter } from 'react-router-dom';
 import { AuthProvider } from '../auth/AuthContext';
 import { Settings } from './Settings';
 
-function json(body: unknown) {
+function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: { 'content-type': 'application/json' },
   });
 }
@@ -33,7 +33,7 @@ const ME = {
   csrf_token: 'x',
 };
 
-function setup() {
+function setup(opts: { settingsFail?: boolean } = {}) {
   const calls: { url: string; method: string; body: unknown }[] = [];
   vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
     const url = String(input);
@@ -64,7 +64,8 @@ function setup() {
     if (method === 'PATCH') return Promise.resolve(json(SETTINGS));
     if (url.includes('/admin/llm/models'))
       return Promise.resolve(json({ reachable: true, models: ['gemma3', 'qwen3-vl'] }));
-    if (url.includes('/admin/settings')) return Promise.resolve(json(SETTINGS));
+    if (url.includes('/admin/settings'))
+      return Promise.resolve(opts.settingsFail ? json({ detail: 'nope' }, 500) : json(SETTINGS));
     return Promise.resolve(json({}));
   });
 
@@ -172,5 +173,18 @@ describe('admin Settings', () => {
     // The parent is warned before they commit to it, because it signs them out.
     expect(String(prompt.mock.calls[0][0])).toContain('signs you out');
     prompt.mockRestore();
+  });
+});
+
+describe('admin Settings when the load failed', () => {
+  it('will not offer to save over settings it could not read', async () => {
+    // The seeding effect returns early without data, so the form rendered blank with
+    // default thresholds — and Save then PATCHed llm_base_url: null, llm_model: null over
+    // the household's real vision-model config. A failed load must not become a wipe.
+    const calls = setup({ settingsFail: true });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Couldn’t load the settings/);
+    expect(screen.queryByRole('button', { name: /^save$/i })).not.toBeInTheDocument();
+    expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(0);
   });
 });

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { useBalance, useLedger } from '../api/hooks';
-import { Card, Spinner } from '../shared/ui';
+import { Card, LoadFailed, Spinner } from '../shared/ui';
 import { RangeTabs } from '../shared/RangeTabs';
 import { DEFAULT_RANGE_DAYS, toRange, type RangeDays } from '../shared/dates';
 import { money } from '../shared/format';
@@ -31,12 +31,14 @@ export function Money() {
       <h1 className="text-xl font-bold">Money</h1>
       <Card>
         <p className="text-sm text-slate-400">Balance</p>
+        {/* Never $0.00 for "we could not ask": that is a wrong number, and this one is
+            about the kid's own money. MeShell shows an em dash for the same reason. */}
         <p
           className={`text-3xl font-bold ${
-            (balance.data?.balance_cents ?? 0) < 0 ? 'text-rose-400' : ''
+            (balance.data?.balance_cents ?? 0) < 0 && balance.data ? 'text-rose-400' : ''
           }`}
         >
-          {money(balance.data?.balance_cents ?? 0)}
+          {balance.data ? money(balance.data.balance_cents) : '—'}
         </p>
       </Card>
       <RangeTabs
@@ -52,6 +54,8 @@ export function Money() {
       <div className="flex flex-col gap-2">
         {ledger.isLoading ? (
           <Spinner />
+        ) : ledger.isError ? (
+          <LoadFailed what="your money" onRetry={() => void ledger.refetch()} />
         ) : groups.length === 0 ? (
           <p className="text-slate-500">No entries yet.</p>
         ) : (

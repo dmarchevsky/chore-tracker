@@ -8,7 +8,7 @@ import {
   useUpdateChild,
 } from './api';
 import type { Child } from '../api/types';
-import { Button, Card, Spinner } from '../shared/ui';
+import { Button, Card, LoadFailed, Spinner } from '../shared/ui';
 
 export function Kids() {
   const kids = useChildren();
@@ -18,6 +18,7 @@ export function Kids() {
   const [error, setError] = useState<string | null>(null);
 
   if (kids.isLoading) return <Spinner />;
+  if (kids.isError) return <LoadFailed what="the kids" onRetry={() => void kids.refetch()} />;
 
   async function add() {
     setError(null);

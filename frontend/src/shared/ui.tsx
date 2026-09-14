@@ -9,6 +9,27 @@ export function Spinner({ label = 'Loading…' }: { label?: string }) {
   );
 }
 
+/** A query that failed, said plainly.
+ *
+ * The counterpart to Spinner, and the reason it exists: nearly every screen rendered
+ * `data ?? []` and drew a failed load as an empty one, so an outage looked like good news —
+ * an inbox with nothing waiting, a chore list with no chores, a balance of $0.00. Emptiness
+ * and failure are different answers and the app has to be able to tell a parent which one
+ * it got.
+ */
+export function LoadFailed({ what, onRetry }: { what: string; onRetry?: () => void }) {
+  return (
+    <div role="alert" className="flex flex-wrap items-center gap-3 text-rose-400">
+      <span>Couldn’t load {what}.</span>
+      {onRetry && (
+        <button className="text-sm text-sky-400 underline" onClick={onRetry}>
+          Try again
+        </button>
+      )}
+    </div>
+  );
+}
+
 type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: 'primary' | 'ghost' | 'danger';
 };

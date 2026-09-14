@@ -13,7 +13,7 @@ import { useAdminChores, useChildren, useOpenDisputes } from './api';
 import { ReviewDetail } from './ReviewDetail';
 import { StandingDetail } from './StandingDetail';
 import { PenaltyDetail } from './PenaltyDetail';
-import { Button, Card, Section, Spinner } from '../shared/ui';
+import { Button, Card, LoadFailed, Section, Spinner } from '../shared/ui';
 import { StatusBadge } from '../shared/StatusBadge';
 import { standingEntry, TONE_CLASS } from '../shared/status';
 import { occurrenceWorth } from '../shared/outcome';
@@ -162,6 +162,12 @@ export function Inbox() {
     upcoming.isLoading
   )
     return <Spinner />;
+  // The screen is built from six queries and every section reads `data ?? []`, so a failure
+  // used to render as "Nothing waiting. 🎉" — a cheerful all-clear on a broken screen, which
+  // is the worst answer this app can give a parent. Any one of them failing means the page
+  // cannot be trusted to say what is outstanding.
+  const failed = [inbox, chores, missed, openNow, done, upcoming].find((q) => q.isError);
+  if (failed) return <LoadFailed what="the inbox" onRetry={() => void failed.refetch()} />;
   const byId = new Map((chores.data ?? []).map((c) => [c.id, c]));
   const kidById = new Map((kids.data ?? []).map((k) => [k.id, k]));
   const rows = inbox.data ?? [];

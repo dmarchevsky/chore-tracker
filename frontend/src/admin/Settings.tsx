@@ -10,7 +10,7 @@ import {
 import type { SettingsPatch } from './api';
 import { setCsrfToken } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
-import { Button, Card, Spinner } from '../shared/ui';
+import { Button, Card, LoadFailed, Spinner } from '../shared/ui';
 import { PushCard } from '../pwa/PushCard';
 import { NotificationPrefs } from '../pwa/NotificationPrefs';
 
@@ -39,7 +39,13 @@ export function Settings() {
   const models = useLlmModels(baseUrl, apiKey);
 
   if (settings.isLoading) return <Spinner />;
-  const src = settings.data?.source ?? {};
+  // Not merely an empty screen: the seeding effect above returns early when there is no
+  // data, so the form would render blank with default thresholds and Save would PATCH
+  // llm_base_url: null, llm_model: null over the household's real configuration. A screen
+  // that cannot show the settings must not offer to overwrite them.
+  if (settings.isError || !settings.data)
+    return <LoadFailed what="the settings" onRetry={() => void settings.refetch()} />;
+  const src = settings.data.source ?? {};
 
   async function submit() {
     setMsg(null);

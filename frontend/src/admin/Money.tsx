@@ -8,7 +8,7 @@ import {
   useReversePenalty,
 } from './api';
 import { ledgerQs } from '../api/hooks';
-import { Button, Card, Spinner } from '../shared/ui';
+import { Button, Card, LoadFailed, Spinner } from '../shared/ui';
 import { KidTabs } from '../shared/KidTabs';
 import { RangeTabs } from '../shared/RangeTabs';
 import { DEFAULT_RANGE_DAYS, toRange, type RangeDays } from '../shared/dates';
@@ -60,12 +60,15 @@ function ChildPanel({ childId }: { childId: string }) {
     <div className="grid gap-4">
       <Card>
         <p className="text-sm text-slate-400">Balance</p>
+        {/* A balance that failed to load is not zero. Rendering `?? 0` printed $0.00 in
+            3xl bold — not an empty state but a wrong number, on the one screen where the
+            number is the entire point. me/MeShell already degrades to an em dash; follow it. */}
         <p
           className={`text-3xl font-bold ${
-            (balance.data?.balance_cents ?? 0) < 0 ? 'text-rose-400' : ''
+            (balance.data?.balance_cents ?? 0) < 0 && balance.data ? 'text-rose-400' : ''
           }`}
         >
-          {money(balance.data?.balance_cents ?? 0)}
+          {balance.data ? money(balance.data.balance_cents) : '—'}
         </p>
         {/* The balance is all-time and the statement is not, so say so — otherwise the two
             numbers on this card look like they disagree. */}
@@ -137,6 +140,8 @@ function ChildPanel({ childId }: { childId: string }) {
         </div>
         {ledger.isLoading ? (
           <Spinner />
+        ) : ledger.isError ? (
+          <LoadFailed what="the statement" onRetry={() => void ledger.refetch()} />
         ) : groups.length === 0 ? (
           <p className="text-slate-500">No money moved in this range.</p>
         ) : (

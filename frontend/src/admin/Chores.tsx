@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAdminChores } from './api';
-import { Button, Card, Spinner } from '../shared/ui';
+import { Button, Card, LoadFailed, Spinner } from '../shared/ui';
 import { DetailSheet } from '../shared/DetailSheet';
 import { money } from '../shared/format';
 import { ChoreForm } from './chores/ChoreForm';
@@ -12,6 +12,7 @@ export function Chores() {
   const [form, setForm] = useState<FormState | null>(null);
 
   if (chores.isLoading) return <Spinner />;
+  if (chores.isError) return <LoadFailed what="the chores" onRetry={() => void chores.refetch()} />;
 
   return (
     <div className="grid gap-4 md:grid-cols-2">

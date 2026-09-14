@@ -205,9 +205,12 @@ function renderInbox(
   misses: unknown[] = missed,
   queue: unknown[] = [occurrence],
   finished: unknown[] = [],
+  failInbox = false,
 ) {
   vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
     const url = String(input);
+    if (failInbox && url.includes('inbox=true'))
+      return Promise.resolve(new Response('{}', { status: 500 }));
     if (url.includes('inbox=true')) return Promise.resolve(json(queue));
     if (url.includes('/state/history'))
       return Promise.resolve(
@@ -744,5 +747,18 @@ describe('admin Inbox', () => {
     await expand(/Missed/);
     await expand(/Coming up/);
     expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+  });
+});
+
+describe('the inbox when it cannot load', () => {
+  it('says so instead of reporting an all-clear', async () => {
+    // The screen is six queries deep and every section reads `data ?? []`, so a failure
+    // used to render "Nothing waiting. 🎉" — the worst possible answer, because the parent
+    // reasonably concludes the kids have nothing outstanding and closes the app.
+    cleanup();
+    renderInbox([], '/admin', missed, [occurrence], [], true);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Couldn’t load the inbox/);
+    expect(screen.queryByText(/Nothing waiting/)).not.toBeInTheDocument();
   });
 });

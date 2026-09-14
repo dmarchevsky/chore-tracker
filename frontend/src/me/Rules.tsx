@@ -2,7 +2,7 @@ import { useChores } from '../api/hooks';
 import { useAuth } from '../auth/AuthContext';
 import { isAssignedTo, isVisibleTo } from '../shared/assignment';
 import type { Chore } from '../api/types';
-import { Card, Spinner } from '../shared/ui';
+import { Card, LoadFailed, Spinner } from '../shared/ui';
 import { money, tierOutcome } from '../shared/format';
 import { formatCadence, formatClock, opensAt } from '../shared/schedule';
 
@@ -32,6 +32,7 @@ export function Rules() {
   const chores = useChores();
   const { me } = useAuth();
   if (chores.isLoading) return <Spinner />;
+  if (chores.isError) return <LoadFailed what="your rules" onRetry={() => void chores.refetch()} />;
 
   const mine = (chores.data ?? []).filter((c) => isVisibleTo(c, me?.id));
   // Penalty rules get their own section rather than sitting among the chores: a chore is

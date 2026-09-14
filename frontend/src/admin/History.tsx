@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useAdminChores, useChildren, useHistory } from './api';
 import type { HistoryQuery } from './api';
 import { ReviewDetail } from './ReviewDetail';
-import { Button, Card, Spinner } from '../shared/ui';
+import { Button, Card, LoadFailed, Spinner } from '../shared/ui';
 import { StatusBadge } from '../shared/StatusBadge';
 import { ADMIN_STATUS } from '../shared/status';
 import { occurrenceWorth } from '../shared/outcome';
@@ -132,6 +132,8 @@ export function History() {
 
         {history.isLoading ? (
           <Spinner />
+        ) : history.isError ? (
+          <LoadFailed what="the history" onRetry={() => void history.refetch()} />
         ) : rows.length === 0 ? (
           <p className="text-slate-500">Nothing matches those filters.</p>
         ) : (
