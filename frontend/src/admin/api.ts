@@ -123,6 +123,9 @@ export function useDecision() {
       // Re-deciding writes reversing ledger entries, so money moves too (spec §9).
       void qc.invalidateQueries({ queryKey: ['ledger'] });
       void qc.invalidateQueries({ queryKey: ['balance'] });
+      // Deciding answers any open appeal on this chore, so it leaves "Kids say something
+      // is wrong" — without this the row stays put until the next full refresh.
+      void qc.invalidateQueries({ queryKey: ['disputes'] });
     },
   });
 }

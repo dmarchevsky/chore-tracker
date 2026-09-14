@@ -25,7 +25,7 @@ from app.models import (
 )
 from app.models.chore import ProofType, VerificationMode
 from app.models.verification import Verdict, Verification
-from app.services import anti_cheat, audit, ledger, notifications
+from app.services import anti_cheat, audit, disputes, ledger, notifications
 from app.services.geo import GeoCheck, evaluate_checkin
 from app.services.media import ingest_photo
 
@@ -312,6 +312,13 @@ async def apply_decision(
             "tier_id": tier_id,
         },
     )
+    # Deciding a disputed chore answers the appeal, so close it here rather than leaving the
+    # parent a second chore to tick off. Silent on purpose: the verdict/redo push below says
+    # the same thing, with the same reason, pointing at the same screen.
+    await disputes.resolve_open_for_occurrence(
+        db, occurrence_id=occurrence.id, admin=admin, note=f"{action}: {reason}"
+    )
+
     if action == "redo":
         await notifications.notify_redo(db, occurrence, reason)
     else:

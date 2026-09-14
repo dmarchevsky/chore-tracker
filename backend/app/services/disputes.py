@@ -53,7 +53,15 @@ async def open_dispute(
     return d
 
 
-async def resolve(db: AsyncSession, *, dispute: Dispute, admin: User, note: str) -> Dispute:
+async def resolve(
+    db: AsyncSession, *, dispute: Dispute, admin: User, note: str, notify: bool = True
+) -> Dispute:
+    """Close one appeal.
+
+    ``notify=False`` is for the case where the parent answered the appeal by *deciding the
+    chore*: the verdict push already carries the same reason and points at the same screen,
+    so a second "A parent replied" would be the same answer twice.
+    """
     # The column is a plain String, so a row loaded from the DB carries a str, not the
     # enum member — compare by value.
     if dispute.status == DisputeStatus.resolved:
@@ -73,9 +81,35 @@ async def resolve(db: AsyncSession, *, dispute: Dispute, admin: User, note: str)
         entity_id=dispute.id,
         after={"note": note},
     )
-    if dispute.author_user_id is not None:
+    if notify and dispute.author_user_id is not None:
         await notifications.notify_dispute_resolved(db, dispute, note)
     return dispute
+
+
+async def resolve_open_for_occurrence(
+    db: AsyncSession, *, occurrence_id: uuid.UUID, admin: User, note: str
+) -> int:
+    """Close every open appeal on an occurrence, because the parent has now answered it.
+
+    Deciding a disputed chore *is* the answer to the dispute — so leaving the appeal open
+    afterwards was wrong twice over. It kept the item sitting in the parent's "Kids say
+    something is wrong" list with nothing left to do about it, and, because settlement
+    skips an occurrence under appeal (``settlement._due_for_settlement``), it also pinned
+    the money in place: a disputed miss that a parent reviewed would never settle at all.
+    """
+    rows = (
+        await db.execute(
+            select(Dispute).where(
+                Dispute.occurrence_id == occurrence_id,
+                Dispute.status == DisputeStatus.open,
+            )
+        )
+    ).scalars()
+    closed = 0
+    for d in rows:
+        await resolve(db, dispute=d, admin=admin, note=note, notify=False)
+        closed += 1
+    return closed
 
 
 async def for_occurrence(db: AsyncSession, occurrence_id: uuid.UUID) -> list[Dispute]:

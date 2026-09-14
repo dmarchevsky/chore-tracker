@@ -156,3 +156,103 @@ async def test_an_appeal_filed_too_late_is_refused(client, db_session, occ, chil
     assert r.status_code == 409
     assert "too late" in r.json()["detail"]
     assert (await db_session.execute(select(Dispute))).scalars().first() is None
+
+
+async def test_deciding_a_disputed_chore_closes_the_appeal(
+    client, db_session, occ, child_user, admin_user
+):
+    """Reviewing the chore *is* the answer to the appeal.
+
+    Leaving it open afterwards left the item sitting in the parent's "Kids say something is
+    wrong" list with nothing left to do about it.
+    """
+    kh = await _kid_login(client)
+    r = await client.post(
+        f"/api/v1/occurrences/{occ.id}/dispute",
+        json={"message": "I did do it"},
+        headers=kh,
+    )
+    assert r.status_code == 201
+
+    ah = await _admin_login(client)
+    assert len((await client.get("/api/v1/disputes", headers=ah)).json()) == 1
+
+    r = await client.post(
+        f"/api/v1/occurrences/{occ.id}/decision",
+        json={"action": "approve", "reason": "you were right"},
+        headers=ah,
+    )
+    assert r.status_code == 200
+
+    assert (await client.get("/api/v1/disputes", headers=ah)).json() == []
+    d = (
+        await db_session.execute(select(Dispute).where(Dispute.occurrence_id == occ.id))
+    ).scalar_one()
+    await db_session.refresh(d)
+    assert d.status == DisputeStatus.resolved
+    assert d.resolved_by_user_id == admin_user.id
+    assert "you were right" in d.resolution_note
+
+
+async def test_closing_an_appeal_by_deciding_does_not_tell_the_kid_twice(
+    client, db_session, occ, child_user, admin_user
+):
+    """The verdict push already carries this reason and points at this screen — a second
+    "A parent replied" is the same answer delivered twice."""
+    from app.models import NotificationLog
+
+    kh = await _kid_login(client)
+    await client.post(
+        f"/api/v1/occurrences/{occ.id}/dispute", json={"message": "unfair"}, headers=kh
+    )
+    ah = await _admin_login(client)
+    await client.post(
+        f"/api/v1/occurrences/{occ.id}/decision",
+        json={"action": "approve", "reason": "fair enough"},
+        headers=ah,
+    )
+
+    kinds = [
+        k
+        for (k,) in (
+            await db_session.execute(
+                select(NotificationLog.kind).where(NotificationLog.user_id == child_user.id)
+            )
+        ).all()
+    ]
+    assert "dispute.resolved" not in kinds
+    assert any(k.startswith("verdict.") for k in kinds)
+
+
+async def test_a_reviewed_miss_can_finally_settle(client, db_session, occ, admin_user):
+    """The serious half. Settlement skips an occurrence under appeal, so a disputed miss
+    the parent had reviewed never settled at all — the penalty simply never posted."""
+    from app.services.settlement import settle_missed
+
+    occ.status = OccurrenceStatus.missed
+    occ.penalty_cents = 500
+    await db_session.commit()
+
+    kh = await _kid_login(client)
+    await client.post(
+        f"/api/v1/occurrences/{occ.id}/dispute", json={"message": "I did it!"}, headers=kh
+    )
+    # Under appeal: the money stays where it is, however long the delay has run.
+    later = datetime.now(UTC) + timedelta(days=2)
+    assert await settle_missed(db_session, now=later) == 0
+
+    ah = await _admin_login(client)
+    await client.post(
+        f"/api/v1/occurrences/{occ.id}/decision",
+        json={"action": "reject", "reason": "the photo shows otherwise"},
+        headers=ah,
+    )
+    await db_session.commit()
+
+    # Answered, so the appeal no longer holds it. (`reject` posts the penalty itself, which
+    # is why there is nothing left for the sweep to settle.)
+    d = (
+        await db_session.execute(select(Dispute).where(Dispute.occurrence_id == occ.id))
+    ).scalar_one()
+    await db_session.refresh(d)
+    assert d.status == DisputeStatus.resolved
