@@ -172,6 +172,43 @@ def test_required_no_fails():
     assert r.outcome == "fail"
 
 
+def test_an_unsure_no_asks_a_human_instead_of_taking_the_money():
+    """A "no" is banded like a "yes" — the model must be as sure to charge as to pay.
+
+    It used to be an unconditional fail, so a "yes" at 0.6 went to review while a "no" at
+    0.6 debited the kid. A false pass costs one unearned reward; a false fail costs money
+    that was earned, and the belief that the thing is fair.
+    """
+    r = derive_verdict(
+        _resp([(1, "yes", 0.95), (2, "no", 0.6)], overall=0.95),
+        required_ids={1, 2},
+        auto_pass_threshold=0.85,
+        auto_fail_threshold=0.35,
+    )
+    assert r.outcome == "needs_review"
+
+
+def test_a_confident_no_still_fails_on_its_own():
+    r = derive_verdict(
+        _resp([(1, "yes", 0.95), (2, "no", 0.93)], overall=0.95),
+        required_ids={1, 2},
+        auto_pass_threshold=0.85,
+        auto_fail_threshold=0.35,
+    )
+    assert r.outcome == "fail"
+
+
+def test_a_no_on_a_check_nobody_requires_is_ignored():
+    """Banding must not quietly promote an optional check into a blocking one."""
+    r = derive_verdict(
+        _resp([(1, "yes", 0.95), (2, "no", 0.2)], overall=0.95),
+        required_ids={1},
+        auto_pass_threshold=0.85,
+        auto_fail_threshold=0.35,
+    )
+    assert r.outcome == "pass"
+
+
 def test_unclear_caps_confidence_and_routes_to_review():
     r = derive_verdict(
         _resp([(1, "yes", 0.95), (2, "unclear", 0.9)]),

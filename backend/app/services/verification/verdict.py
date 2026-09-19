@@ -1,8 +1,10 @@
 """Turn a model response + anti-cheat flags into a routed verdict (spec §6.3, §7.3).
 
-Confidence banding, not thresholding. ``unclear`` on a required check is a fail that also
-caps confidence at 0.5, which lands it in review. Any anti-cheat flag routes to review
-regardless of confidence. An image-quality problem is a retake, never a fail.
+Confidence banding, not thresholding — and symmetric: a required "no" has to clear the
+same bar as a required "yes" before it is acted on, so an unsure model asks a human instead
+of taking a kid's money. ``unclear`` on a required check caps confidence at 0.5, which
+lands it in review. Any anti-cheat flag routes to review regardless of confidence. An
+image-quality problem is a retake, never a fail.
 """
 
 from __future__ import annotations
@@ -69,11 +71,20 @@ def derive_verdict(
             checks=checks,
         )
 
-    # A required "no" is a clear fail. A required "unclear" (with no "no") routes to review
-    # — its confidence is already capped at 0.5 (spec §7.3). When every required check is
-    # "yes", band on confidence: high -> pass, low -> fail, middle -> review (spec §6.3).
+    # A required "no" is banded exactly like a required "yes": the model has to be as sure
+    # to take money as it is to pay it.
+    #
+    # It used to be an unconditional fail, which trusted a negative more than a positive —
+    # a "yes" at 0.6 went to review, a "no" at 0.6 debited the kid. That is backwards here.
+    # A false pass costs a parent one unearned reward; a false fail costs a kid money they
+    # did earn, and the belief that the thing is fair, which is harder to get back. It also
+    # sat badly with spec §6.3: the model is an assistant, and everything uncertain is
+    # supposed to fail open to a human.
+    #
+    # A required "unclear" (with no "no") still routes to review — its confidence is
+    # already capped at 0.5 (spec §7.3).
     if any_no:
-        outcome = "fail"
+        outcome = "fail" if conf >= auto_pass_threshold else "needs_review"
     elif not passed:  # only "unclear" left
         outcome = "needs_review"
     elif conf >= auto_pass_threshold:
