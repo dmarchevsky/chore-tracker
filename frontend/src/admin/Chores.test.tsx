@@ -229,7 +229,7 @@ describe('admin Chores', () => {
       },
     );
     fireEvent.click(screen.getByRole('button', { name: /add a check/i }));
-    fireEvent.change(screen.getByPlaceholderText(/free of dishes/i), {
+    fireEvent.change(screen.getByPlaceholderText(/dirty dishes in the sink basin/i), {
       target: { value: 'Is the sink basin free of dishes?' },
     });
 
@@ -293,7 +293,7 @@ describe('admin Chores', () => {
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Feed the cat' } });
     fireEvent.change(screen.getByDisplayValue('manual'), { target: { value: 'llm_auto' } });
     fireEvent.click(screen.getByRole('button', { name: /add a check/i }));
-    fireEvent.change(screen.getByPlaceholderText(/free of dishes/i), {
+    fireEvent.change(screen.getByPlaceholderText(/dirty dishes in the sink basin/i), {
       target: { value: 'Is the bowl full?' },
     });
     fireEvent.change(screen.getByDisplayValue('photo'), { target: { value: 'acknowledgement' } });

@@ -5,6 +5,8 @@ Kept free of app imports so the Phase 0 bake-off script can reuse these strings 
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 SYSTEM_PROMPT = (
     "You are a household chore verification assistant. You examine photographs and answer "
     "specific factual questions about what is visible. You are strict about only reporting "
@@ -55,11 +57,26 @@ RESPONSE_SCHEMA: dict = {
 }
 
 
+@dataclass(frozen=True)
+class CheckSpec:
+    """One question as the parent wrote it.
+
+    ``expect`` is NOT sent to the model. It is the app's rule, not a fact about the photo,
+    and telling the model which answer is the good one invites it to please us. The model
+    reports what it sees; ``derive_verdict`` decides what that means.
+    """
+
+    id: int
+    text: str
+    expect: str = "yes"
+    ignore: tuple[str, ...] = field(default_factory=tuple)
+
+
 def build_task_prompt(
     *,
     chore_title: str,
     photo_labels: list[str] | None,
-    checks: list[tuple[int, str]],
+    checks: list[CheckSpec] | list[tuple[int, str]],
 ) -> str:
     """The USER message body (spec §7.3).
 
@@ -77,7 +94,13 @@ def build_task_prompt(
     elif labels:
         lines.append("Photos, in order: " + ", ".join(f"{i}. {x}" for i, x in enumerate(labels, 1)))
     lines += ["", "Answer each check:"]
-    lines += [f"{i}. {q} (yes/no/unclear)" for i, q in checks]
+    for c in _as_specs(checks):
+        lines.append(f"{c.id}. {c.text} (yes/no/unclear)")
+        if c.ignore:
+            # Its own line, in the imperative. The same words trailing the question — "a
+            # sponge or dish brush left in the basin is fine" — were dropped by a 4B model,
+            # which then failed the chore citing the sponge and the brush by name.
+            lines.append(f"   Do not count these as a problem: {', '.join(c.ignore)}.")
     lines += [
         "",
         # Worded in the order the schema forces, so the instruction and the grammar agree.
@@ -88,3 +111,8 @@ def build_task_prompt(
         "If the photo is too dark/blurry or shows the wrong thing, set image_quality_issue.",
     ]
     return "\n".join(lines)
+
+
+def _as_specs(checks: list[CheckSpec] | list[tuple[int, str]]) -> list[CheckSpec]:
+    """Accept the plain ``(id, text)`` pairs the bake-off script and older callers pass."""
+    return [c if isinstance(c, CheckSpec) else CheckSpec(id=c[0], text=c[1]) for c in checks]

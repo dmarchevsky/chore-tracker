@@ -5,9 +5,9 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import date, datetime, time
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.chore import AssignmentMode, ChoreKind, ProofType, VerificationMode
 from app.models.occurrence import OccurrenceStatus
@@ -34,6 +34,29 @@ class ChecklistItem(BaseModel):
     id: int = Field(ge=1)
     text: str = Field(min_length=1, max_length=300)
     required: bool = True
+
+    # Which answer means the chore was done. Defaults to "yes" so every checklist written
+    # before this existed behaves exactly as it did.
+    #
+    # It exists because demanding yes=done forced parents into the hard phrasing. Spec §6.3
+    # says the answerable question is "Are there dishes in the sink basin?", but with yes
+    # meaning done that has to be contorted into "Is the basin clear of dishes?" — and
+    # verifying an absence is much harder for a vision model than reporting a presence.
+    # With `expect`, the parent writes the direct question and the app applies the rule.
+    expect: Literal["yes", "no"] = "yes"
+
+    # Things that are present but must not count against the check. A trailing "a sponge or
+    # dish brush is fine" in the question text is the first thing a small model drops; as
+    # its own instruction line it survives. (This is the real failure that prompted it.)
+    ignore: list[str] = Field(default_factory=list, max_length=12)
+
+    @field_validator("ignore")
+    @classmethod
+    def _tidy(cls, v: list[str]) -> list[str]:
+        out = [x.strip() for x in v if x.strip()]
+        if any(len(x) > 60 for x in out):
+            raise ValueError("each ignored item must be 60 characters or fewer")
+        return out
 
 
 class OutcomeKind(enum.StrEnum):

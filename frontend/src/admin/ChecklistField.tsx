@@ -4,6 +4,13 @@ export interface ChecklistItem {
   id: number;
   text: string;
   required: boolean;
+  /** Which answer means the chore was done. Lets the question be written the direct way —
+   *  "Are there dirty dishes in the basin?" — instead of inverted into "is it clear of…",
+   *  which is much harder for a vision model to answer. */
+  expect?: 'yes' | 'no';
+  /** Things that may be present without counting against the check. Sent as its own
+   *  instruction line, because the same words trailing the question got dropped. */
+  ignore?: string[];
 }
 
 interface Props {
@@ -45,30 +52,60 @@ export function ChecklistField({ value, onChange }: Props) {
         </p>
       )}
       {items.map((it, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <span className="w-4 text-xs text-slate-500">{it.id}</span>
-          <input
-            className="inp flex-1"
-            placeholder="Is the sink basin free of dishes?"
-            value={it.text}
-            onChange={(e) => edit(i, { text: e.target.value })}
-          />
-          <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
+        <div key={i} className="flex flex-col gap-1 border-b border-slate-800 pb-2 last:border-0">
+          <div className="flex items-center gap-2">
+            <span className="w-4 text-xs text-slate-500">{it.id}</span>
             <input
-              type="checkbox"
-              checked={it.required}
-              onChange={(e) => edit(i, { required: e.target.checked })}
+              className="inp flex-1"
+              placeholder="Are there dirty dishes in the sink basin?"
+              value={it.text}
+              onChange={(e) => edit(i, { text: e.target.value })}
             />
-            must pass
-          </label>
-          <button
-            type="button"
-            aria-label={`Remove check ${it.id}`}
-            className="shrink-0 px-2 text-slate-500"
-            onClick={() => remove(i)}
-          >
-            ✕
-          </button>
+            <button
+              type="button"
+              aria-label={`Remove check ${it.id}`}
+              className="shrink-0 px-2 text-slate-500"
+              onClick={() => remove(i)}
+            >
+              ✕
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 pl-6">
+            <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
+              Done when the answer is
+              <select
+                className="rounded-lg bg-slate-800 p-1 text-xs"
+                aria-label={`Check ${it.id} passes when the answer is`}
+                value={it.expect ?? 'yes'}
+                onChange={(e) => edit(i, { expect: e.target.value as 'yes' | 'no' })}
+              >
+                <option value="yes">yes</option>
+                <option value="no">no</option>
+              </select>
+            </label>
+            <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
+              <input
+                type="checkbox"
+                checked={it.required}
+                onChange={(e) => edit(i, { required: e.target.checked })}
+              />
+              must pass
+            </label>
+            <input
+              className="inp min-w-[12rem] flex-1 text-xs"
+              aria-label={`Check ${it.id} ignores`}
+              placeholder="ignore, comma separated — sponge, dish brush"
+              value={(it.ignore ?? []).join(', ')}
+              onChange={(e) =>
+                edit(i, {
+                  ignore: e.target.value
+                    .split(',')
+                    .map((x) => x.trim())
+                    .filter(Boolean),
+                })
+              }
+            />
+          </div>
         </div>
       ))}
       <div>
@@ -84,8 +121,12 @@ export function ChecklistField({ value, onChange }: Props) {
       </div>
       {items.length > 0 && (
         <p className="text-xs text-slate-500">
-          A “must pass” check answered <span className="text-rose-400">no</span> fails the chore. An
-          optional one is recorded but doesn’t decide it.
+          A “must pass” check that comes back with the wrong answer fails the chore; an optional one
+          is recorded but doesn’t decide it. Ask the question the direct way — “are there dirty
+          dishes in the basin?”, done when the answer is <em>no</em> — rather than inverting it into
+          “is the basin clear?”. Spotting something is far easier for the model than proving its
+          absence. Anything in <em>ignore</em> is named to the model as not a problem, which is much
+          more reliable than putting “a sponge is fine” at the end of the question.
         </p>
       )}
     </div>

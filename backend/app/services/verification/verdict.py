@@ -33,9 +33,22 @@ def derive_verdict(
     auto_pass_threshold: float,
     auto_fail_threshold: float,
     flags: list[str] | None = None,
+    expected: dict[int, str] | None = None,
 ) -> VerdictResult:
+    """``expected`` maps a check id to the answer that means the chore was done.
+
+    Absent, every check expects "yes", which is what every checklist written before
+    ChecklistItem.expect existed means. It lets a parent ask the question the direct way —
+    "Are there dirty dishes in the sink basin?" (expect "no") — instead of inverting it into
+    "Is the basin clear of dishes?" just to make yes mean done. Reporting a presence is much
+    easier for a vision model than verifying an absence (spec §6.3 "checklists beat vibes").
+    """
     flags = flags or []
+    expected = expected or {}
     checks = [c.model_dump() for c in response.checks]
+
+    def wanted(cid: int) -> str:
+        return expected.get(cid, "yes")
 
     if response.image_quality_issue and response.image_quality_issue != "none":
         return VerdictResult(
@@ -48,9 +61,11 @@ def derive_verdict(
         )
 
     considered = [c for c in response.checks if required_ids is None or c.id in required_ids]
-    passed = all(c.answer == "yes" for c in considered) if considered else False
+    passed = all(c.answer == wanted(c.id) for c in considered) if considered else False
     any_unclear = any(c.answer == "unclear" for c in considered)
-    any_no = any(c.answer == "no" for c in considered)
+    # A definite answer that is not the one the chore needed. Not "== no": on a check that
+    # expects "no", a "yes" is the failure.
+    any_no = any(c.answer != wanted(c.id) and c.answer != "unclear" for c in considered)
 
     if considered:
         conf = min(c.confidence for c in considered)
@@ -60,7 +75,11 @@ def derive_verdict(
     if any_unclear:
         conf = min(conf, UNCLEAR_CAP)
 
-    reasoning = "; ".join(f"#{c.id}:{c.answer}({c.confidence:.2f})" for c in response.checks)
+    reasoning = "; ".join(
+        f"#{c.id}:{c.answer}({c.confidence:.2f})"
+        + ("" if wanted(c.id) == "yes" else f"[wanted {wanted(c.id)}]")
+        for c in response.checks
+    )
 
     if flags:  # spec §6.3 rule 2 — any flag -> review regardless of confidence
         return VerdictResult(

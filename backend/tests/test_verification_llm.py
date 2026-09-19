@@ -9,7 +9,12 @@ import pytest
 import respx
 
 from app.config import Settings
-from app.services.verification import RESPONSE_SCHEMA, build_task_prompt, derive_verdict
+from app.services.verification import (
+    RESPONSE_SCHEMA,
+    CheckSpec,
+    build_task_prompt,
+    derive_verdict,
+)
 from app.services.verification.llm import (
     MAX_TOKENS,
     LLMError,
@@ -297,3 +302,82 @@ def test_the_instructions_ask_for_evidence_first_too():
     )
     assert prompt.index("evidence") < prompt.index("`answer`")
     assert "Decide the answer from the evidence you just wrote." in prompt
+
+
+# --- checks that say what they expect (spec §6.3) ----------------------------
+
+
+def test_a_check_can_expect_no_so_the_question_can_be_asked_the_direct_way():
+    """ "Are there dirty dishes in the basin?" is answerable; "is it clear of dishes?"
+    makes the model prove an absence. Only the app knows which answer means done."""
+    ok = derive_verdict(
+        _resp([(1, "no", 0.95)], overall=0.95),
+        required_ids={1},
+        auto_pass_threshold=0.85,
+        auto_fail_threshold=0.35,
+        expected={1: "no"},
+    )
+    assert ok.outcome == "pass"
+
+    # And the mirror: on that same check a confident "yes" is the failure.
+    bad = derive_verdict(
+        _resp([(1, "yes", 0.95)], overall=0.95),
+        required_ids={1},
+        auto_pass_threshold=0.85,
+        auto_fail_threshold=0.35,
+        expected={1: "no"},
+    )
+    assert bad.outcome == "fail"
+
+
+def test_a_checklist_written_before_expect_existed_is_unchanged():
+    r = derive_verdict(
+        _resp([(1, "yes", 0.95)], overall=0.95),
+        required_ids={1},
+        auto_pass_threshold=0.85,
+        auto_fail_threshold=0.35,
+    )
+    assert r.outcome == "pass"
+
+
+def test_unclear_still_routes_to_review_whatever_was_expected():
+    r = derive_verdict(
+        _resp([(1, "unclear", 0.9)], overall=0.9),
+        required_ids={1},
+        auto_pass_threshold=0.85,
+        auto_fail_threshold=0.35,
+        expected={1: "no"},
+    )
+    assert r.outcome == "needs_review"
+
+
+def test_the_ignore_list_is_its_own_instruction_not_a_trailing_clause():
+    """The exact failure this came from: "a sponge, dish brush, or drain strainer left in
+    the basin is fine" tacked onto the question was dropped, and the chore was failed
+    citing the sponge and the brush by name."""
+    prompt = build_task_prompt(
+        chore_title="Kitchen",
+        photo_labels=["sink"],
+        checks=[
+            CheckSpec(
+                id=1,
+                text="Are there dirty dishes, cups, pans or utensils in the sink basin?",
+                expect="no",
+                ignore=("sponge", "dish brush", "drain strainer"),
+            )
+        ],
+    )
+    lines = prompt.splitlines()
+    q = next(i for i, ln in enumerate(lines) if ln.startswith("1."))
+    assert lines[q + 1].strip() == (
+        "Do not count these as a problem: sponge, dish brush, drain strainer."
+    )
+    # `expect` is the app's rule, not a fact about the photo. Telling the model which
+    # answer we want invites it to give us that answer.
+    assert "expect" not in prompt and "Done when" not in prompt
+
+
+def test_plain_id_text_pairs_still_build_a_prompt():
+    """The bake-off script and older callers pass tuples."""
+    prompt = build_task_prompt(chore_title="K", photo_labels=None, checks=[(1, "Clear?")])
+    assert "1. Clear? (yes/no/unclear)" in prompt

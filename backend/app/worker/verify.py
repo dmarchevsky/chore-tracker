@@ -32,7 +32,7 @@ from app.models.verification import Verdict, Verification
 from app.services import ledger, notifications
 from app.services.llm_config import get_llm_config
 from app.services.media import read_media
-from app.services.verification import build_task_prompt, derive_verdict, run_vision
+from app.services.verification import CheckSpec, build_task_prompt, derive_verdict, run_vision
 from app.services.verification.llm import LLMError
 from app.worker import queue
 
@@ -46,13 +46,27 @@ _OUTCOME_TO_VERDICT = {
 }
 
 
-def _checklist(chore: Chore) -> tuple[list[tuple[int, str]], set[int]]:
-    """``(id, question)`` pairs plus the ids that must pass. The ids travel all the way to
-    the model and back, so a checklist with gaps (a parent deleted a row) still lines up."""
+def _checklist(chore: Chore) -> tuple[list[CheckSpec], set[int], dict[int, str]]:
+    """The questions, the ids that must pass, and what each id's passing answer is.
+
+    The ids travel all the way to the model and back, so a checklist with gaps (a parent
+    deleted a row) still lines up. ``expect`` and ``ignore`` default to the old behaviour,
+    so a checklist stored before they existed is unaffected — the column is JSONB, so there
+    is nothing to migrate.
+    """
     items = chore.verification_checklist or []
-    checks = [(it["id"], it["text"]) for it in items]
+    checks = [
+        CheckSpec(
+            id=it["id"],
+            text=it["text"],
+            expect=it.get("expect", "yes"),
+            ignore=tuple(it.get("ignore") or ()),
+        )
+        for it in items
+    ]
     required = {it["id"] for it in items if it.get("required", True)}
-    return checks, required
+    expected = {c.id: c.expect for c in checks}
+    return checks, required, expected
 
 
 async def process_job(db: AsyncSession, job: VerificationJob) -> None:
@@ -82,7 +96,7 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
         .all()
     )
 
-    checks, required_ids = _checklist(chore)
+    checks, required_ids, expected = _checklist(chore)
     prompt = build_task_prompt(
         chore_title=chore.title,
         photo_labels=[m.prompt_label or "" for m in media_rows],
@@ -122,6 +136,7 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
         auto_pass_threshold=float(chore.auto_pass_threshold),
         auto_fail_threshold=float(chore.auto_fail_threshold),
         flags=list(sub.flags),
+        expected=expected,
     )
 
     v = _write_verification(
