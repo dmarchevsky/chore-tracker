@@ -9,7 +9,7 @@ import pytest
 import respx
 
 from app.config import Settings
-from app.services.verification import build_task_prompt, derive_verdict
+from app.services.verification import RESPONSE_SCHEMA, build_task_prompt, derive_verdict
 from app.services.verification.llm import (
     MAX_TOKENS,
     LLMError,
@@ -232,3 +232,31 @@ def test_build_task_prompt_lists_every_photo_label_in_order():
         checks=[(1, "Is the sink empty?")],
     )
     assert "Photos, in order: 1. sink close-up, 2. wide kitchen" in p
+
+
+def test_the_model_must_describe_before_it_decides():
+    """`evidence` is emitted before `answer`, and that ordering is the fix, not cosmetics.
+
+    The schema goes out as `response_format: json_schema` and is decoded under a grammar
+    built from it, so key order here is key order on the wire — and an autoregressive model
+    cannot revise what it already wrote. With `answer` first, a check that said "a sponge or
+    dish brush left in the basin is fine" came back failed, evidenced by "there are several
+    items, including a dish brush and a sponge": the model saw correctly and judged first.
+    """
+    item = RESPONSE_SCHEMA["properties"]["checks"]["items"]
+    assert list(item["properties"]) == ["id", "evidence", "answer", "confidence"]
+    # `required` drives grammar order too on some servers, so it has to agree.
+    assert item["required"] == ["id", "evidence", "answer", "confidence"]
+    # additionalProperties:false is what makes the grammar closed, and so ordered at all.
+    assert item["additionalProperties"] is False
+
+
+def test_the_instructions_ask_for_evidence_first_too():
+    """An instruction that contradicts the grammar just confuses a small model."""
+    prompt = build_task_prompt(
+        chore_title="Kitchen",
+        photo_labels=["sink"],
+        checks=[(1, "Is the sink basin clear?")],
+    )
+    assert prompt.index("evidence") < prompt.index("`answer`")
+    assert "Decide the answer from the evidence you just wrote." in prompt

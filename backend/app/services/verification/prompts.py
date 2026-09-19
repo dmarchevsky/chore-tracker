@@ -23,12 +23,25 @@ RESPONSE_SCHEMA: dict = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["id", "answer", "confidence", "evidence"],
+                # ORDER IS LOAD-BEARING. `response_format: json_schema` is decoded under a
+                # grammar built from this schema, so the model emits these keys in exactly
+                # this order — and an autoregressive model cannot revise what it already
+                # wrote. With `answer` first it committed to yes/no before describing
+                # anything, then wrote evidence to justify a guess. A parent's check that
+                # said "a sponge or dish brush in the basin is fine" was failed with the
+                # evidence "there are several items, including a dish brush and a sponge"
+                # — the model saw correctly and judged first.
+                #
+                # Evidence first makes the answer conditional on the model's own
+                # description. It is the cheapest chain-of-thought available to us and
+                # costs nothing extra, which matters: `enable_thinking` is off (llm.py) and
+                # the deployed model is 4B-class, so this is the only room it gets.
+                "required": ["id", "evidence", "answer", "confidence"],
                 "properties": {
                     "id": {"type": "integer"},
+                    "evidence": {"type": "string"},
                     "answer": {"type": "string", "enum": ["yes", "no", "unclear"]},
                     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                    "evidence": {"type": "string"},
                 },
             },
         },
@@ -67,7 +80,10 @@ def build_task_prompt(
     lines += [f"{i}. {q} (yes/no/unclear)" for i, q in checks]
     lines += [
         "",
-        "For each: answer, confidence 0-1, and one sentence of evidence describing what you see.",
+        # Worded in the order the schema forces, so the instruction and the grammar agree.
+        "For each check, in this order: first `evidence` — one sentence describing only "
+        "what you can actually see that bears on the question — then `answer`, then "
+        "`confidence` 0-1. Decide the answer from the evidence you just wrote.",
         "Then an overall summary in one friendly sentence addressed to a child.",
         "If the photo is too dark/blurry or shows the wrong thing, set image_quality_issue.",
     ]

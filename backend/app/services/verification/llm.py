@@ -51,10 +51,13 @@ class LLMError(RuntimeError):
 
 
 class Check(BaseModel):
+    # Field order mirrors RESPONSE_SCHEMA, where it is load-bearing: the model writes what
+    # it sees before it decides. Parsing does not care, but the two drifting apart would
+    # hide the reason the schema is ordered the way it is.
     id: int
+    evidence: str = ""
     answer: str  # yes | no | unclear
     confidence: float = Field(ge=0, le=1)
-    evidence: str = ""
 
 
 class ModelResponse(BaseModel):

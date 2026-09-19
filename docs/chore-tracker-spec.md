@@ -438,15 +438,24 @@ Answer each check:
 2. Is the countertop immediately around the sink free of dirty dishes? (yes/no/unclear)
 3. Is the visible area free of food waste or spills? (yes/no/unclear)
 
-For each: answer, confidence 0-1, and one sentence of evidence describing what you see.
+For each check, in this order: first `evidence` — one sentence describing only what you can
+actually see that bears on the question — then `answer`, then `confidence` 0-1. Decide the
+answer from the evidence you just wrote.
 Then an overall summary in one friendly sentence addressed to a child.
 ```
 
-Response schema:
+Response schema. `[D]` **`evidence` comes before `answer`, and the order is load-bearing.**
+The schema is sent as `response_format: json_schema` and decoded under a grammar built from
+it, so the model emits the keys in this order and cannot revise what it already wrote. With
+`answer` first it committed to a verdict before describing anything — a check reading "a
+sponge or dish brush left in the basin is fine" was failed with the evidence "there are
+several items, including a dish brush and a sponge". Evidence first makes the answer
+conditional on the model's own description, which is the only thinking room it gets:
+`enable_thinking` is off and the deployed model is 4B-class.
 
 ```json
 {
-  "checks": [{"id": 1, "answer": "yes|no|unclear", "confidence": 0.0, "evidence": "string"}],
+  "checks": [{"id": 1, "evidence": "string", "answer": "yes|no|unclear", "confidence": 0.0}],
   "overall_confidence": 0.0,
   "child_message": "string",
   "image_quality_issue": "none|too_dark|too_blurry|wrong_subject|too_close|too_far"
