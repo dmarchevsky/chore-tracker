@@ -109,9 +109,14 @@ fmt:
 lint:
     cd {{backend}} && uv run ruff check . && uv run ruff format --check .
 
-# Score the vision model against the labelled set (spec §7)
+# Score the vision model against the labelled set (spec §7). Needs the model.
 eval *args:
     cd {{backend}} && uv run python -m eval.run {{args}}
+
+# Re-decide stored verifications with today's logic and report what would move.
+# Read-only, needs no model — run it after any change to verdict/prompt code.
+eval-replay *args:
+    cd {{backend}} && uv run python -m eval.replay_cli {{args}}
 
 # --- Frontend (PWA) ------------------------------------------------------
 

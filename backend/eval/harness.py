@@ -20,22 +20,35 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from app.services.verification import build_task_prompt, derive_verdict
+from app.services.verification import CheckSpec, build_task_prompt, derive_verdict
 from app.services.verification.llm import LLMError, run_vision
 
-# Seeds for the four brief chores; override per-folder with checklists.json.
+# Seeds for the brief's chores; override per-folder with checklists.json.
+#
+# Written the way the app now recommends: ask what is *there*, and say which answer means
+# done. "Are there dirty dishes in the basin?" is a question about the photo; "is the basin
+# free of dishes?" asks the model to prove an absence, which it is much worse at. Anything
+# allowed to be present is named in `ignore` rather than trailing the question, because a
+# 4B model drops a trailing "a sponge is fine" and then fails the chore citing the sponge.
 DEFAULT_CHECKLISTS: dict[str, dict] = {
     "sink": {
         "checks": [
-            "Is the sink basin free of dishes, cups, pans and utensils?",
-            "Is the counter around the sink free of dirty dishes?",
+            {
+                "text": "Are there dirty dishes, cups, pans or utensils in the sink basin?",
+                "expect": "no",
+                "ignore": ["sponge", "dish brush", "drain strainer"],
+            },
+            {
+                "text": "Are there dirty dishes on the counter around the sink?",
+                "expect": "no",
+            },
         ],
         "required": [1, 2],
     },
     "room": {
         "checks": [
-            "Is the floor clear of clothes and clutter?",
-            "Is the bed made?",
+            {"text": "Are there clothes or clutter on the floor?", "expect": "no"},
+            {"text": "Is the bed made?", "expect": "yes"},
         ],
         "required": [1, 2],
     },
@@ -96,6 +109,28 @@ def _checklist_for(chore_type: str, root: Path) -> dict:
     )
 
 
+def specs_for(spec: dict) -> list[CheckSpec]:
+    """Turn a checklist entry into CheckSpecs, accepting the old list-of-strings form.
+
+    A set labelled before `expect` existed is still a valid set; it just means every
+    question was written the yes=done way.
+    """
+    out: list[CheckSpec] = []
+    for i, c in enumerate(spec["checks"], 1):
+        if isinstance(c, str):
+            out.append(CheckSpec(id=i, text=c))
+        else:
+            out.append(
+                CheckSpec(
+                    id=c.get("id", i),
+                    text=c["text"],
+                    expect=c.get("expect", "yes"),
+                    ignore=tuple(c.get("ignore") or ()),
+                )
+            )
+    return out
+
+
 def score_one(outcome: str, expected_pass: bool, counts: Counts) -> None:
     if outcome == "pass":
         counts.tp += expected_pass
@@ -113,12 +148,14 @@ async def run(root: Path, *, auto_pass: float = 0.85, auto_fail: float = 0.35) -
     results: dict[str, Counts] = {}
     for chore_type, items in discover(root).items():
         spec = _checklist_for(chore_type, root)
-        required = set(spec.get("required") or range(1, len(spec["checks"]) + 1))
+        checks = specs_for(spec)
+        required = set(spec.get("required") or [c.id for c in checks])
+        expected_answers = {c.id: c.expect for c in checks}
         counts = Counts()
+        # Built once: it does not vary per image, and rebuilding it per photo is how the
+        # signature drift below went unnoticed for so long.
+        prompt = build_task_prompt(chore_title=chore_type, photo_labels=None, checks=checks)
         for img, expected in items:
-            prompt = build_task_prompt(
-                chore_title=chore_type, photo_label=None, checks=spec["checks"]
-            )
             t0 = time.perf_counter()
             try:
                 resp, _, _ = await run_vision(task_prompt=prompt, images=[img.read_bytes()])
@@ -131,6 +168,7 @@ async def run(root: Path, *, auto_pass: float = 0.85, auto_fail: float = 0.35) -
                 required_ids=required or None,
                 auto_pass_threshold=auto_pass,
                 auto_fail_threshold=auto_fail,
+                expected=expected_answers,
             )
             score_one(verdict.outcome, expected, counts)
         results[chore_type] = counts
