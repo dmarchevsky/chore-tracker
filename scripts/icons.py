@@ -30,6 +30,10 @@ CHECK = 0.13  # check stroke; the knob to turn if the tab icon reads as a dot
 # The check itself: (x, y) fractions, short arm then long arm.
 CHECK_POINTS = ((0.34, 0.51), (0.45, 0.62), (0.67, 0.39))
 
+# The Android status-bar badge: the check alone, filling most of the canvas.
+BADGE_EXTENT = 0.62  # how much of the canvas the check's bounding box spans
+BADGE_STROKE = 0.15  # stroke, as a fraction of the canvas
+
 SUPERSAMPLE = 4
 
 ICO_SIZES = (16, 32, 48)
@@ -77,6 +81,42 @@ def render(size: int, *, square: bool = False) -> Image.Image:
     return img.convert("RGB") if square else img
 
 
+def render_badge(size: int) -> Image.Image:
+    """The notification badge — Android's status-bar icon.
+
+    Android does not draw this image. It throws the colour away and keeps **only the alpha
+    channel**, then fills that silhouette with white. So the app icon is the one thing that
+    can never be used here: its tile is opaque corner to corner (94.8% of icon-192.png is
+    alpha 255), and the mask of an opaque tile is a solid square. That is precisely the
+    generic square that sat in the status bar, while the notification shade — which uses
+    `icon`, not `badge`, and is drawn normally — looked correct.
+
+    So: transparent everywhere, the check and nothing else, scaled up to fill the canvas
+    since there is no coin to sit on. Drawn in white because that is what the alpha will be
+    filled with anyway, and it keeps the file legible anywhere that ignores the mask.
+    """
+    s = size * SUPERSAMPLE
+    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+
+    xs = [x for x, _ in CHECK_POINTS]
+    ys = [y for _, y in CHECK_POINTS]
+    w, h = max(xs) - min(xs), max(ys) - min(ys)
+    k = BADGE_EXTENT / max(w, h)  # uniform, so the check keeps its shape
+    # Centre the scaled bounding box on the canvas.
+    ox = (1 - w * k) / 2 - min(xs) * k
+    oy = (1 - h * k) / 2 - min(ys) * k
+    pts = [((x * k + ox) * s, (y * k + oy) * s) for x, y in CHECK_POINTS]
+
+    white = (255, 255, 255, 255)
+    d.line(pts, fill=white, width=round(BADGE_STROKE * s), joint="curve")
+    r = BADGE_STROKE * s / 2
+    for x, y in (pts[0], pts[-1]):
+        d.ellipse((x - r, y - r, x + r, y + r), fill=white)
+
+    return img.resize((size, size), Image.LANCZOS)
+
+
 def svg() -> str:
     """The same drawing as vector, for tabs that prefer it. Kept in step with the constants."""
     (x0, y0), (x1, y1), (x2, y2) = CHECK_POINTS
@@ -103,6 +143,10 @@ def main(argv: list[str]) -> None:
     for name, size in (("apple-touch-icon.png", 180), ("icon-512-maskable.png", 512)):
         render(size, square=True).save(dest / name)
         written.append(name)
+
+    # 96px covers xxxhdpi for a 24dp status-bar icon; Android scales down from here.
+    render_badge(96).save(dest / "badge-96.png")
+    written.append("badge-96.png")
 
     largest = render(max(ICO_SIZES))
     largest.save(dest / "favicon.ico", sizes=[(n, n) for n in ICO_SIZES])

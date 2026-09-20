@@ -28,6 +28,7 @@ SIZES = {
     "icon-512.png": 512,
     "icon-512-maskable.png": 512,
     "apple-touch-icon.png": 180,
+    "badge-96.png": 96,
 }
 
 
@@ -91,3 +92,45 @@ def test_index_html_icon_links_all_resolve():
     assert hrefs
     for href in hrefs:
         assert (PUBLIC / href.lstrip("/")).exists(), href
+
+
+# --- the Android status-bar badge -------------------------------------------
+#
+# Android does not draw this image: it keeps only the alpha channel and fills that
+# silhouette with white. So the one asset that can never be used here is the app icon,
+# whose tile is opaque corner to corner — its mask is a solid rounded square, which is
+# exactly what sat in the status bar while the pulled-down shade looked correct.
+
+
+def test_the_badge_masks_to_a_mark_and_not_to_a_square():
+    from PIL import Image
+
+    alpha = Image.open(PUBLIC / "badge-96.png").convert("RGBA").getchannel("A")
+    px = list(alpha.get_flattened_data())
+    opaque = sum(p > 127 for p in px)
+
+    # A shape, not a tile. The app icon is ~95% opaque; a checkmark is a small fraction.
+    assert 0.05 < opaque / len(px) < 0.35, "badge silhouette looks like a filled tile"
+    # Every corner clear, or the mask has a square edge whatever is drawn inside it.
+    w, h = alpha.size
+    assert [alpha.getpixel(p) for p in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1))] == [
+        0,
+        0,
+        0,
+        0,
+    ]
+    # Ink in the middle: a transparent PNG would also pass the two checks above.
+    assert alpha.getpixel((w // 2, h // 2)) > 127
+
+
+def test_the_badge_is_not_the_app_icon():
+    """The regression this guards: badge and icon pointing at the same file."""
+    badge = (PUBLIC / "badge-96.png").read_bytes()
+    for other in ("icon-192.png", "icon-512.png", "apple-touch-icon.png"):
+        assert badge != (PUBLIC / other).read_bytes()
+
+
+def test_the_service_worker_asks_for_the_badge_not_the_tile():
+    sw = (ROOT / "frontend" / "src" / "sw.ts").read_text()
+    assert re.search(r"badge:\s*'/badge-96\.png'", sw)
+    assert not re.search(r"badge:\s*'/icon-", sw), "badge must never point at an app tile"

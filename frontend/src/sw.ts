@@ -44,8 +44,18 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title || 'ChoreKeeper', {
       body: data.body || '',
+      // Two different jobs, and they cannot share a file.
+      //
+      // `icon` is drawn normally, in the pulled-down shade — the full-colour app icon is
+      // right here.
+      //
+      // `badge` is the status-bar icon, and Android throws its colour away and keeps only
+      // the alpha channel, filling that silhouette with white. icon-192.png is a tile that
+      // is 95% opaque, so its silhouette is a solid rounded square — which is exactly what
+      // sat in the status bar while the shade looked fine. badge-96.png is the checkmark
+      // alone on transparency (scripts/icons.py), so the mask is a checkmark.
       icon: '/icon-192.png',
-      badge: '/icon-192.png',
+      badge: '/badge-96.png',
       data: { url },
     }),
   );
