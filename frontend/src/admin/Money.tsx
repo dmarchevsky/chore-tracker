@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   useChildBalance,
   useChildLedger,
@@ -7,6 +8,7 @@ import {
   usePayout,
   useReversePenalty,
 } from './api';
+import { ApiError } from '../api/client';
 import { ledgerQs } from '../api/hooks';
 import { Button, Card, LoadFailed, Spinner } from '../shared/ui';
 import { KidTabs } from '../shared/KidTabs';
@@ -161,17 +163,18 @@ const signed = (cents: number) => `${cents > 0 ? '+' : ''}${money(cents)}`;
  * indistinguishable credits. So the group leads with what actually happened and what it came
  * to, and keeps the rows themselves one tap away rather than deleting them from the view.
  *
- * Excusing is the ordinary decision path (spec §4.2): it writes a reversing entry rather
- * than removing the charge. A manually applied penalty (spec §4.8) has no occurrence to
- * excuse, so it gets its own undo — two affordances because they are genuinely different
- * acts: excusing forgives a missed chore and clears its state, undoing says the charge
- * itself shouldn't have happened.
+ * Excusing and approving are the ordinary decision paths (spec §4.2): each writes a
+ * reversing entry rather than removing the charge, and approving then pays the chore as if
+ * it had been done. A manually applied penalty (spec §4.8) has no occurrence to decide, so
+ * it gets its own undo — a separate affordance because it is a genuinely different act:
+ * excusing forgives a missed chore, approving says it was done after all, undoing says the
+ * charge itself shouldn't have happened.
  */
 function StatementGroupRow({ group: g }: { group: StatementGroup }) {
   const decide = useDecision();
   const undo = useReversePenalty();
   const [open, setOpen] = useState(false);
-  const [asking, setAsking] = useState(false);
+  const [asking, setAsking] = useState<QuickAction | null>(null);
   const [reason, setReason] = useState('');
 
   const charge = g.live_penalty;
@@ -231,17 +234,26 @@ function StatementGroupRow({ group: g }: { group: StatementGroup }) {
         </div>
       )}
 
-      {(excusable || undoable) && !asking && (
-        <button className="text-xs text-sky-400 underline" onClick={() => setAsking(true)}>
-          {excusable ? 'Excuse this' : 'Undo this'}
-        </button>
+      {!asking && (excusable || undoable) && (
+        <div className="flex gap-3">
+          {excusable ? (
+            <>
+              <QuickLink onClick={() => setAsking('excuse')}>Excuse this</QuickLink>
+              <QuickLink onClick={() => setAsking('approve')}>Approve this</QuickLink>
+            </>
+          ) : (
+            <QuickLink onClick={() => setAsking('undo')}>Undo this</QuickLink>
+          )}
+        </div>
       )}
       {asking && charge && (
         <div className="mt-1 flex gap-2">
           <input
             className="inp text-sm"
             placeholder={
-              excusable ? 'Why? (optional) Your kid reads this.' : 'Why? Your kid reads this.'
+              asking === 'undo'
+                ? 'Why? Your kid reads this.'
+                : 'Why? (optional) Your kid reads this.'
             }
             value={reason}
             onChange={(ev) => setReason(ev.target.value)}
@@ -249,24 +261,61 @@ function StatementGroupRow({ group: g }: { group: StatementGroup }) {
           <Button
             className="min-h-0 shrink-0 px-3 py-2 text-sm"
             variant="ghost"
-            // Excusing takes an optional reason (§4.2); undoing a charge still needs one (§4.8).
-            disabled={(!excusable && !reason.trim()) || pending}
-            onClick={() =>
-              excusable
-                ? decide.mutate(
-                    { id: charge.occurrence_id as string, body: { action: 'excuse', reason } },
-                    { onSuccess: () => setAsking(false) },
-                  )
-                : undo.mutate({ id: charge.id, reason }, { onSuccess: () => setAsking(false) })
-            }
+            // A decision takes an optional reason (§4.2); undoing a charge still needs one (§4.8).
+            disabled={(asking === 'undo' && !reason.trim()) || pending}
+            onClick={() => {
+              const done = { onSuccess: () => setAsking(null) };
+              if (asking === 'undo') undo.mutate({ id: charge.id, reason }, done);
+              else
+                decide.mutate(
+                  { id: charge.occurrence_id as string, body: { action: asking, reason } },
+                  done,
+                );
+            }}
           >
-            {excusable ? 'Excuse' : 'Undo'}
+            {QUICK_VERB[asking]}
           </Button>
+          <button className="text-xs text-slate-500" onClick={() => setAsking(null)}>
+            Cancel
+          </button>
         </div>
       )}
-      {decide.isError && <p className="text-xs text-rose-400">Couldn’t excuse that one.</p>}
+      {decide.isError &&
+        // A tiered chore is graded by picking an outcome, which the backend insists on (409) —
+        // and a ledger row can't tell us the chore was tiered, so send the parent to review.
+        (decide.variables?.body.action === 'approve' &&
+        decide.error instanceof ApiError &&
+        decide.error.status === 409 ? (
+          <p className="text-xs text-rose-400">
+            Couldn’t approve that one here —{' '}
+            <Link className="underline" to={`/admin/review/${charge?.occurrence_id ?? ''}`}>
+              open it in review
+            </Link>
+            .
+          </p>
+        ) : (
+          <p className="text-xs text-rose-400">
+            Couldn’t {decide.variables?.body.action ?? 'excuse'} that one.
+          </p>
+        ))}
       {undo.isError && <p className="text-xs text-rose-400">Couldn’t undo that one.</p>}
     </div>
+  );
+}
+
+type QuickAction = 'excuse' | 'approve' | 'undo';
+
+const QUICK_VERB: Record<QuickAction, string> = {
+  excuse: 'Excuse',
+  approve: 'Approve',
+  undo: 'Undo',
+};
+
+function QuickLink({ onClick, children }: { onClick: () => void; children: string }) {
+  return (
+    <button className="text-xs text-sky-400 underline" onClick={onClick}>
+      {children}
+    </button>
   );
 }
 

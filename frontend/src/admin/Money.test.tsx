@@ -57,7 +57,7 @@ const MANUAL = {
   occurrence_due_at: null,
 };
 
-function setup(ledger: unknown[] = [PENALTY], kids: unknown[] = [ALICE]) {
+function setup(ledger: unknown[] = [PENALTY], kids: unknown[] = [ALICE], postStatus = 200) {
   const calls: { url: string; method: string; body: unknown }[] = [];
   const urls: string[] = [];
   vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
@@ -67,7 +67,13 @@ function setup(ledger: unknown[] = [PENALTY], kids: unknown[] = [ALICE]) {
     if (method !== 'GET')
       calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
 
-    if (method === 'POST') return Promise.resolve(json({}, 200));
+    if (method === 'POST')
+      return Promise.resolve(
+        json(
+          postStatus === 200 ? {} : { detail: 'decided by picking an outcome tier' },
+          postStatus,
+        ),
+      );
     if (url.includes('/ledger')) return Promise.resolve(json(ledger));
     if (url.includes('/balance'))
       return Promise.resolve(json({ child_id: 'k1', balance_cents: -500, currency: 'USD' }));
@@ -154,6 +160,7 @@ describe('admin Money statement', () => {
     expect(group).toHaveTextContent('Earned');
     expect(group).toHaveTextContent('+$5.00');
     expect(screen.queryByText('Excuse this')).not.toBeInTheDocument();
+    expect(screen.queryByText('Approve this')).not.toBeInTheDocument();
 
     // The append-only rows are still there, one tap away, and the reversal says so.
     fireEvent.click(group);
@@ -190,6 +197,41 @@ describe('admin Money statement', () => {
 
     expect(await screen.findByText('(reversed)')).toBeInTheDocument();
     expect(screen.queryByText('Excuse this')).not.toBeInTheDocument();
+    expect(screen.queryByText('Approve this')).not.toBeInTheDocument();
+  });
+
+  it('approves a missed chore from the statement, reason optional', async () => {
+    const { calls } = setup();
+
+    // Both decisions sit side by side on a charged chore.
+    expect(await screen.findByText('Excuse this')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Approve this'));
+    expect(screen.getByPlaceholderText(/optional/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].url).toContain('/occurrences/o1/decision');
+    expect(calls[0].body).toEqual({ action: 'approve', reason: '' });
+  });
+
+  it('sends a tiered chore to review when approving it here is refused', async () => {
+    setup([PENALTY], [ALICE], 409);
+
+    fireEvent.click(await screen.findByText('Approve this'));
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+
+    const link = await screen.findByRole('link', { name: 'open it in review' });
+    expect(link).toHaveAttribute('href', '/admin/review/o1');
+  });
+
+  it('can back out of a quick decision', async () => {
+    const { calls } = setup();
+
+    fireEvent.click(await screen.findByText('Approve this'));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.getByText('Excuse this')).toBeInTheDocument();
+    expect(calls).toEqual([]);
   });
 
   it('bounds the statement to the last 30 days, and follows the pills', async () => {
@@ -219,6 +261,7 @@ describe('admin Money statement', () => {
     // the endpoint both differ (spec §4.8).
     expect(await screen.findByText('Undo this')).toBeInTheDocument();
     expect(screen.queryByText('Excuse this')).not.toBeInTheDocument();
+    expect(screen.queryByText('Approve this')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Undo this'));
     // Unlike excusing, undoing a charge still needs its reason (§4.8).
