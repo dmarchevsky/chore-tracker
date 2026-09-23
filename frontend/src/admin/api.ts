@@ -104,7 +104,8 @@ export const useAdminVerifications = (id: string) =>
 
 export interface Decision {
   action: 'approve' | 'reject' | 'excuse' | 'redo' | 'tier';
-  reason: string;
+  /** Optional, except alongside `amount_override_cents` (spec §4.2). */
+  reason?: string;
   amount_override_cents?: number | null;
   /** action: 'tier' only — the tier takes its amount from the chore, so no override. */
   tier_id?: number;

@@ -81,7 +81,7 @@ describe('ReviewDetail — tiered outcomes', () => {
     expect(screen.queryByPlaceholderText(/Adjust amount/)).not.toBeInTheDocument();
   });
 
-  it('POSTs the chosen tier with the required reason', async () => {
+  it('POSTs the chosen tier with the reason', async () => {
     const calls = setup({ ...BASE, outcome_tiers: TIERS });
 
     await waitFor(() =>
@@ -100,7 +100,7 @@ describe('ReviewDetail — tiered outcomes', () => {
     });
   });
 
-  it('will not grade without a reason', async () => {
+  it('grades without a reason — it is optional', async () => {
     const calls = setup({ ...BASE, outcome_tiers: TIERS });
 
     await waitFor(() =>
@@ -108,8 +108,8 @@ describe('ReviewDetail — tiered outcomes', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: /all A grades/ }));
 
-    expect(await screen.findByText('Add a reason first.')).toBeInTheDocument();
-    expect(calls).toEqual([]);
+    await waitFor(() => expect(calls.length).toBe(1));
+    expect(calls[0].body).toEqual({ action: 'tier', reason: '', tier_id: 1 });
   });
 
   it('shows the grade already given rather than the word Approved', async () => {
@@ -137,5 +137,30 @@ describe('ReviewDetail — tiered outcomes', () => {
     );
     expect(screen.getByRole('button', { name: /^reject$/i })).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/Adjust amount/)).toBeInTheDocument();
+  });
+});
+
+describe('ReviewDetail — decisions', () => {
+  it('approves without a reason', async () => {
+    const calls = setup(BASE);
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^approve$/i })).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^approve$/i }));
+
+    await waitFor(() => expect(calls.length).toBe(1));
+    expect(calls[0].body).toEqual({ action: 'approve', reason: '', amount_override_cents: null });
+  });
+
+  it('still wants a reason when the amount is changed', async () => {
+    const calls = setup(BASE);
+
+    await waitFor(() => expect(screen.getByPlaceholderText(/Adjust amount/)).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText(/Adjust amount/), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: /^approve$/i }));
+
+    expect(await screen.findByText('Add a reason when changing the amount.')).toBeInTheDocument();
+    expect(calls).toEqual([]);
   });
 });

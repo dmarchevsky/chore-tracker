@@ -240,14 +240,17 @@ function StatementGroupRow({ group: g }: { group: StatementGroup }) {
         <div className="mt-1 flex gap-2">
           <input
             className="inp text-sm"
-            placeholder="Why? Your kid reads this."
+            placeholder={
+              excusable ? 'Why? (optional) Your kid reads this.' : 'Why? Your kid reads this.'
+            }
             value={reason}
             onChange={(ev) => setReason(ev.target.value)}
           />
           <Button
             className="min-h-0 shrink-0 px-3 py-2 text-sm"
             variant="ghost"
-            disabled={!reason.trim() || pending}
+            // Excusing takes an optional reason (§4.2); undoing a charge still needs one (§4.8).
+            disabled={(!excusable && !reason.trim()) || pending}
             onClick={() =>
               excusable
                 ? decide.mutate(

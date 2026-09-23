@@ -234,13 +234,13 @@ async def apply_decision(
         if occurrence.status == OccurrenceStatus.approved and _live_net(existing) == target:
             return  # the same decision for the same money: nothing to record
         for e in _live_money(existing):
-            await ledger.reverse_entry(db, entry=e, actor=admin, reason=f"approved: {reason}")
+            await ledger.reverse_entry(db, entry=e, actor=admin, reason=_why("approved", reason))
         await ledger.credit_earning(
             db,
             occurrence=occurrence,
             actor=admin,
             amount_override_cents=amount_override_cents,
-            reason=reason,
+            reason=reason or "approved",
         )
         occurrence.status = OccurrenceStatus.approved
         verdict = Verdict.pass_
@@ -249,8 +249,10 @@ async def apply_decision(
         if occurrence.status == OccurrenceStatus.rejected and _live_net(existing) == target:
             return
         for e in _live_money(existing):
-            await ledger.reverse_entry(db, entry=e, actor=admin, reason=f"rejected: {reason}")
-        await ledger.debit_penalty(db, occurrence=occurrence, actor=admin, reason=reason)
+            await ledger.reverse_entry(db, entry=e, actor=admin, reason=_why("rejected", reason))
+        await ledger.debit_penalty(
+            db, occurrence=occurrence, actor=admin, reason=reason or "rejected"
+        )
         occurrence.status = OccurrenceStatus.rejected
         verdict = Verdict.fail
     elif action == "tier":
@@ -268,10 +270,10 @@ async def apply_decision(
         # Re-deciding: unwind whatever the previous tier posted, then post the new amount.
         for e in _live_money(existing):
             await ledger.reverse_entry(
-                db, entry=e, actor=admin, reason=f"outcome changed: {reason}"
+                db, entry=e, actor=admin, reason=_why("outcome changed", reason)
             )
         await ledger.post_tier_outcome(
-            db, occurrence=occurrence, tier=tier, actor=admin, reason=reason
+            db, occurrence=occurrence, tier=tier, actor=admin, reason=reason or "outcome picked"
         )
         occurrence.outcome_tier_id = tier_id
         occurrence.outcome_tier = tier
@@ -281,7 +283,7 @@ async def apply_decision(
         verdict = Verdict.fail if (tier.get("amount_cents") or 0) < 0 else Verdict.pass_
     elif action == "excuse":
         for e in _live_money(existing):
-            await ledger.reverse_entry(db, entry=e, actor=admin, reason=f"excused: {reason}")
+            await ledger.reverse_entry(db, entry=e, actor=admin, reason=_why("excused", reason))
         # Clear any chosen tier: otherwise the idempotency guard above would treat a later
         # re-pick of that same tier as a no-op and the money would never be re-posted.
         occurrence.outcome_tier_id = None
@@ -294,10 +296,18 @@ async def apply_decision(
     else:  # pragma: no cover - schema enum guards this
         raise SubmissionError(f"unknown action {action!r}")
 
-    # The reason is what the kid reads on the chore — a decision they can't see the
-    # reasoning for is just a number moving (spec §6.3 rule 1).
+    # The reason is what the kid reads on the chore (spec §6.3 rule 1). Left blank, the
+    # message stays NULL so the push and the chore screen fall back to their own copy
+    # instead of showing the kid an empty quote.
     v = await _record_verification(
-        db, occurrence, None, verdict, reason, by="user", actor=admin, child_message=reason
+        db,
+        occurrence,
+        None,
+        verdict,
+        reason or action,
+        by="user",
+        actor=admin,
+        child_message=reason or None,
     )
     await audit.record(
         db,
@@ -316,7 +326,7 @@ async def apply_decision(
     # parent a second chore to tick off. Silent on purpose: the verdict/redo push below says
     # the same thing, with the same reason, pointing at the same screen.
     await disputes.resolve_open_for_occurrence(
-        db, occurrence_id=occurrence.id, admin=admin, note=f"{action}: {reason}"
+        db, occurrence_id=occurrence.id, admin=admin, note=_why(action, reason)
     )
 
     if action == "redo":
@@ -355,6 +365,15 @@ async def _earn_entries(db: AsyncSession, occurrence_id) -> list[LedgerEntry]:
         .scalars()
         .all()
     )
+
+
+def _why(label: str, reason: str) -> str:
+    """``"excused: forgot, fine"``, or just ``"excused"`` when the parent gave no reason.
+
+    The reason is optional (spec §4.2), and a bare ``"excused: "`` in the ledger reads like
+    something was lost.
+    """
+    return f"{label}: {reason}" if reason else label
 
 
 async def _record_verification(

@@ -141,6 +141,8 @@ already-generated occurrences"**.
 - Per-occurrence detail: photos (full-size, EXIF/metadata panel), the exact prompt sent to the model,
   the model's raw response, confidence, per-checklist answers, submission timestamps, and any anti-cheat flags.
 - Actions: **Approve**, **Reject**, **Excuse**, **Request redo** (reopens window with a note), **Adjust amount** (with a required reason).
+  `[D]` The reason is optional on every other action — the kid sees it when given, and a
+  canned verdict line otherwise. Only adjusting the amount insists on one.
 - Bulk approve from a list view.
 
 ### 4.3 Admin — money
@@ -591,7 +593,7 @@ GET    /occurrences/{id}/verifications    admin | self — a kid gets the friend
 GET    /occurrences/{id}/submissions      admin | self — media as signed URLs
 POST   /occurrences/{id}/submissions      admin | self — multipart: files[], note, geo, client_meta
 POST   /occurrences/{id}/decision         admin {action: approve|reject|excuse|redo|tier, tier_id?,
-                                          amount_override_cents?, reason} — tier picks one outcome
+                                          amount_override_cents?, reason?} — tier picks one outcome
                                           tier (§4.6); approve/reject are refused for a tiered chore
 PATCH  /occurrences/{id}/assignee         admin — swap
 GET    /occurrences/{id}/disputes         admin | self

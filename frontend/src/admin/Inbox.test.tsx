@@ -319,7 +319,9 @@ describe('admin Inbox', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /^approve$/i })).toBeInTheDocument(),
     );
-    expect(screen.getByPlaceholderText(/^Reason — your kid will see this$/)).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText(/^Reason \(optional\) — your kid will see this$/),
+    ).toBeInTheDocument();
   });
 
   it('opens the detail over the list on a phone, where the pane is below the fold', async () => {

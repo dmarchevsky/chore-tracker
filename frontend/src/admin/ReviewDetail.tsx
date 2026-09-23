@@ -150,11 +150,13 @@ export function ReviewDetail({ id, onDone }: { id: string; onDone: () => void })
   const tiered = tiers.length > 0;
 
   function act(action: 'approve' | 'reject' | 'excuse' | 'redo') {
-    if (!reason.trim()) {
+    const amount = override.trim() ? Math.round(parseFloat(override) * 100) : null;
+    // The reason is optional, except when the amount changes — a different number with no
+    // why is just money moving (spec §4.2). The server refuses it too.
+    if (amount != null && !reason.trim()) {
       setReasonError(true);
       return;
     }
-    const amount = override.trim() ? Math.round(parseFloat(override) * 100) : null;
     decide.mutate(
       { id, body: { action, reason, amount_override_cents: amount } },
       { onSuccess: onDone },
@@ -162,10 +164,6 @@ export function ReviewDetail({ id, onDone }: { id: string; onDone: () => void })
   }
 
   function pickTier(tier_id: number) {
-    if (!reason.trim()) {
-      setReasonError(true);
-      return;
-    }
     decide.mutate({ id, body: { action: 'tier', reason, tier_id } }, { onSuccess: onDone });
   }
 
@@ -256,14 +254,16 @@ export function ReviewDetail({ id, onDone }: { id: string; onDone: () => void })
       <Card>
         <textarea
           className="w-full rounded-xl bg-slate-800 p-3 text-sm"
-          placeholder="Reason — your kid will see this"
+          placeholder="Reason (optional) — your kid will see this"
           value={reason}
           onChange={(e) => {
             setReason(e.target.value);
             setReasonError(false);
           }}
         />
-        {reasonError && <p className="mt-1 text-sm text-rose-400">Add a reason first.</p>}
+        {reasonError && (
+          <p className="mt-1 text-sm text-rose-400">Add a reason when changing the amount.</p>
+        )}
         {decided && !locked && (
           <p className="mt-2 text-xs text-slate-500">
             Already {statusLabel(o.status).toLowerCase()}. Deciding again reverses the old ledger

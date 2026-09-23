@@ -283,6 +283,57 @@ async def test_rejection_reason_reaches_the_kid_and_nothing_else_does(
     assert admin_view[0]["reasoning"] == "the sink is still full"
 
 
+async def test_a_decision_needs_no_reason(client, db_session, household, admin_user, child_user):
+    """The reason is optional (spec §4.2). Left out, the ledger still says what happened —
+    no dangling ``"approved: "`` — and the kid gets the canned verdict, not an empty quote."""
+    occ = await _mk_occ(db_session, household, child_user, reward=300, penalty=100)
+    await db_session.commit()
+    await _submit_photo(client, occ.id, await _kid_login(client))
+    ah = await _admin_login(client)
+
+    r = await client.post(
+        f"/api/v1/occurrences/{occ.id}/decision", json={"action": "reject"}, headers=ah
+    )
+    assert r.status_code == 200 and r.json()["status"] == "rejected"
+    r = await client.post(
+        f"/api/v1/occurrences/{occ.id}/decision",
+        json={"action": "approve", "reason": "   "},
+        headers=ah,
+    )
+    assert r.status_code == 200 and r.json()["status"] == "approved"
+    assert await balance_cents(db_session, child_user.id) == 300
+
+    reasons = (
+        await db_session.scalars(
+            select(LedgerEntry.reason)
+            .where(LedgerEntry.occurrence_id == occ.id)
+            .order_by(LedgerEntry.created_at, LedgerEntry.amount_cents)
+        )
+    ).all()
+    assert set(reasons) == {"rejected", "approved"}
+
+    seen = (await client.get(f"/api/v1/occurrences/{occ.id}/verifications", headers=ah)).json()
+    assert seen[0]["child_message"] is None
+    assert seen[0]["reasoning"] == "approve"
+
+
+async def test_changing_the_amount_still_needs_a_reason(
+    client, db_session, household, admin_user, child_user
+):
+    """The one place the spec insists on a reason: adjusting the amount (spec §4.2)."""
+    occ = await _mk_occ(db_session, household, child_user, reward=250)
+    await db_session.commit()
+    await _submit_photo(client, occ.id, await _kid_login(client))
+    ah = await _admin_login(client)
+    r = await client.post(
+        f"/api/v1/occurrences/{occ.id}/decision",
+        json={"action": "approve", "amount_override_cents": 120},
+        headers=ah,
+    )
+    assert r.status_code == 422
+    assert await balance_cents(db_session, child_user.id) == 0
+
+
 async def test_a_past_decision_can_be_changed_and_the_money_follows(
     client, db_session, household, admin_user, child_user
 ):

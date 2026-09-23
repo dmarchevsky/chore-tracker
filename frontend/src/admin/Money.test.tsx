@@ -175,6 +175,16 @@ describe('admin Money statement', () => {
     expect(calls[0].body).toEqual({ action: 'excuse', reason: 'we were away' });
   });
 
+  it('excuses without a reason — it is optional', async () => {
+    const { calls } = setup();
+
+    fireEvent.click(await screen.findByText('Excuse this'));
+    fireEvent.click(screen.getByRole('button', { name: 'Excuse' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ action: 'excuse', reason: '' });
+  });
+
   it('will not re-excuse an entry that is already reversed', async () => {
     setup([{ ...PENALTY, reversed_by_entry_id: 'l2' }]);
 
@@ -211,6 +221,8 @@ describe('admin Money statement', () => {
     expect(screen.queryByText('Excuse this')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Undo this'));
+    // Unlike excusing, undoing a charge still needs its reason (§4.8).
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
     fireEvent.change(screen.getByPlaceholderText(/Why\?/), {
       target: { value: 'it was the neighbour’s bike' },
     });

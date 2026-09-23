@@ -89,12 +89,18 @@ class DecisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: DecisionAction
-    reason: str = Field(min_length=1, max_length=1000)
+    # Optional (spec §4.2): a parent ticking off a missed chore shouldn't have to invent a
+    # sentence. Adjusting the amount is the exception — a different number with no why is
+    # just money moving.
+    reason: str = Field(default="", max_length=1000)
     amount_override_cents: int | None = Field(default=None, ge=0)
     tier_id: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def _check(self) -> DecisionRequest:
+        self.reason = self.reason.strip()
+        if self.amount_override_cents is not None and not self.reason:
+            raise ValueError("changing the amount needs a reason")
         if self.action is DecisionAction.tier:
             if self.tier_id is None:
                 raise ValueError("action=tier needs a tier_id")
