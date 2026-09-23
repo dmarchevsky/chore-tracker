@@ -94,6 +94,7 @@ export function useChoreForm(
             chore_kind: kind,
             cadence: kind,
             due_time: '00:00:00',
+            weekend_due_time: null,
             proof_type: 'none',
             verification_mode: 'manual',
             geofence: null,
@@ -105,7 +106,14 @@ export function useChoreForm(
             // rows carried over from the other kind would be rejected on save.
             outcome_tiers: null,
           }
-        : { ...f, chore_kind: kind, cadence: 'daily', due_time: '08:00:00', proof_type: 'photo' },
+        : {
+            ...f,
+            chore_kind: kind,
+            cadence: 'daily',
+            due_time: '08:00:00',
+            weekend_due_time: null,
+            proof_type: 'photo',
+          },
     );
   }
 

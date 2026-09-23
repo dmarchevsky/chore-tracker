@@ -89,6 +89,8 @@ class Chore(TimestampMixin, Base):
     # --- Schedule ------------------------------------------------------
     cadence: Mapped[str] = mapped_column(String(120))
     due_time: Mapped[time] = mapped_column(Time)  # local wall-clock; TZ is household-level
+    # Sat/Sun wall-clock, for a chore that runs later at the weekend. NULL = due_time.
+    weekend_due_time: Mapped[time | None] = mapped_column(Time, default=None)
     window_open_offset_s: Mapped[int] = mapped_column(Integer, default=-12 * 3600)
     grace_period_s: Mapped[int] = mapped_column(Integer, default=15 * 60)
     start_date: Mapped[date] = mapped_column(Date)

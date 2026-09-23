@@ -96,6 +96,22 @@ def test_due_time_is_local_wallclock_across_fall_back():
     assert [dt.hour for dt in got] == [15, 16, 16]
 
 
+def test_weekend_due_time_applies_to_saturday_and_sunday_only():
+    # Fri 7th .. Mon 10th March 2025, with spring-forward falling on the Sunday.
+    got = due_datetimes(
+        "daily", date(2025, 3, 7), date(2025, 3, 10), time(8, 0), LA, weekend_due_time=time(10, 0)
+    )
+    local = [dt.astimezone(LA) for dt in got]
+    assert [(d.weekday(), d.hour) for d in local] == [(4, 8), (5, 10), (6, 10), (0, 8)]
+    # Still local wall-clock across the DST change: 18:00Z on Sat, 17:00Z on Sun.
+    assert [dt.hour for dt in got] == [16, 18, 17, 15]
+
+
+def test_no_weekend_due_time_keeps_due_time_every_day():
+    got = due_datetimes("weekends", date(2025, 3, 8), date(2025, 3, 9), time(8, 0), LA, None)
+    assert [dt.astimezone(LA).hour for dt in got] == [8, 8]
+
+
 def test_due_datetimes_empty_for_no_matches():
     assert (
         due_datetimes("weekly(on=[SUN])", date(2025, 3, 3), date(2025, 3, 7), time(8, 0), LA) == []

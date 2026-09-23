@@ -112,7 +112,9 @@ async def generate_occurrences(
     for chore in chores:
         win_start = max(chore.start_date, today)
         win_end = horizon_end if chore.end_date is None else min(chore.end_date, horizon_end)
-        for due_at in due_datetimes(chore.cadence, win_start, win_end, chore.due_time, tz):
+        for due_at in due_datetimes(
+            chore.cadence, win_start, win_end, chore.due_time, tz, chore.weekend_due_time
+        ):
             window_open_at = due_at + timedelta(seconds=chore.window_open_offset_s)
             status = _initial_status(window_open_at, due_at, chore.grace_period_s, now)
             for assignee_id in resolve_assignees(chore, due_at.astimezone(tz).date()):

@@ -119,6 +119,12 @@ describe('Rules', () => {
     expect(screen.getByText(/opens .* the day before/)).toBeInTheDocument();
   });
 
+  it('shows a separate weekend due time when there is one', async () => {
+    setup([{ ...MINE, weekend_due_time: '10:00:00' }]);
+
+    expect(await screen.findByText(/due .* \(weekends .*10:00/)).toBeInTheDocument();
+  });
+
   it('shows no schedule line on rules that have no schedule', async () => {
     // A standing chore is a state a parent flips and a penalty rule is a price list; the
     // backend fills their schedule columns with defaults, so printing them would be a lie.

@@ -6,6 +6,9 @@ import type { ChoreFormApi } from '../useChoreForm';
 export function WhenSection({ f }: { f: ChoreFormApi }) {
   const form = f.form;
   const once = onceDate(String(form.cadence));
+  // A single date, or a cadence with no weekend in it, has nothing for a weekend time to move.
+  const hasWeekend = once === null && String(form.cadence).trim().toLowerCase() !== 'weekdays';
+  const weekendTime = form.weekend_due_time ? String(form.weekend_due_time) : null;
 
   return (
     <>
@@ -16,6 +19,8 @@ export function WhenSection({ f }: { f: ChoreFormApi }) {
           onChange={(e) => {
             const on = e.target.checked;
             f.set('cadence', on ? ONCE_TODAY() : 'daily');
+            // A one-off landing on a Saturday would otherwise silently take the weekend time.
+            if (on) f.set('weekend_due_time', null);
             f.set('end_date', on ? new Date().toISOString().slice(0, 10) : null);
           }}
         />
@@ -80,7 +85,7 @@ export function WhenSection({ f }: { f: ChoreFormApi }) {
           </p>
         </Field>
       )}
-      <Field label="Due time">
+      <Field label={hasWeekend && weekendTime ? 'Due time (Mon–Fri)' : 'Due time'}>
         <input
           className="inp"
           type="time"
@@ -88,6 +93,33 @@ export function WhenSection({ f }: { f: ChoreFormApi }) {
           onChange={(e) => f.set('due_time', `${e.target.value}:00`)}
         />
       </Field>
+      {hasWeekend && (
+        <Field label="Weekend due time (optional)">
+          <div className="flex gap-2">
+            <input
+              className="inp"
+              type="time"
+              aria-label="Weekend due time"
+              value={weekendTime?.slice(0, 5) ?? ''}
+              onChange={(e) =>
+                f.set('weekend_due_time', e.target.value ? `${e.target.value}:00` : null)
+              }
+            />
+            {weekendTime && (
+              <button
+                type="button"
+                className="shrink-0 text-xs text-slate-400 underline"
+                onClick={() => f.set('weekend_due_time', null)}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            Sat &amp; Sun. Leave empty to use the due time above every day.
+          </p>
+        </Field>
+      )}
       <Field label="Opens (before it’s due)">
         {/* Stored as a negative offset from the due time; the box only ever sees how long
             before, which is how a parent says it. */}

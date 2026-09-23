@@ -145,6 +145,27 @@ async def test_snapshots_money_and_window(db_session, household):
     assert (occ.due_at - occ.window_open_at) == timedelta(hours=1)
 
 
+async def test_weekend_due_time_moves_the_whole_window(db_session, household):
+    """Sat/Sun take the weekend time, and the window and grace follow it (spec §4.1)."""
+    db_session.add(_chore(household, weekend_due_time=time(10, 0), window_open_offset_s=-3600))
+    await db_session.commit()
+    # NOW is Sunday 2025-06-01; a 1-day horizon covers Sunday and Monday.
+    await generate_occurrences(db_session, horizon_days=1, now=NOW)
+    await db_session.commit()
+
+    rows = (
+        (await db_session.execute(select(ChoreOccurrence).order_by(ChoreOccurrence.due_at)))
+        .scalars()
+        .all()
+    )
+    # 10:00 and 08:00 PDT.
+    assert [r.due_at for r in rows] == [
+        datetime(2025, 6, 1, 17, 0, tzinfo=UTC),
+        datetime(2025, 6, 2, 15, 0, tzinfo=UTC),
+    ]
+    assert all(r.due_at - r.window_open_at == timedelta(hours=1) for r in rows)
+
+
 async def test_end_date_caps_generation(db_session, household):
     db_session.add(_chore(household, end_date=date(2025, 6, 3)))
     await db_session.commit()

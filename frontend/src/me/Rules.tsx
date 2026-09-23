@@ -10,7 +10,8 @@ import { formatCadence, formatClock, opensAt } from '../shared/schedule';
  *  Standing chores and penalty rules have no schedule — the backend fills those columns
  *  with defaults — so this is only ever called for a scheduled chore. */
 function scheduleSummary(c: Chore): string {
-  return `${formatCadence(c.cadence)}, due ${formatClock(c.due_time)} · ${opensAt(
+  const weekend = c.weekend_due_time ? ` (weekends ${formatClock(c.weekend_due_time)})` : '';
+  return `${formatCadence(c.cadence)}, due ${formatClock(c.due_time)}${weekend} · ${opensAt(
     c.due_time,
     c.window_open_offset_s,
   )}`;

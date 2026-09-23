@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 import pytest_asyncio
@@ -705,6 +706,52 @@ async def test_one_off_after_end_date_is_rejected(client, admin_user, child_user
     )
     assert r.status_code == 422
     assert "can never fire" in str(r.json())
+
+
+async def test_weekend_due_time_previews_sets_and_clears(
+    client, admin_user, child_user, db_session
+):
+    """An optional Sat/Sun time (spec §4.1): the preview shows it, a PATCH moves the upcoming
+    weekend occurrences to it, and an explicit null puts them back on due_time."""
+    h = await _admin_headers(client, admin_user)
+    la = ZoneInfo("America/Los_Angeles")
+
+    # Fri 6th .. Mon 9th June 2025
+    r = await client.post(
+        "/api/v1/chores/preview?count=4&from_date=2025-06-06",
+        json=_fixed_body(child_user, weekend_due_time="10:30:00"),
+        headers=h,
+    )
+    assert r.status_code == 200
+    local = [datetime.fromisoformat(i["due_at"]).astimezone(la) for i in r.json()]
+    assert [(d.weekday(), d.hour, d.minute) for d in local] == [
+        (4, 8, 0),
+        (5, 10, 30),
+        (6, 10, 30),
+        (0, 8, 0),
+    ]
+
+    created = await client.post("/api/v1/chores", json=_fixed_body(child_user), headers=h)
+    assert created.json()["weekend_due_time"] is None
+    chore_id = created.json()["id"]
+    upcoming = select(ChoreOccurrence.due_at).where(
+        ChoreOccurrence.chore_id == uuid.UUID(chore_id),
+        ChoreOccurrence.due_at > datetime.now(UTC),
+    )
+
+    async def weekend_hours() -> set[int]:
+        rows = (await db_session.execute(upcoming)).scalars()
+        return {d.astimezone(la).hour for d in rows if d.astimezone(la).weekday() >= 5}
+
+    r = await client.patch(
+        f"/api/v1/chores/{chore_id}", json={"weekend_due_time": "10:00:00"}, headers=h
+    )
+    assert r.status_code == 200 and r.json()["weekend_due_time"] == "10:00:00"
+    assert await weekend_hours() == {10}
+
+    r = await client.patch(f"/api/v1/chores/{chore_id}", json={"weekend_due_time": None}, headers=h)
+    assert r.status_code == 200 and r.json()["weekend_due_time"] is None
+    assert await weekend_hours() == {8}
 
 
 async def test_patch_accepts_grace_period_and_end_date(client, admin_user, child_user):

@@ -560,6 +560,46 @@ describe('admin Chores', () => {
     expect(body.end_date).toBe('2030-12-31');
   });
 
+  it('sets a weekend due time and PATCHes it', async () => {
+    const calls = setup();
+
+    fireEvent.click(await screen.findByText('Empty the sink'));
+    expect(screen.getByText('Due time')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Weekend due time'), { target: { value: '10:00' } });
+    // With two times in play, the first one says which days it covers.
+    expect(screen.getByText('Due time (Mon–Fri)')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    const body = calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>;
+    expect(body.weekend_due_time).toBe('10:00:00');
+    expect(body.due_time).toBe('08:00:00');
+  });
+
+  it('clears a weekend due time back to null', async () => {
+    const calls = setup([{ ...CHORE, weekend_due_time: '10:00:00' }]);
+
+    fireEvent.click(await screen.findByText('Empty the sink'));
+    expect(screen.getByLabelText('Weekend due time')).toHaveValue('10:00');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    const body = calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>;
+    expect(body.weekend_due_time).toBeNull();
+  });
+
+  it('has no weekend time for a one-off or a weekdays chore', async () => {
+    setup();
+
+    fireEvent.click(await screen.findByText('Empty the sink'));
+    fireEvent.click(screen.getByRole('button', { name: 'weekdays' }));
+    expect(screen.queryByLabelText('Weekend due time')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('One-off — a single date'));
+    expect(screen.queryByLabelText('Weekend due time')).not.toBeInTheDocument();
+  });
+
   it('keeps an untouched grace period exactly as stored', async () => {
     const calls = setup();
 

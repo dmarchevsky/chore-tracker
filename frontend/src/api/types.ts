@@ -92,6 +92,8 @@ export interface Chore {
   penalty_cents: number;
   late_multiplier: number;
   due_time: string;
+  /** Sat/Sun wall clock; null = `due_time` every day. */
+  weekend_due_time: string | null;
   cadence: string;
   assignment_mode: AssignmentMode;
   fixed_assignee_id: string | null;

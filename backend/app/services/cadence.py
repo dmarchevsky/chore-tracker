@@ -1,7 +1,8 @@
 """Cadence parsing + due-datetime generation (spec §4.1 `cadence`, §8.1, §8.4).
 
 A chore's ``cadence`` string decides *which dates* an occurrence is due; the separate
-``due_time`` (local wall-clock ``HH:MM``) decides the time on each of those dates. All
+``due_time`` (local wall-clock ``HH:MM``) decides the time on each of those dates, unless
+an optional ``weekend_due_time`` overrides it on Saturdays and Sundays. All
 wall-clock math happens in the household timezone and the result is returned as
 timezone-aware UTC datetimes — "before 8am" means 8am local, across DST boundaries.
 
@@ -156,10 +157,15 @@ def due_datetimes(
     end: date,
     due_time: time,
     tz: ZoneInfo,
+    weekend_due_time: time | None = None,
 ) -> list[datetime]:
-    """Cadence dates combined with ``due_time`` in ``tz``, returned as UTC datetimes."""
+    """Cadence dates combined with ``due_time`` in ``tz``, returned as UTC datetimes.
+
+    A Saturday or Sunday takes ``weekend_due_time`` instead, when one is set.
+    """
     result: list[datetime] = []
     for d in cadence_dates(cadence, start, end):
-        local = datetime.combine(d, due_time, tzinfo=tz)
+        at = weekend_due_time if weekend_due_time and d.weekday() >= 5 else due_time
+        local = datetime.combine(d, at, tzinfo=tz)
         result.append(local.astimezone(_UTC))
     return result

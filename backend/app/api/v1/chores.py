@@ -353,7 +353,9 @@ async def preview_occurrences(
     end = horizon_end if payload.end_date is None else min(payload.end_date, horizon_end)
 
     items: list[OccurrencePreviewItem] = []
-    for due_at in due_datetimes(payload.cadence, start, end, payload.due_time, tz):
+    for due_at in due_datetimes(
+        payload.cadence, start, end, payload.due_time, tz, payload.weekend_due_time
+    ):
         window_open_at = due_at + timedelta(seconds=payload.window_open_offset_s)
         for assignee_id in resolve_assignees(transient, due_at.astimezone(tz).date()):
             items.append(

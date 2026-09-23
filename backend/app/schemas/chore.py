@@ -110,6 +110,7 @@ class ChoreBase(BaseModel):
 
     cadence: str = Field(min_length=1, max_length=120)
     due_time: time
+    weekend_due_time: time | None = None  # Sat/Sun; None = due_time every day
     window_open_offset_s: int = Field(default=-12 * 3600, le=0, ge=-14 * 24 * 3600)
     grace_period_s: int = Field(default=15 * 60, ge=0, le=24 * 3600)
     start_date: date
@@ -358,6 +359,7 @@ class ChoreUpdate(BaseModel):
 
     cadence: str | None = Field(default=None, min_length=1, max_length=120)
     due_time: time | None = None
+    weekend_due_time: time | None = None  # an explicit null clears it
     window_open_offset_s: int | None = Field(default=None, le=0, ge=-14 * 24 * 3600)
     grace_period_s: int | None = Field(default=None, ge=0, le=24 * 3600)
     end_date: date | None = None

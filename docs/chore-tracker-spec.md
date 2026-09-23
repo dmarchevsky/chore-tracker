@@ -115,6 +115,7 @@ Admin MUST be able to define a chore with:
 | `cadence` | `daily`, `weekdays`, `weekends`, `weekly(on=[SAT])`, `monthly(day=N)`, `once(YYYY-MM-DD)`, `standing`, `custom_rule`. `[D]` A one-off carries its date **inside the token**, not in `start_date`: occurrence generation only ever passes the cadence its clamped `[max(start_date, today), horizon]` window (§8.1), so a date-less `once` would fire on every tick forever for a chore with no `end_date`. Keeping it in the token also leaves a one-off reschedulable — `cadence` is patchable, `start_date` is not. |
 | `window_opens` | Relative to due time, e.g. `-12h` — kid can't submit tomorrow's kitchen photo at 3pm today. |
 | `due_time` | Local wall-clock time, e.g. `08:00`. Timezone is household-level. |
+| `weekend_due_time` | Optional wall-clock time for Saturdays and Sundays, e.g. `10:00`; empty = `due_time` every day. `[D]` One override for the weekend, not a time per weekday — `window_opens` and `grace_period` stay relative to whichever time applies that day. |
 | `grace_period` | e.g. `15m`. Late-but-within-grace = pass with `was_late` flag (optionally reduced payout). |
 | `start_date`, `end_date` | `end_date` nullable = open-ended. |
 | `proof_type` | `photo` (1..n photos), `location`, `photo+location`, `acknowledgement`, `none` (parent-verified only). |
