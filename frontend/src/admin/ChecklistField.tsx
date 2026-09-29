@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Button } from '../shared/ui';
 
 export interface ChecklistItem {
@@ -26,6 +27,10 @@ const renumber = (items: ChecklistItem[]): ChecklistItem[] =>
 
 export function ChecklistField({ value, onChange }: Props) {
   const items = value ?? [];
+  // The ignore box shows the list joined with commas, so re-joining what we parse on
+  // every keystroke would eat the comma the user just typed. Keep the raw text of the
+  // focused box in a draft and only fall back to the canonical join once it's blurred.
+  const [draft, setDraft] = useState<{ idx: number; raw: string } | null>(null);
 
   function edit(idx: number, patch: Partial<ChecklistItem>) {
     onChange(renumber(items.map((it, i) => (i === idx ? { ...it, ...patch } : it))));
@@ -95,15 +100,18 @@ export function ChecklistField({ value, onChange }: Props) {
               className="inp min-w-[12rem] flex-1 text-xs"
               aria-label={`Check ${it.id} ignores`}
               placeholder="ignore, comma separated — sponge, dish brush"
-              value={(it.ignore ?? []).join(', ')}
-              onChange={(e) =>
+              value={draft?.idx === i ? draft.raw : (it.ignore ?? []).join(', ')}
+              onChange={(e) => {
+                const raw = e.target.value;
+                setDraft({ idx: i, raw });
                 edit(i, {
-                  ignore: e.target.value
+                  ignore: raw
                     .split(',')
                     .map((x) => x.trim())
                     .filter(Boolean),
-                })
-              }
+                });
+              }}
+              onBlur={() => setDraft(null)}
             />
           </div>
         </div>

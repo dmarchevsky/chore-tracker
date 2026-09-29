@@ -40,6 +40,17 @@ describe('ChecklistField', () => {
     ]);
   });
 
+  it('keeps the comma while it is being typed', () => {
+    // The box re-joins the parsed list, which used to eat the comma the moment it was
+    // typed — so the list could never grow past the first item.
+    show();
+    const box = screen.getByLabelText(/ignores/i);
+    fireEvent.change(box, { target: { value: 'sponge,' } });
+    expect(box).toHaveValue('sponge,');
+    fireEvent.change(box, { target: { value: 'sponge, dish brush' } });
+    expect(box).toHaveValue('sponge, dish brush');
+  });
+
   it('round-trips an ignore list back into the box', () => {
     show([{ ...ITEM, ignore: ['sponge', 'dish brush'] }]);
     expect(screen.getByLabelText(/ignores/i)).toHaveValue('sponge, dish brush');
