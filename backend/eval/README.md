@@ -31,7 +31,11 @@ threshold change — otherwise tuning is guesswork.
 ```
 just eval                       # uses eval/labeled/, thresholds from .env
 uv run python -m eval.run --dir path/to/set --auto-pass 0.9 --auto-fail 0.3
+just eval --backend decider      # same set through the System One decider (DECIDER_* env)
 ```
+
+Run both backends on the same set before switching the household to the decider: its
+probabilities are not the LLM's self-rated confidence, and the bands may need to move.
 
 ## Folder layout
 

@@ -161,3 +161,86 @@ async def test_a_child_cannot_reach_the_profile_endpoint(client, child_user):
     assert (
         await client.patch("/api/v1/admin/profile", json={"display_name": "x"}, headers=h)
     ).status_code == 403
+
+
+async def test_verifier_defaults_to_llm(client, admin_user, household):
+    h = await _admin(client)
+    body = (await client.get("/api/v1/admin/settings", headers=h)).json()
+    assert body["verifier"] == {
+        "backend": "llm",
+        "decider_base_url": "",
+        "decider_model": "d3-nano",
+    }
+    assert body["source"]["verifier_backend"] == "env"
+
+
+async def test_decider_override_then_reset(client, admin_user, household):
+    h = await _admin(client)
+    r = await client.patch(
+        "/api/v1/admin/settings",
+        json={
+            "verifier_backend": "decider",
+            "decider_base_url": "http://halogen.test:8731/v1",
+            "decider_model": "d3-lite",
+        },
+        headers=h,
+    )
+    assert r.status_code == 200
+    assert r.json()["verifier"] == {
+        "backend": "decider",
+        "decider_base_url": "http://halogen.test:8731/v1",
+        "decider_model": "d3-lite",
+    }
+    assert r.json()["source"]["decider_model"] == "db"
+
+    r = await client.patch(
+        "/api/v1/admin/settings",
+        json={"verifier_backend": None, "decider_model": ""},
+        headers=h,
+    )
+    assert r.json()["verifier"]["backend"] == "llm"
+    assert r.json()["verifier"]["decider_model"] == "d3-nano"
+    assert r.json()["source"]["decider_model"] == "env"
+
+
+async def test_decider_needs_a_url(client, admin_user, household):
+    """Chosen without an endpoint, every photo would silently go to the fallback."""
+    h = await _admin(client)
+    r = await client.patch(
+        "/api/v1/admin/settings", json={"verifier_backend": "decider"}, headers=h
+    )
+    assert r.status_code == 422
+    body = (await client.get("/api/v1/admin/settings", headers=h)).json()
+    assert body["verifier"]["backend"] == "llm"  # nothing was written
+
+    r = await client.patch(
+        "/api/v1/admin/settings",
+        json={"verifier_backend": "nope"},
+        headers=h,
+    )
+    assert r.status_code == 422
+    r = await client.patch(
+        "/api/v1/admin/settings",
+        json={"verifier_backend": "decider", "decider_base_url": "file:///etc/passwd"},
+        headers=h,
+    )
+    assert r.status_code == 422
+
+
+@respx.mock
+async def test_models_probe_lists_decision_models(client, admin_user, household):
+    h = await _admin(client)
+    respx.get("http://halogen.test/v1/models").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "Qwen3.8-Flash-Next"},
+                    {"id": "d3-nano", "task": "decision"},
+                    {"id": "qwen3guard-gen-0.6b", "task": "moderation"},
+                ]
+            },
+        )
+    )
+    r = await client.get("/api/v1/admin/llm/models?base_url=http://halogen.test/v1", headers=h)
+    assert r.json()["decision_models"] == ["d3-nano"]

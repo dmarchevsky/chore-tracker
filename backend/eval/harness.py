@@ -20,7 +20,9 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from app.services.verification import CheckSpec, build_task_prompt, derive_verdict
+from app.config import get_settings
+from app.services.llm_config import DeciderConfig
+from app.services.verification import CheckSpec, build_task_prompt, derive_verdict, run_decider
 from app.services.verification.llm import LLMError, run_vision
 
 # Seeds for the brief's chores; override per-folder with checklists.json.
@@ -144,7 +146,13 @@ def score_one(outcome: str, expected_pass: bool, counts: Counts) -> None:
         counts.review += 1
 
 
-async def run(root: Path, *, auto_pass: float = 0.85, auto_fail: float = 0.35) -> dict[str, Counts]:
+async def run(
+    root: Path, *, auto_pass: float = 0.85, auto_fail: float = 0.35, backend: str = "llm"
+) -> dict[str, Counts]:
+    """``backend`` is ``"llm"`` or ``"decider"`` (env ``DECIDER_*``) — same labeled set,
+    same banding, so the two can be compared head to head (spec §7.2)."""
+    s = get_settings()
+    dcfg = DeciderConfig(s.decider_base_url, s.decider_model, s.llm_timeout_s)
     results: dict[str, Counts] = {}
     for chore_type, items in discover(root).items():
         spec = _checklist_for(chore_type, root)
@@ -158,8 +166,17 @@ async def run(root: Path, *, auto_pass: float = 0.85, auto_fail: float = 0.35) -
         for img, expected in items:
             t0 = time.perf_counter()
             try:
-                resp, _, _ = await run_vision(task_prompt=prompt, images=[img.read_bytes()])
-            except LLMError:
+                if backend == "decider":
+                    resp, _, _ = await run_decider(
+                        chore_title=chore_type,
+                        photo_labels=[],
+                        checks=checks,
+                        images=[img.read_bytes()],
+                        config=dcfg,
+                    )
+                else:
+                    resp, _, _ = await run_vision(task_prompt=prompt, images=[img.read_bytes()])
+            except LLMError:  # DeciderError included
                 counts.error += 1
                 continue
             counts.latencies_ms.append((time.perf_counter() - t0) * 1000)

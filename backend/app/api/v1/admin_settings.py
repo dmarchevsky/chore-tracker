@@ -1,4 +1,4 @@
-"""Runtime household settings — vision-LLM connection, verification banding, and the
+"""Runtime household settings — vision-LLM / decider connection, verification banding, and the
 parent's own sign-in details (spec §7.2, §12.1).
 
 Values are stored on ``household_settings`` and override the ``.env`` defaults. The API key
@@ -7,7 +7,7 @@ is write-only: reads report ``api_key_set`` but never the value.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -21,8 +21,10 @@ from app.services import audit
 from app.services.llm_config import (
     LlmConfigError,
     ensure_settings_row,
+    get_decider_config,
     get_llm_config,
     get_verification_defaults,
+    get_verifier_backend,
     probe_models,
     validate_base_url,
 )
@@ -43,8 +45,11 @@ class SettingsUpdate(BaseModel):
     llm_max_retries: int | None = Field(default=None, ge=0, le=5)
     auto_pass_threshold: float | None = Field(default=None, ge=0, le=1)
     auto_fail_threshold: float | None = Field(default=None, ge=0, le=1)
+    verifier_backend: Literal["llm", "decider"] | None = None
+    decider_base_url: str | None = None
+    decider_model: str | None = None
 
-    @field_validator("llm_base_url")
+    @field_validator("llm_base_url", "decider_base_url")
     @classmethod
     def _check_base_url(cls, v: str | None) -> str | None:
         """Caught here so a typo is a 422 the parent can read, not a verification that
@@ -69,7 +74,11 @@ async def _view(db: DbDep) -> dict:
         "llm_max_retries": "db" if row.llm_max_retries is not None else "env",
         "auto_pass_threshold": "db" if row.auto_pass_threshold is not None else "env",
         "auto_fail_threshold": "db" if row.auto_fail_threshold is not None else "env",
+        "verifier_backend": "db" if row.verifier_backend else "env",
+        "decider_base_url": "db" if row.decider_base_url else "env",
+        "decider_model": "db" if row.decider_model else "env",
     }
+    dcfg = await get_decider_config(db)
     return {
         "llm": {
             "base_url": cfg.base_url,
@@ -79,6 +88,11 @@ async def _view(db: DbDep) -> dict:
             "max_retries": cfg.max_retries,
         },
         "verification": {"auto_pass_threshold": ap, "auto_fail_threshold": af},
+        "verifier": {
+            "backend": await get_verifier_backend(db),
+            "decider_base_url": dcfg.base_url,
+            "decider_model": dcfg.model,
+        },
         "source": src,
     }
 
@@ -93,9 +107,14 @@ async def update_settings(payload: SettingsUpdate, db: DbDep, admin: AdminUser) 
     row = await ensure_settings_row(db)
     data = payload.model_dump(exclude_unset=True)
     for key, value in data.items():
-        if key == "llm_api_key" and value == "":
+        if key in ("llm_api_key", "decider_base_url", "decider_model") and value == "":
             value = None  # empty string clears the override
         setattr(row, key, value)
+    await db.flush()
+    # Checked against the *effective* values, so env-configured decider URLs count too.
+    # Without a URL every photo would quietly go through the fallback (spec §7.2).
+    if await get_verifier_backend(db) == "decider" and not (await get_decider_config(db)).base_url:
+        raise HTTPException(422, "set a decider base URL before choosing it")
     row.updated_by_user_id = admin.id
     await db.flush()
 

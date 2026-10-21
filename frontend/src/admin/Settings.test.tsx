@@ -21,6 +21,7 @@ const SETTINGS = {
     max_retries: 1,
   },
   verification: { auto_pass_threshold: 0.85, auto_fail_threshold: 0.35 },
+  verifier: { backend: 'llm', decider_base_url: '', decider_model: 'd3-nano' },
   source: { llm_base_url: 'db', llm_model: 'env' },
 };
 
@@ -62,6 +63,14 @@ function setup(opts: { settingsFail?: boolean } = {}) {
         json({ categories: [{ key: 'review', label: 'Chores needing my review' }], muted: [] }),
       );
     if (method === 'PATCH') return Promise.resolve(json(SETTINGS));
+    if (url.includes('/admin/llm/models') && url.includes('halogen'))
+      return Promise.resolve(
+        json({
+          reachable: true,
+          models: ['Flash', 'd3-nano'],
+          decision_models: ['d3-nano', 'd3-lite'],
+        }),
+      );
     if (url.includes('/admin/llm/models'))
       return Promise.resolve(json({ reachable: true, models: ['gemma3', 'qwen3-vl'] }));
     if (url.includes('/admin/settings'))
@@ -102,6 +111,31 @@ describe('admin Settings', () => {
     const patch = calls.find((c) => c.method === 'PATCH')!;
     expect(patch.url).toContain('/admin/settings');
     expect((patch.body as Record<string, unknown>).llm_base_url).toBe('http://box:9000/v1');
+  });
+
+  it('switches photo checking to the decider and saves it', async () => {
+    const calls = setup();
+    await waitFor(() => expect(screen.getByDisplayValue('http://box:9000/v1')).toBeInTheDocument());
+    expect(screen.queryByLabelText(/decider base url/i)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/scored by/i), { target: { value: 'decider' } });
+    fireEvent.change(screen.getByLabelText(/decider base url/i), {
+      target: { value: 'http://halogen.lan:8731/v1' },
+    });
+    // two "Fetch models" now: the decider's comes first
+    fireEvent.click(screen.getAllByRole('button', { name: /fetch models/i })[0]);
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'd3-lite' })).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole('option', { name: 'Flash' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/decider model/i), { target: { value: 'd3-lite' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    const body = calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>;
+    expect(body.verifier_backend).toBe('decider');
+    expect(body.decider_base_url).toBe('http://halogen.lan:8731/v1');
+    expect(body.decider_model).toBe('d3-lite');
   });
 
   it('names the Google account in use and sets the break-glass password', async () => {

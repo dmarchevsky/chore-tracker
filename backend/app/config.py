@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -61,6 +62,13 @@ class Settings(BaseSettings):
     llm_vision_api_key: str = Field(default="not-needed", alias="LLM_VISION_API_KEY")
     llm_timeout_s: int = Field(default=120, alias="LLM_TIMEOUT_S")
     llm_max_retries: int = Field(default=1, alias="LLM_MAX_RETRIES")
+
+    # --- Decider (optional photo verifier, spec §7.2) ------------------------
+    # "llm" scores photos with the vision LLM above; "decider" asks a System One endpoint
+    # (halogen's d3-nano on the NPU) per check and falls back to the LLM when it fails.
+    verifier_backend: Literal["llm", "decider"] = Field(default="llm", alias="VERIFIER_BACKEND")
+    decider_base_url: str = Field(default="", alias="DECIDER_BASE_URL")
+    decider_model: str = Field(default="d3-nano", alias="DECIDER_MODEL")
 
     # --- Missed-chore settlement (spec §3, §9) -----------------------------
     # A miss is flagged the moment the grace period lapses, but the money moves later: a

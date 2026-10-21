@@ -400,3 +400,136 @@ async def test_sparse_checklist_ids_still_decide_the_verdict(
     assert "3. Is the counter clear?" in sent
     # The required "no" on id 3 is what fails it — the check was not silently dropped.
     assert occ.status == OccurrenceStatus.verified_fail
+
+
+# --- decider backend (spec §7.2 "Decider backend") ---------------------------------------
+
+DECIDER_BASE = "http://decider.test/v1"
+DECIDER_URL = f"{DECIDER_BASE}/systemone"
+
+
+async def _use_decider(db) -> None:
+    from app.services.llm_config import ensure_settings_row
+
+    row = await ensure_settings_row(db)
+    row.verifier_backend = "decider"
+    row.decider_base_url = DECIDER_BASE
+    await db.commit()
+
+
+def _decider_reply(answers: dict[int, tuple[str, float]]) -> httpx.Response:
+    def choice(c: str, p: float, opts: list[str]) -> dict:
+        return {
+            "type": "choice",
+            "choice": c,
+            "probabilities": {o: (p if o == c else (1 - p) / (len(opts) - 1)) for o in opts},
+            "confidence": p,
+        }
+
+    out = {f"c{i}": choice(a, p, ["yes", "no", "unclear"]) for i, (a, p) in answers.items()}
+    out["image_quality"] = choice(
+        "none", 0.95, ["none", "too_dark", "too_blurry", "wrong_subject", "too_close", "too_far"]
+    )
+    return httpx.Response(200, json={"model": "d3-nano", "answers": out})
+
+
+async def _only_verification(db, occ_id) -> Verification:
+    return (
+        await db.execute(select(Verification).where(Verification.occurrence_id == occ_id))
+    ).scalar_one()
+
+
+@respx.mock
+async def test_decider_auto_pass_credits_and_names_its_model(
+    client, db_session, household, child_user
+):
+    respx.post(DECIDER_URL).mock(return_value=_decider_reply({1: ("yes", 0.97)}))
+    llm = respx.post(LLM_URL).mock(return_value=httpx.Response(500))
+    occ = await _mk_occ(db_session, household, child_user, reward=250)
+    await _use_decider(db_session)
+    await _kid_submit(client, occ.id)
+    await _make_media_look_real(db_session, occ.id)
+
+    await verify.drain(db_session)
+    await db_session.refresh(occ)
+    assert occ.status == OccurrenceStatus.verified_pass
+    assert await balance_cents(db_session, child_user.id) == 250
+    assert not llm.called
+    v = await _only_verification(db_session, occ.id)
+    assert v.model_name == "d3-nano"
+    assert v.child_message  # the decider writes none; the worker supplies one
+    assert v.raw_request["backend"] == "decider"
+
+
+@respx.mock
+async def test_decider_expect_no_end_to_end(client, db_session, household, child_user):
+    respx.post(DECIDER_URL).mock(return_value=_decider_reply({1: ("no", 0.96)}))
+    occ = await _mk_occ(
+        db_session,
+        household,
+        child_user,
+        reward=150,
+        checklist=({"id": 1, "text": "Are there dishes in the basin?", "expect": "no"},),
+    )
+    await _use_decider(db_session)
+    await _kid_submit(client, occ.id)
+    await _make_media_look_real(db_session, occ.id)
+
+    await verify.drain(db_session)
+    await db_session.refresh(occ)
+    assert occ.status == OccurrenceStatus.verified_pass
+
+
+@respx.mock
+async def test_decider_failure_falls_back_to_llm(client, db_session, household, child_user):
+    respx.post(DECIDER_URL).mock(return_value=httpx.Response(500))
+    llm = respx.post(LLM_URL).mock(return_value=_completion(_model_reply([(1, "yes", 0.95)])))
+    occ = await _mk_occ(db_session, household, child_user, reward=200)
+    await _use_decider(db_session)
+    await _kid_submit(client, occ.id)
+    await _make_media_look_real(db_session, occ.id)
+
+    await verify.drain(db_session)
+    await db_session.refresh(occ)
+    assert llm.called
+    assert occ.status == OccurrenceStatus.verified_pass
+    v = await _only_verification(db_session, occ.id)
+    assert v.reasoning.startswith("decider failed (")
+    assert "scored by LLM" in v.reasoning
+    assert v.model_name != "d3-nano"
+
+
+@respx.mock
+async def test_decider_and_llm_both_down_fail_open(client, db_session, household, child_user):
+    respx.post(DECIDER_URL).mock(side_effect=httpx.ConnectError("refused"))
+    respx.post(LLM_URL).mock(return_value=httpx.Response(500))
+    occ = await _mk_occ(db_session, household, child_user, reward=200)
+    await _use_decider(db_session)
+    await _kid_submit(client, occ.id)
+    await _make_media_look_real(db_session, occ.id)
+
+    await verify.drain(db_session)
+    await db_session.refresh(occ)
+    assert occ.status == OccurrenceStatus.needs_review
+    assert await _ledger_count(db_session, occ.id) == 0
+    assert occ.verification_error.startswith("decider failed (")
+    assert "vision endpoint error" in occ.verification_error
+    v = await _only_verification(db_session, occ.id)
+    assert v.verdict == Verdict.error
+
+
+@respx.mock
+async def test_llm_backend_never_calls_the_decider(client, db_session, household, child_user):
+    from app.services.llm_config import ensure_settings_row
+
+    decider = respx.post(DECIDER_URL).mock(return_value=_decider_reply({1: ("yes", 0.99)}))
+    respx.post(LLM_URL).mock(return_value=_completion(_model_reply([(1, "yes", 0.95)])))
+    occ = await _mk_occ(db_session, household, child_user)
+    row = await ensure_settings_row(db_session)
+    row.decider_base_url = DECIDER_BASE  # configured, but not chosen
+    await db_session.commit()
+    await _kid_submit(client, occ.id)
+    await _make_media_look_real(db_session, occ.id)
+
+    await verify.drain(db_session)
+    assert not decider.called

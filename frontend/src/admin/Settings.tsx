@@ -7,7 +7,7 @@ import {
   useUpdateProfile,
   useUpdateSettings,
 } from './api';
-import type { SettingsPatch } from './api';
+import type { SettingsPatch, VerifierBackend } from './api';
 import { setCsrfToken } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { Button, Card, LoadFailed, Spinner } from '../shared/ui';
@@ -24,6 +24,9 @@ export function Settings() {
   const [pass, setPass] = useState(0.85);
   const [fail, setFail] = useState(0.35);
   const [timeout, setTimeoutS] = useState(120);
+  const [backend, setBackend] = useState<VerifierBackend>('llm');
+  const [deciderUrl, setDeciderUrl] = useState('');
+  const [deciderModel, setDeciderModel] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -34,9 +37,13 @@ export function Settings() {
     setPass(d.verification.auto_pass_threshold);
     setFail(d.verification.auto_fail_threshold);
     setTimeoutS(d.llm.timeout_s);
+    setBackend(d.verifier.backend);
+    setDeciderUrl(d.verifier.decider_base_url);
+    setDeciderModel(d.verifier.decider_model);
   }, [settings.data]);
 
   const models = useLlmModels(baseUrl, apiKey);
+  const deciders = useLlmModels(deciderUrl, '');
 
   if (settings.isLoading) return <Spinner />;
   // Not merely an empty screen: the seeding effect above returns early when there is no
@@ -55,6 +62,9 @@ export function Settings() {
       llm_timeout_s: timeout,
       auto_pass_threshold: pass,
       auto_fail_threshold: fail,
+      verifier_backend: backend,
+      decider_base_url: deciderUrl || null,
+      decider_model: deciderModel || null,
     };
     if (apiKey) body.llm_api_key = apiKey;
     try {
@@ -78,6 +88,81 @@ export function Settings() {
       />
 
       <NotificationPrefs />
+
+      <Card className="flex flex-col gap-3">
+        <h2 className="font-bold">Photo checker</h2>
+
+        <Field label={`Scored by (${src.verifier_backend ?? 'env'})`}>
+          <select
+            className="inp"
+            value={backend}
+            onChange={(e) => setBackend(e.target.value as VerifierBackend)}
+          >
+            <option value="llm">Vision LLM</option>
+            <option value="decider">Decider (fast, NPU)</option>
+          </select>
+        </Field>
+
+        {backend === 'decider' && (
+          <>
+            <Field label={`Decider base URL (${src.decider_base_url ?? 'env'})`}>
+              <input
+                className="inp"
+                placeholder="http://halogen.lan:8731/v1"
+                value={deciderUrl}
+                onChange={(e) => setDeciderUrl(e.target.value)}
+              />
+            </Field>
+            <div className="flex items-end gap-2">
+              <Field label={`Decider model (${src.decider_model ?? 'env'})`}>
+                {deciders.data?.decision_models?.length ? (
+                  <select
+                    className="inp"
+                    value={deciderModel}
+                    onChange={(e) => setDeciderModel(e.target.value)}
+                  >
+                    {!deciders.data.decision_models.includes(deciderModel) && deciderModel && (
+                      <option value={deciderModel}>{deciderModel}</option>
+                    )}
+                    {deciders.data.decision_models.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className="inp"
+                    value={deciderModel}
+                    onChange={(e) => setDeciderModel(e.target.value)}
+                  />
+                )}
+              </Field>
+              <Button
+                className="min-h-0 px-3 py-2 text-sm"
+                variant="ghost"
+                disabled={!deciderUrl || deciders.isFetching}
+                onClick={() => deciders.refetch()}
+              >
+                Fetch models
+              </Button>
+            </div>
+            {deciders.isFetched && (
+              <p
+                className={`text-xs ${deciders.data?.reachable ? 'text-emerald-400' : 'text-rose-400'}`}
+              >
+                {deciders.data?.reachable
+                  ? `reachable — ${deciders.data.decision_models?.length ?? 0} decision model(s)`
+                  : `unreachable${deciders.data?.error ? `: ${deciders.data.error}` : ''}`}
+              </p>
+            )}
+            <p className="text-xs text-slate-400">
+              The decider answers each checklist question about each photo. If it fails, the vision
+              LLM below scores the photo instead.
+            </p>
+          </>
+        )}
+      </Card>
 
       <Card className="flex flex-col gap-3">
         <h2 className="font-bold">Vision model &amp; connection</h2>

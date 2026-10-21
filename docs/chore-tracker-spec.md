@@ -422,6 +422,34 @@ Fallback: if no local VLM performs acceptably, `verification_mode: llm_assist` d
 gracefully to "parent reviews everything, sorted into a nice queue" — still useful. The architecture
 MUST support this without code changes.
 
+#### Decider backend
+
+`[D]` The household can score photo proof with a **System One decider** instead of the vision LLM:
+halogen's `d3-nano` (vLLM Semantic Router Decision 3.0) on the NPU, behind
+`POST {DECIDER_BASE_URL}/systemone`. One switch in Settings, household-wide (`verifier_backend`:
+`llm` | `decider`); no per-chore override.
+
+A decider writes no text. It answers typed questions about a `state` string plus **one** picture,
+with a probability for every option (`services/verification/decider.py`):
+
+- each checklist item becomes a `choice` of `yes` / `no` / `unclear`, keyed by its real id; the
+  `ignore` list is appended to the question, `expect` is never sent;
+- an `image_quality` choice (`none`, `too_dark`, …) — acted on only at ≥ 0.8, so a small model's
+  coin-toss does not send a kid back for a retake;
+- confidence = the chosen option's probability, so the same bands apply;
+- one request per photo; a check's answer is **"in any photo"** — `yes` anywhere wins, `no` only
+  when no photo saw it, `unclear` only when every photo said so. (Measured: a photo that does not
+  show the thing answers a confident "no", so "photos disagree → review" reviewed every multi-shot
+  chore.)
+
+The answers are folded into the same response shape the LLM returns, so `derive_verdict` — banding,
+flags, `expect`, retake — is unchanged. `child_message` is a fixed line per outcome.
+
+`[D]` **Fallback order: decider → vision LLM → `NEEDS_REVIEW`.** A decider failure (down, non-2xx,
+missing answer) is logged and the vision LLM scores the photo; its verification's `reasoning` says
+so. Only if that fails too does the occurrence fail open (§6.3). Run `just eval --backend decider`
+against the same labeled set before switching: its probabilities are not the LLM's self-rating.
+
 ### 7.3 Prompt structure
 
 ```
@@ -806,6 +834,9 @@ LLM_VISION_MODEL=<model-id>
 LLM_VISION_API_KEY=not-needed
 LLM_TIMEOUT_S=120
 LLM_MAX_RETRIES=1
+VERIFIER_BACKEND=llm            # or "decider" (§7.2 Decider backend; falls back to the LLM)
+DECIDER_BASE_URL=               # e.g. http://halogen.lan:8731/v1
+DECIDER_MODEL=d3-nano
 VAPID_PUBLIC_KEY= / VAPID_PRIVATE_KEY=
 SESSION_SECRET=              # prod refuses to start on the default (main.create_app)
 ADMIN_EMAIL=                 # parent-admin's Google address, for the first-run bootstrap

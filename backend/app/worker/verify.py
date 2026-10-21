@@ -2,7 +2,8 @@
 
 1. build the checklist prompt — the anti-cheat scan already ran at
    ingest, for every verification mode, and its flags are on the submission
-2. call the vision model (with repair retry)
+2. call the vision model (with repair retry) — or, when the household picked the decider,
+   the System One decider, falling back to the vision model if it fails (spec §7.2)
 3. derive verdict + apply confidence banding — any anti-cheat flag forces NEEDS_REVIEW
 4. write the Verification row, transition the occurrence, ledger only on a terminal
    auto pass/fail; llm_assist always routes to NEEDS_REVIEW
@@ -30,9 +31,18 @@ from app.models import (
 from app.models.chore import VerificationMode
 from app.models.verification import Verdict, Verification
 from app.services import ledger, notifications
-from app.services.llm_config import get_llm_config
+from app.services.llm_config import get_decider_config, get_llm_config, get_verifier_backend
 from app.services.media import read_media
-from app.services.verification import CheckSpec, build_task_prompt, derive_verdict, run_vision
+from app.services.verification import (
+    CheckSpec,
+    DeciderError,
+    ModelResponse,
+    VerdictResult,
+    build_task_prompt,
+    derive_verdict,
+    run_decider,
+    run_vision,
+)
 from app.services.verification.llm import LLMError
 from app.worker import queue
 
@@ -43,6 +53,14 @@ _OUTCOME_TO_VERDICT = {
     "fail": Verdict.fail,
     "needs_review": Verdict.needs_review,
     "retake": Verdict.needs_review,
+}
+
+# The decider writes no text, so the kid's line comes from here (spec §7.2 "Decider backend").
+_DECIDER_MESSAGES = {
+    "pass": "Looks done — nice work!",
+    "fail": "A parent will take a look.",
+    "needs_review": "A parent will take a look.",
+    "retake": "Please retake the photo so the whole area is clear.",
 }
 
 
@@ -104,18 +122,39 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
     )
 
     cfg = await get_llm_config(db)
+    model_name = cfg.model
+    scored_by_decider = False
+    decider_note = ""
     try:
         images = [read_media(m.storage_path) for m in media_rows]
-        response, raw_req, raw_resp = await run_vision(
-            task_prompt=prompt, images=images, config=cfg
-        )
+        response: ModelResponse | None = None
+        if await get_verifier_backend(db) == "decider":
+            dcfg = await get_decider_config(db)
+            try:
+                response, raw_req, raw_resp = await run_decider(
+                    chore_title=chore.title,
+                    photo_labels=[m.prompt_label or "" for m in media_rows],
+                    checks=checks,
+                    images=images,
+                    config=dcfg,
+                )
+                model_name = dcfg.model
+                scored_by_decider = True
+            except DeciderError as exc:
+                # Fall back to the vision LLM before failing open (spec §7.2 [D]).
+                decider_note = f"decider failed ({exc}); "
+                log.warning("verify job %s: decider failed, trying LLM: %s", job.id, exc)
+        if response is None:
+            response, raw_req, raw_resp = await run_vision(
+                task_prompt=prompt, images=images, config=cfg
+            )
     except LLMError as exc:
         v = _write_verification(
             db,
             occ,
             sub,
             Verdict.error,
-            reasoning=str(exc),
+            reasoning=decider_note + str(exc),
             model_name=cfg.model,
             # Whatever the client managed to send and receive: without it a failure here
             # is only ever as legible as its message string (spec §6.3).
@@ -123,7 +162,7 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
             raw_response=exc.raw_response,
         )
         occ.status = OccurrenceStatus.needs_review
-        occ.verification_error = str(exc)[:200]
+        occ.verification_error = (decider_note + str(exc))[:200]
         await queue.complete(db, job)  # a human handles it; not a job-level retry
         await notifications.notify_verdict(db, occ, v)
         await notifications.notify_needs_review(db, occ)
@@ -138,6 +177,10 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
         flags=list(sub.flags),
         expected=expected,
     )
+    if scored_by_decider:
+        _fill_decider_message(result)
+    elif decider_note:
+        result.reasoning = decider_note + "scored by LLM; " + result.reasoning
 
     v = _write_verification(
         db,
@@ -149,7 +192,7 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
         child_message=result.child_message,
         checks=result.checks,
         image_quality_issue=result.image_quality_issue,
-        model_name=cfg.model,
+        model_name=model_name,
         raw_request=raw_req,
         raw_response=raw_resp,
     )
@@ -162,6 +205,11 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
     if occ.status == OccurrenceStatus.verified_pass:
         await notifications.notify_completed(db, occ)
     log.info("verify job %s -> %s (conf %.2f)", job.id, result.outcome, result.confidence)
+
+
+def _fill_decider_message(result: VerdictResult) -> None:
+    if not result.child_message:
+        result.child_message = _DECIDER_MESSAGES[result.outcome]
 
 
 async def _apply_outcome(

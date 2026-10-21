@@ -144,8 +144,10 @@ with what it would take.
    photo scoring routes everything to `NEEDS_REVIEW` (fail-open, spec §6.3). Intended
    defaults, but know that an empty `LLM_VISION_MODEL` means the LLM is not scoring, not
    that it is broken.
-3. **Vision LLM over plain http on the LAN** — photo bytes cross the home network
-   unencrypted (same trust level as the LAN door; accepted). Prefer a LAN DNS name over a
+3. **Vision LLM (and the optional decider) over plain http on the LAN** — photo bytes
+   cross the home network unencrypted (same trust level as the LAN door; accepted). The
+   decider (`VERIFIER_BACKEND=decider`, `DECIDER_BASE_URL`) falls back to the vision LLM
+   when it fails, so keep the LLM configured too. Prefer a LAN DNS name over a
    raw IP so a DHCP lease move does not silently disable scoring.
 4. **Rate limits are per-process**, so an api restart forgives outstanding login backoff.
    Deliberate: one api replica serves every request, and the durable defences are Access,

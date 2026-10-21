@@ -33,6 +33,12 @@ class HouseholdSettings(TimestampMixin, Base):
     llm_timeout_s: Mapped[int | None] = mapped_column(Integer, default=None)
     llm_max_retries: Mapped[int | None] = mapped_column(Integer, default=None)
 
+    # --- photo verifier choice + decider connection (overrides VERIFIER_BACKEND,
+    # DECIDER_* env). The decider shares llm_timeout_s.
+    verifier_backend: Mapped[str | None] = mapped_column(String(16), default=None)
+    decider_base_url: Mapped[str | None] = mapped_column(String(255), default=None)
+    decider_model: Mapped[str | None] = mapped_column(String(160), default=None)
+
     # --- verification banding defaults (overrides AUTO_*_THRESHOLD env) -----
     auto_pass_threshold: Mapped[float | None] = mapped_column(Numeric(3, 2), default=None)
     auto_fail_threshold: Mapped[float | None] = mapped_column(Numeric(3, 2), default=None)

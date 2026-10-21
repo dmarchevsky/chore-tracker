@@ -1,6 +1,7 @@
 """`just eval` entrypoint — run the calibration harness and print the report.
 
 uv run python -m eval.run [--dir eval/labeled] [--auto-pass 0.85] [--auto-fail 0.35]
+                          [--backend llm|decider]
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ def main() -> int:
     ap.add_argument("--dir", default="eval/labeled", type=Path)
     ap.add_argument("--auto-pass", type=float, default=None)
     ap.add_argument("--auto-fail", type=float, default=None)
+    ap.add_argument("--backend", choices=["llm", "decider"], default="llm")
     args = ap.parse_args()
 
     if not args.dir.is_dir():
@@ -28,10 +30,13 @@ def main() -> int:
     s = get_settings()
     ap_thr = args.auto_pass if args.auto_pass is not None else s.auto_pass_threshold
     af_thr = args.auto_fail if args.auto_fail is not None else s.auto_fail_threshold
-    print(f"model={s.llm_vision_model or '(unset)'} endpoint={s.llm_vision_base_url}")
+    if args.backend == "decider":
+        print(f"decider model={s.decider_model} endpoint={s.decider_base_url or '(unset)'}")
+    else:
+        print(f"model={s.llm_vision_model or '(unset)'} endpoint={s.llm_vision_base_url}")
     print(f"thresholds: auto_pass={ap_thr} auto_fail={af_thr}\n")
 
-    results = asyncio.run(run(args.dir, auto_pass=ap_thr, auto_fail=af_thr))
+    results = asyncio.run(run(args.dir, auto_pass=ap_thr, auto_fail=af_thr, backend=args.backend))
     if not results:
         print(f"no labeled images found under {args.dir}/")
         return 0

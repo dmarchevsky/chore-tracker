@@ -1,5 +1,6 @@
-"""Local vision-LLM verification (spec §7)."""
+"""Local vision-LLM and decider verification (spec §7)."""
 
+from app.services.verification.decider import DeciderError, run_decider
 from app.services.verification.llm import LLMError, ModelResponse, run_vision
 from app.services.verification.prompts import (
     RESPONSE_SCHEMA,
@@ -13,10 +14,12 @@ __all__ = [
     "RESPONSE_SCHEMA",
     "SYSTEM_PROMPT",
     "CheckSpec",
+    "DeciderError",
     "LLMError",
     "ModelResponse",
     "VerdictResult",
     "build_task_prompt",
     "derive_verdict",
+    "run_decider",
     "run_vision",
 ]

@@ -403,8 +403,12 @@ export interface AdminSettings {
     max_retries: number;
   };
   verification: { auto_pass_threshold: number; auto_fail_threshold: number };
+  verifier: { backend: VerifierBackend; decider_base_url: string; decider_model: string };
   source: Record<string, 'db' | 'env'>;
 }
+
+/** Who scores photo proof: the vision LLM, or the System One decider (LLM as fallback). */
+export type VerifierBackend = 'llm' | 'decider';
 
 export type SettingsPatch = Partial<{
   llm_base_url: string | null;
@@ -414,6 +418,9 @@ export type SettingsPatch = Partial<{
   llm_max_retries: number | null;
   auto_pass_threshold: number | null;
   auto_fail_threshold: number | null;
+  verifier_backend: VerifierBackend | null;
+  decider_base_url: string | null;
+  decider_model: string | null;
 }>;
 
 export const useSettings = () =>
@@ -430,6 +437,8 @@ export function useUpdateSettings() {
 export interface LlmModels {
   reachable: boolean;
   models: string[];
+  /** Ids the server tags `task: "decision"` — the ones the decider backend can use. */
+  decision_models?: string[];
   error?: string;
   status_code?: number;
 }
