@@ -11,6 +11,10 @@ version's section. History before the first tag is in `git log`, not here.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-26
+
+The first tagged release.
+
 ### Added
 
 - Release pipeline: a `vX.Y.Z` tag (`just release X.Y.Z`) runs the CI gates and publishes
@@ -28,4 +32,5 @@ version's section. History before the first tag is in `git log`, not here.
   `just up-build` for the working tree.
 - cloudflared 2026.8.3 → 2026.10.4.
 
-[Unreleased]: https://github.com/dmarchevsky/chore-tracker/commits/main
+[Unreleased]: https://github.com/dmarchevsky/chore-tracker/compare/v0.1.0...main
+[0.1.0]: https://github.com/dmarchevsky/chore-tracker/releases/tag/v0.1.0
