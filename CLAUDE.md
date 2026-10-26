@@ -41,8 +41,10 @@ Prerequisites: `docker` + `docker compose`, `uv`, and [`just`](https://github.co
 | Task | Command |
 |---|---|
 | Postgres only (for tests) | `just db-up` / `just db-down` |
-| Full dev stack | `just up` (builds + starts `db` `api` `worker` `proxy`) / `just down` |
-| Production stack | `just prod-up` / `just prod-down` / `just prod-ps` (needs `env.production`) |
+| Full dev stack | `just up` (released ghcr images, pulled once) / `just up-build` (builds the working tree) / `just down` |
+| Back to the released dev images | `just pull` (after a local build re-tagged them) |
+| Production stack | `just prod-up` / `just prod-pull` / `just prod-down` / `just prod-ps` (needs `env.production`, incl. `CHOREKEEPER_VERSION`) |
+| **Release** | `just release X.Y.Z` — tags + pushes `vX.Y.Z`; **ask first** (see "Release — ask first") |
 | Migrations | `just migrate` · `just makemigration "message"` |
 | VAPID keys for web push | `just vapid-keys` (prints a pair; writes nothing — [docs/notifications.md](docs/notifications.md)) |
 | Seed dev data | `just seed` — **ASK FIRST, every time** (see below). Needs `ADMIN_PASSWORD` set when `ENVIRONMENT=prod`; it refuses otherwise |
@@ -82,9 +84,10 @@ money, and the only reason a wipe has been safe so far is that it happened to hi
 worktrees can run the gate at the same time without truncating each other's tables — a shared
 one produced dozens of failures that were pure noise. `just test-db-prune` drops them.
 
-`just up` builds `db` `api` `worker` `proxy` but does **not** rebuild the PWA bundle — see
-step 9. Sign in to the dev stack at `http://localhost:5173` by picking a user; there is no
-password and no Google.
+`just up` runs the **released** images (`CHOREKEEPER_VERSION`, default `latest`) and builds
+nothing; `just up-build` builds `api` `worker` `proxy` from the checkout — see step 9. Sign
+in to the dev stack at `http://localhost:5173` by picking a user; there is no password and
+no Google.
 
 ## Git workflow — MUST follow for every change
 
@@ -104,6 +107,9 @@ History on `main` is **linear** (rebase + fast-forward, no merge commits).
      then `just web-lint` and `just web-test` → both green
    - models changed? `just makemigration "..."`, eyeball the autogenerate diff,
      `just migrate` applies with no error
+   - **`CHANGELOG.md`:** one line under `## [Unreleased]` (Added / Changed / Fixed) saying
+     what changed for a household or an operator — part of the same single commit. Pure
+     refactors, tests and docs typos can skip it.
 5. **Commit once:**
    ```
    <phase-tag>: <imperative summary>
@@ -121,16 +127,15 @@ History on `main` is **linear** (rebase + fast-forward, no merge commits).
 9. **Green build = Docker up and healthy.** This runs the **dev** stack, on its own compose
    project and its own volumes; if the production stack is running, `just prod-down` first
    (both bind `:5173` and `:8088`) and `just prod-up` again when you are done. From `main`:
-   `just up`, then verify
+   **`just up-build`** — not `just up`, which runs the last *release* and would prove
+   nothing about this commit — then verify
    - `docker compose ps` → `db` healthy, `api` + `worker` up
    - `curl -sf localhost:8088/api/v1/health` → `{"status":"ok"}`
    - `docker compose logs worker` → tick loop, no tracebacks
 
-   **`just up` does NOT rebuild the PWA** — it builds `db` `api` `worker` only, and the
-   `proxy` container keeps serving whatever bundle was baked into its image. Any change
-   under `frontend/` is invisible in the browser until you rebuild it. So when the branch
-   touched `frontend/`, also:
-   - `just web-serve` → rebuilds the `proxy` image and recreates the container
+   `just up-build` builds `proxy` too, so the bundle is fresh. When the branch touched
+   `frontend/`, still check it is the one being served:
+   - `just web-serve` → rebuilds just the `proxy` image (for later PWA-only iterations)
    - `docker compose ps proxy` → up, and `curl -sf localhost:5173/` → 200
    - confirm the new bundle is actually being served, e.g.
      `curl -s localhost:5173/ | grep -o '/assets/index-[^"]*\.js'` then grep that asset
@@ -142,10 +147,41 @@ History on `main` is **linear** (rebase + fast-forward, no merge commits).
     ([.github/workflows/ci.yml](.github/workflows/ci.yml): ruff + `alembic upgrade head` +
     pytest) is the remote safety net, not a replacement for the local gates.
 
-**Never:** push without explicit confirmation · **seed, wipe a volume, or drop/restore a
+## Release — ask first
+
+A release is a `vX.Y.Z` tag on `main`. The tag is what publishes: the Release workflow
+([.github/workflows/release.yml](.github/workflows/release.yml)) reruns the CI gates, requires
+a `## [X.Y.Z]` section in `CHANGELOG.md`, pushes `ghcr.io/dmarchevsky/chorekeeper-api` and
+`chorekeeper-proxy`, and opens a GitHub Release from that section. Production then runs it
+when its `CHOREKEEPER_VERSION` is set to it ([docs/deploy-dockhand.md](docs/deploy-dockhand.md#releases)).
+A pushed tag cannot be quietly taken back — images get pulled — so **every step that leaves
+this machine needs the user's yes for that run.**
+
+1. **Only when the user asks for a release.** Read `## [Unreleased]`, propose the version —
+   patch for fixes only, minor for anything added, major for anything a household or operator
+   must act on (a required env var, a breaking API, a migration that cannot be rolled back) —
+   and wait for a yes. Not `0.0.x`; the first release is `0.1.0`.
+2. **Release commit, through the normal workflow** (worktree `feat/release-X.Y.Z`, steps 1–8):
+   in `CHANGELOG.md` rename `## [Unreleased]` to `## [X.Y.Z] - <today, YYYY-MM-DD>`, put a
+   fresh empty `## [Unreleased]` above it, and update the link references at the bottom
+   (`[Unreleased]: …/compare/vX.Y.Z...main`, `[X.Y.Z]: …/compare/v<prev>...vX.Y.Z`, or
+   `…/releases/tag/vX.Y.Z` for the first). Nothing else in that commit. Message:
+   `release: X.Y.Z`. Fast-forward, then push `main` only on a yes (step 10).
+3. **Tag:** `just release X.Y.Z` — ask first; it pushes. It refuses off `main`, on a dirty or
+   unpushed tree, on an existing tag, or without the section. Then `gh run watch` the Release
+   run until green and confirm both images exist:
+   `docker manifest inspect ghcr.io/dmarchevsky/chorekeeper-api:X.Y.Z` (and `-proxy`).
+   A red run publishes nothing; fix forward with `X.Y.(Z+1)` — never move or reuse a tag.
+4. **Deploy only on request.** The user sets `CHOREKEEPER_VERSION=X.Y.Z` in the Dockhand
+   stack environment (`chore-tracker-prod` on `debian2`) — the `dockhand-deploy` script
+   cannot edit it. Then plan, confirm, deploy and verify through that skill. Roll back the
+   same way with the previous version.
+
+**Never:** push without explicit confirmation · tag, release or deploy without explicit
+per-run confirmation · move, delete or reuse a release tag · **seed, wipe a volume, or drop/restore a
 database without explicit per-run approval** · commit on `main` directly · merge with a
-failing gate or an un-rebased branch · bypass `--ff-only` · run `just up` with worktrees
-still present.
+failing gate or an un-rebased branch · bypass `--ff-only` · run `just up` / `just up-build`
+with worktrees still present.
 
 ## Code conventions
 

@@ -4,9 +4,14 @@
 # Access), docker-compose.yml is dev (LAN only, pick-a-user sign-in). There is no overlay
 # between them and nothing is shared — see CLAUDE.md.
 #
-#   manual:  docker compose -f docker-compose.prod.yml --env-file env.production up -d --build
+#   manual:  docker compose -f docker-compose.prod.yml --env-file env.production up -d
 #   dockhand: stack source = this repo, compose path = docker-compose.prod.yml,
 #             stack environment = the filled env.production values (see env.production.example)
+#
+# Nothing here is built: api, worker and proxy run the release images that
+# .github/workflows/release.yml publishes to ghcr on a vX.Y.Z tag. CHOREKEEPER_VERSION picks
+# one and is required — upgrade or roll back by changing it and redeploying
+# (docs/deploy-dockhand.md "Releases").
 #
 # Security-critical settings (ENVIRONMENT, COOKIE_SECURE, TRUST_PROXY_HEADERS) are pinned
 # HERE, not read from env — a production stack cannot be misconfigured into dev mode by a
@@ -46,7 +51,7 @@ services:
     restart: unless-stopped
 
   api:
-    build: ./backend
+    image: ghcr.io/dmarchevsky/chorekeeper-api:${CHOREKEEPER_VERSION:?set CHOREKEEPER_VERSION to a release, e.g. 1.4.0}
     environment: &app-env
       # --- pinned: production cannot downgrade these ---
       ENVIRONMENT: prod                # HSTS on, /docs + /openapi.json off
@@ -137,7 +142,7 @@ services:
     restart: unless-stopped
 
   worker:
-    build: ./backend
+    image: ghcr.io/dmarchevsky/chorekeeper-api:${CHOREKEEPER_VERSION:?set CHOREKEEPER_VERSION to a release, e.g. 1.4.0}
     environment: *app-env
     depends_on:
       db:
@@ -158,7 +163,7 @@ services:
   # Caddy front door (frontend/Caddyfile): :80 = tunnel door (stays unpublished,
   # cloudflared reaches it on the compose network), :81 = LAN break-glass door.
   proxy:
-    build: ./frontend
+    image: ghcr.io/dmarchevsky/chorekeeper-proxy:${CHOREKEEPER_VERSION:?set CHOREKEEPER_VERSION to a release, e.g. 1.4.0}
     depends_on:
       api:
         condition: service_healthy
@@ -168,7 +173,7 @@ services:
 
   # Outbound-only connection to Cloudflare's edge — the sole ingress path.
   cloudflared:
-    image: cloudflare/cloudflared:2026.8.3
+    image: cloudflare/cloudflared:2026.10.4
     command: tunnel --no-autoupdate run
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in the stack environment}

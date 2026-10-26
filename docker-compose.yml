@@ -20,6 +20,12 @@
 # published. Publishing the tunnel door too would give a developer a second front door with
 # subtly different rules to trip over, for no gain when there is no tunnel.
 #
+# api, worker and proxy name the released ghcr images AND keep `build:`. `just up` runs the
+# release (CHOREKEEPER_VERSION, default latest), pulled once and reused; `just up-build` and
+# `just web-serve` build the working tree instead. A local build re-tags that same image
+# name, so after one `just up` keeps running your build until `just pull` fetches the
+# release again.
+#
 # The volumes are dev-scoped and disposable; the household's real data lives in the prod
 # stack's, which this file never names.
 
@@ -43,6 +49,8 @@ services:
       retries: 20
 
   api:
+    image: ghcr.io/dmarchevsky/chorekeeper-api:${CHOREKEEPER_VERSION:-latest}
+    pull_policy: missing
     build: ./backend
     environment:
       # --- pinned: dev cannot be talked into looking like production ---
@@ -76,6 +84,8 @@ services:
       - media_data:/data/media
 
   worker:
+    image: ghcr.io/dmarchevsky/chorekeeper-api:${CHOREKEEPER_VERSION:-latest}
+    pull_policy: missing
     build: ./backend
     environment:
       ENVIRONMENT: dev
@@ -105,6 +115,8 @@ services:
   # of the dev stack, because "the app works" and "the API answers" are different claims.
   # `just up` does NOT rebuild it — use `just web-serve` after touching frontend/.
   proxy:
+    image: ghcr.io/dmarchevsky/chorekeeper-proxy:${CHOREKEEPER_VERSION:-latest}
+    pull_policy: missing
     build: ./frontend
     depends_on:
       - api

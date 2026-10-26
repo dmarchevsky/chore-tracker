@@ -17,10 +17,10 @@ This document covers only what is DockHand-specific, plus the readiness audit.
 | Service | Image / build | Publishes | Role |
 |---|---|---|---|
 | `db` | `postgres:17.6` (pinned) | `127.0.0.1:5432` | data; operator psql from the host only |
-| `api` | `build: ./backend` | `127.0.0.1:8088` | FastAPI; runs `alembic upgrade head` before uvicorn |
-| `worker` | `build: ./backend` | — | scheduler ticks + verification queue |
-| `proxy` | `build: ./frontend` | `${LAN_DOOR_PORT:-5173}` → container `:81` | Caddy front door; `:80` (tunnel door) stays unpublished |
-| `cloudflared` | `cloudflare/cloudflared:2026.8.3` (pinned) | — | sole ingress, outbound-only to Cloudflare's edge |
+| `api` | `ghcr.io/dmarchevsky/chorekeeper-api:${CHOREKEEPER_VERSION}` | `127.0.0.1:8088` | FastAPI; runs `alembic upgrade head` before uvicorn |
+| `worker` | `ghcr.io/dmarchevsky/chorekeeper-api:${CHOREKEEPER_VERSION}` | — | scheduler ticks + verification queue |
+| `proxy` | `ghcr.io/dmarchevsky/chorekeeper-proxy:${CHOREKEEPER_VERSION}` | `${LAN_DOOR_PORT:-5173}` → container `:81` | Caddy front door; `:80` (tunnel door) stays unpublished |
+| `cloudflared` | `cloudflare/cloudflared:2026.10.4` (pinned) | — | sole ingress, outbound-only to Cloudflare's edge |
 
 Volumes `db_data` and `media_data` are named and owned by project `chorekeeper-prod`, so
 they survive recreations and cannot collide with a dev `chorekeeper` project on the same host.
@@ -33,9 +33,9 @@ deploy loudly instead of booting with a default.
 ## DockHand stack setup
 
 1. **Stack → source:** this git repo (any branch you deploy from; `main`).
-2. **Compose path:** `docker-compose.prod.yml`. Builds happen on the Docker agent from the
-   checked-out repo (`./backend`, `./frontend` are repo-root-relative — keep the file at
-   the root).
+2. **Compose path:** `docker-compose.prod.yml`. Nothing is built on the agent: `api`,
+   `worker` and `proxy` pull the release images from ghcr named by `CHOREKEEPER_VERSION`
+   (see [Releases](#releases)). The stack's "build" option is harmless but does nothing.
 3. **Environment:** copy [../env.production.example](../env.production.example), fill it in,
    and paste the values into the stack's environment (or host the filled `env.production`
    on the agent for manual runs — it is gitignored; never commit it). The `:?` guards make
@@ -87,6 +87,36 @@ deploy loudly instead of booting with a default.
 7. **Verify** with the checklist at the bottom of
    [remote-access.md](remote-access.md) (health 200, `/docs` 404, `/auth/me` 403,
    break-glass 404 through the tunnel, 401 on the host).
+
+## Releases
+
+Production runs **published releases**, not the branch head. A release is a `vX.Y.Z` tag
+on `main`; [.github/workflows/release.yml](../.github/workflows/release.yml) runs the CI
+gates, checks that [../CHANGELOG.md](../CHANGELOG.md) has a `## [X.Y.Z]` section, then
+pushes both images (`X.Y.Z`, `X.Y`, `sha-<short>`, `latest`, `linux/amd64`) and opens a
+GitHub Release with that section as its notes.
+
+**Ship one:**
+
+1. A `release: X.Y.Z` commit on `main` that turns `## [Unreleased]` in CHANGELOG.md into
+   `## [X.Y.Z] - YYYY-MM-DD` (the agent procedure is in [../CLAUDE.md](../CLAUDE.md)
+   "Release — ask first"), pushed.
+2. `just release X.Y.Z` — refuses off `main`, on a dirty or unpushed tree, on an existing
+   tag, or without the CHANGELOG section; otherwise tags and pushes `vX.Y.Z`.
+3. Wait for the **Release** workflow to go green (`gh run watch`).
+4. In the Dockhand stack environment set `CHOREKEEPER_VERSION=X.Y.Z`, then redeploy.
+   Compose pulls the new tag because it is not on the host yet.
+
+**Roll back:** set `CHOREKEEPER_VERSION` to the previous release and redeploy. Migrations
+are not reversed — a release that added one keeps its schema; check the CHANGELOG before
+rolling back past it.
+
+**One-time, after the first release:** ghcr creates packages **private**, even for a public
+repo. In GitHub → Packages, set `chorekeeper-api` and `chorekeeper-proxy` to Public (or give
+Dockhand registry credentials for `ghcr.io`). Until then every pull fails `unauthorized`.
+
+A missing `CHOREKEEPER_VERSION` fails the deploy with a named error — the `:?` guard — rather
+than pulling something unexpected.
 
 ## Production readiness audit
 

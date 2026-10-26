@@ -27,9 +27,17 @@ default:
 
 # --- Dev stack (docker-compose.yml) --------------------------------------
 
-# Build and start the whole dev stack; sign in at http://localhost:5173, no password
+# Start the dev stack on the released images (pulled once); http://localhost:5173, no password
 up:
+    {{compose}} up -d
+
+# Build the working tree and start the dev stack on it — what "green build" means
+up-build:
     {{compose}} up -d --build
+
+# Fetch the released images again (CHOREKEEPER_VERSION, default latest) over a local build
+pull:
+    {{compose}} pull api worker proxy
 
 # Stop the dev stack
 down:
@@ -41,9 +49,13 @@ logs service="":
 
 # --- Production stack (docker-compose.prod.yml + env.production) ---------
 
-# Build and start production — tunnel + Access. Stop the dev stack first
+# Start production on the release in CHOREKEEPER_VERSION — tunnel + Access. Stop dev first
 prod-up:
-    {{prod}} up -d --build
+    {{prod}} up -d
+
+# Pull production's images for CHOREKEEPER_VERSION without starting anything
+prod-pull:
+    {{prod}} pull
 
 # Stop the production stack
 prod-down:
@@ -140,9 +152,29 @@ web-lint:
 web-test *args:
     cd frontend && npm run test {{args}}
 
-# Rebuild the bundle into the proxy image — `just up` does NOT do this
+# Rebuild the bundle into the proxy image — `just up` does NOT do this (`up-build` does)
 web-serve:
     {{compose}} up -d --build proxy
+
+# --- Release (CLAUDE.md "Release — ask first") ---------------------------
+
+# Tag vX.Y.Z on main and push it; CI then publishes the ghcr images + GitHub Release
+release version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    v="{{version}}"
+    [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "version must be X.Y.Z, got '$v'"; exit 1; }
+    [[ "$(git branch --show-current)" == main ]] || { echo "release from main only"; exit 1; }
+    [[ -z "$(git status --porcelain)" ]] || { echo "working tree is not clean"; exit 1; }
+    git fetch -q origin main --tags
+    [[ "$(git rev-parse main)" == "$(git rev-parse origin/main)" ]] \
+      || { echo "main is not origin/main — push (or pull) first"; exit 1; }
+    ! git rev-parse -q --verify "refs/tags/v$v" >/dev/null || { echo "tag v$v already exists"; exit 1; }
+    grep -Eq "^## \[$v\] - [0-9]{4}-[0-9]{2}-[0-9]{2}" CHANGELOG.md \
+      || { echo "CHANGELOG.md has no '## [$v] - YYYY-MM-DD' section — commit 'release: $v' first"; exit 1; }
+    git tag -a "v$v" -m "release $v"
+    git push origin "v$v"
+    echo "pushed v$v — watch it: gh run watch \$(gh run list -w Release -L1 --json databaseId -q '.[0].databaseId')"
 
 # --- Backup & restore (docs/restore.md) ----------------------------------
 

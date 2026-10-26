@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The release workflow runs these same gates before it publishes anything.
+  workflow_call:
 
 jobs:
   backend:

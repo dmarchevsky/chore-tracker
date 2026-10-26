@@ -153,14 +153,15 @@ Requires `docker` + `docker compose`, [`uv`](https://docs.astral.sh/uv/), and
 [`just`](https://github.com/casey/just).
 
 ```sh
-just up          # build + start db, api, worker, proxy — no .env needed
+just up          # start db, api, worker, proxy on the released images — no .env needed
+just up-build    # the same, built from this checkout instead
 just seed        # 1 household, admin "parent", three placeholder kids (identities printed)
 just test        # pytest against the compose Postgres (exposed on :5432)
 ```
 
 Open `http://localhost:5173` and pick who to sign in as — the dev stack has no Cloudflare
-and no password. Touched `frontend/`? `just web-serve` rebuilds the bundle into the proxy
-image; `just up` does not.
+and no password. Touched the code? `just up-build` (or `just web-serve` for the PWA alone)
+builds it; `just up` runs the last release. `just pull` goes back to the release.
 
 API is on `http://localhost:8088` (host `:8000` is reserved for an existing llama-server).
 Interactive docs at `/docs` when `ENVIRONMENT=dev`.
@@ -171,7 +172,8 @@ There are exactly two compose files and no overlay between them.
 
 | | dev — `docker-compose.yml` | prod — `docker-compose.prod.yml` |
 |---|---|---|
-| start | `just up` | `just prod-up` (needs `env.production`) |
+| start | `just up` / `just up-build` | `just prod-up` (needs `env.production`) |
+| images | ghcr release, or built locally | ghcr release `CHOREKEEPER_VERSION`, never built |
 | reachable from | the LAN only, `:5173` | the internet, via Cloudflare Tunnel |
 | sign-in | pick a user, no password | Google, via Cloudflare Access |
 | break-glass | none (the API 404s it) | admin password, LAN door only |
@@ -194,6 +196,9 @@ prod file under an orchestrator, plus the readiness audit:
   security headers. Built into the `proxy` image.
 - `docker-compose.yml` — the dev stack: `db`, `api`, `worker`, `proxy`.
   `docker-compose.prod.yml` — the production stack, tunnel and all, in one file.
+
+Releases (`just release X.Y.Z`, ghcr images, [CHANGELOG.md](CHANGELOG.md)):
+[docs/deploy-dockhand.md](docs/deploy-dockhand.md#releases).
 
 Full spec: [docs/chore-tracker-spec.md](docs/chore-tracker-spec.md). Development workflow
 (worktrees, quality gates, push flow): [CLAUDE.md](CLAUDE.md).
