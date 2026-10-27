@@ -109,8 +109,13 @@ async def test_empty_content_fails_without_a_repair_round():
     route = respx.post(URL).mock(return_value=_completion("   "))
     with pytest.raises(LLMError) as excinfo:
         await run_vision(task_prompt="x", images=[b"img"], settings=_settings())
-    assert route.call_count == 1
+    # asked again from scratch (LLM_MAX_RETRIES=1), never with a repair turn
+    assert route.call_count == 2
+    for call in route.calls:
+        assert json.loads(call.request.content)["messages"][-1]["role"] == "user"
+        assert len(json.loads(call.request.content)["messages"]) == 2
     assert "empty content" in str(excinfo.value)
+    assert "after 2 attempts" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
@@ -143,6 +148,76 @@ async def test_connection_error_raises_llmerror():
     respx.post(URL).mock(side_effect=httpx.ConnectError("refused"))
     with pytest.raises(LLMError):
         await run_vision(task_prompt="x", images=[b"img"], settings=_settings())
+
+
+# --- retries (LLM_MAX_RETRIES) ------------------------------------------------
+
+
+def _retrying(n: int) -> Settings:
+    s = _settings()
+    s.llm_max_retries = n
+    return s
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_a_dropped_connection_is_asked_again():
+    # prod 2026-10-19: one ReadError sent a Kitchen chore to review with a blank reason
+    route = respx.post(URL).mock(side_effect=[httpx.ReadError(""), _completion(_GOOD)])
+    resp, _, _ = await run_vision(task_prompt="x", images=[b"img"], settings=_retrying(1))
+    assert route.call_count == 2
+    assert resp.overall_confidence == 0.92
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_an_empty_reply_is_asked_again():
+    # prod 2026-09-04: Gemma returned "" once
+    route = respx.post(URL).mock(side_effect=[_completion(""), _completion(_GOOD)])
+    resp, _, _ = await run_vision(task_prompt="x", images=[b"img"], settings=_retrying(1))
+    assert route.call_count == 2 and resp.checks[0].answer == "yes"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_a_5xx_is_retried_up_to_the_limit():
+    route = respx.post(URL).mock(return_value=httpx.Response(503))
+    with pytest.raises(LLMError) as excinfo:
+        await run_vision(task_prompt="x", images=[b"img"], settings=_retrying(2))
+    assert route.call_count == 3
+    assert "HTTPStatusError" in str(excinfo.value) and "after 3 attempts" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_zero_retries_means_one_call():
+    route = respx.post(URL).mock(side_effect=httpx.ReadError(""))
+    with pytest.raises(LLMError):
+        await run_vision(task_prompt="x", images=[b"img"], settings=_retrying(0))
+    assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize(
+    "reply",
+    [httpx.Response(400), _completion("", finish_reason="length")],
+    ids=["4xx", "truncated"],
+)
+async def test_failures_that_would_repeat_are_not_retried(reply):
+    route = respx.post(URL).mock(return_value=reply)
+    with pytest.raises(LLMError):
+        await run_vision(task_prompt="x", images=[b"img"], settings=_retrying(3))
+    assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_an_error_with_no_message_still_names_its_type():
+    respx.post(URL).mock(side_effect=httpx.RemoteProtocolError(""))
+    with pytest.raises(LLMError) as excinfo:
+        await run_vision(task_prompt="x", images=[b"img"], settings=_retrying(0))
+    assert str(excinfo.value) == "vision endpoint error: RemoteProtocolError"
 
 
 # --- verdict banding (pure) --------------------------------------------------

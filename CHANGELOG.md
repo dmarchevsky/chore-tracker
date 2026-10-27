@@ -21,6 +21,12 @@ version's section. History before the first tag is in `git log`, not here.
 - Decider verdicts now say which photo each answer came from, and what every photo said,
   on the review screen, so an answer taken from the wrong photo is visible at a glance.
 
+### Fixed
+
+- `LLM_MAX_RETRIES` (also in Settings) was never applied: a dropped connection, timeout,
+  5xx or empty reply from the vision model is now retried before the chore goes to review,
+  and an error with no message now names its type instead of reading "vision endpoint error: ".
+
 ## [0.1.0] - 2026-10-26
 
 The first tagged release.

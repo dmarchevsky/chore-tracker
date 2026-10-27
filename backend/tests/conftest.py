@@ -6,6 +6,7 @@ import re
 import tempfile
 from pathlib import Path
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
@@ -46,6 +47,12 @@ TEST_DB_URL = os.environ.get("TEST_DATABASE_URL") or make_url(DEFAULT_SERVER).se
 # maintenance one that is always there. Derived from TEST_DB_URL rather than hardcoded, so
 # pointing TEST_DATABASE_URL at another host creates the database on that host.
 ADMIN_BASE = make_url(TEST_DB_URL).set(database="postgres").render_as_string(hide_password=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_vision_retry_pause(monkeypatch):
+    """Keep run_vision's retry pause out of the suite; the retries themselves still run."""
+    monkeypatch.setattr("app.services.verification.llm.RETRY_BACKOFF_S", 0.0)
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)

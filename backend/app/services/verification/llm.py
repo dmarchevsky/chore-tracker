@@ -7,8 +7,10 @@ fails open to NEEDS_REVIEW — the kid never loses money because inference broke
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
+import logging
 from typing import Any
 
 import httpx
@@ -18,7 +20,11 @@ from app.config import Settings, get_settings
 from app.services.llm_config import LlmConfig, LlmConfigError, validate_base_url
 from app.services.verification.prompts import RESPONSE_SCHEMA, SYSTEM_PROMPT
 
+log = logging.getLogger(__name__)
+
 TEMPERATURE = 0.1
+# Pause before retry n is n times this — long enough for a restarting llama-server.
+RETRY_BACKOFF_S = 3.0
 # Reasoning models bill their thinking tokens against this budget even when the server
 # hands the thinking back in a separate ``reasoning_content`` field. A 4B-class model
 # spent all of a 700-token budget reasoning about three photos and never emitted the JSON
@@ -44,10 +50,14 @@ class LLMError(RuntimeError):
         *,
         raw_request: dict | None = None,
         raw_response: dict | None = None,
+        transient: bool = False,
     ) -> None:
         super().__init__(message)
         self.raw_request = raw_request
         self.raw_response = raw_response
+        # Worth asking again: the connection dropped, the server 5xx'd, or the model sent
+        # back nothing. Not a 4xx, a truncation or bad JSON — those repeat identically.
+        self.transient = transient
 
 
 class Check(BaseModel):
@@ -105,6 +115,26 @@ async def run_vision(
     fallback kept for callers without a DB session.
     """
     cfg = config or LlmConfig.from_settings(settings or get_settings())
+    # LLM_MAX_RETRIES / the Settings field was stored and shown but never read, so one
+    # dropped connection or one empty completion sent a chore to review (prod, 2026-09-04
+    # and 2026-10-19). A transient failure is now asked again, after a short pause.
+    attempts = 1 + max(cfg.max_retries, 0)
+    for n in range(attempts):
+        try:
+            return await _attempt(cfg, task_prompt, images)
+        except LLMError as exc:
+            if not exc.transient or n == attempts - 1:
+                if n:
+                    exc.args = (f"{exc} (after {n + 1} attempts)",)
+                raise
+            log.warning("vision call failed (%s), retrying %d/%d", exc, n + 1, cfg.max_retries)
+            await asyncio.sleep(RETRY_BACKOFF_S * (n + 1))
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+async def _attempt(
+    cfg: LlmConfig, task_prompt: str, images: list[bytes]
+) -> tuple[ModelResponse, dict, dict]:
     user_content: list[dict] = [{"type": "text", "text": task_prompt}]
     user_content += [{"type": "image_url", "image_url": {"url": _data_url(b)}} for b in images]
     messages = [
@@ -144,7 +174,15 @@ async def run_vision(
                     raw_response=raw2,
                 ) from exc
     except httpx.HTTPError as exc:
-        raise LLMError(f"vision endpoint error: {exc}", raw_request=raw_request) from exc
+        # Some httpx errors stringify to "" — the 2026-10-19 record read only
+        # "vision endpoint error: ". The type is what says which failure it was.
+        detail = type(exc).__name__ + (f": {exc}" if str(exc) else "")
+        transient = isinstance(exc, httpx.TransportError) or (
+            isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code >= 500
+        )
+        raise LLMError(
+            f"vision endpoint error: {detail}", raw_request=raw_request, transient=transient
+        ) from exc
 
 
 def _reject_if_no_output(raw: dict, raw_request: dict) -> None:
@@ -170,6 +208,8 @@ def _reject_if_no_output(raw: dict, raw_request: dict) -> None:
         "can consume the whole budget before it emits the JSON.",
         raw_request=raw_request,
         raw_response=raw,
+        # An empty reply is a fresh run's luck; a truncation replays the same budget.
+        transient=finish != "length",
     )
 
 
