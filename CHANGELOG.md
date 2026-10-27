@@ -11,6 +11,8 @@ version's section. History before the first tag is in `git log`, not here.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-27
+
 ### Changed
 
 - The in-app camera asks for a 1920x1440 picture instead of the browser's 640x480
@@ -48,5 +50,6 @@ The first tagged release.
   `just up-build` for the working tree.
 - cloudflared 2026.8.3 → 2026.10.4.
 
-[Unreleased]: https://github.com/dmarchevsky/chore-tracker/compare/v0.1.0...main
+[Unreleased]: https://github.com/dmarchevsky/chore-tracker/compare/v0.2.0...main
+[0.2.0]: https://github.com/dmarchevsky/chore-tracker/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/dmarchevsky/chore-tracker/releases/tag/v0.1.0
