@@ -24,6 +24,9 @@ function holdReason(
   if (sub?.flags?.length) return `Held for a look: ${sub.flags.map(flagLabel).join(' · ')}`;
   if (o.status === 'submitted') return 'Waiting on the AI check.';
   if (o.status === 'verified_fail') return 'The AI called this a miss — your call overrides it.';
+  // The worker holds a model "fail" here instead of charging it (spec §6.3 rule 2).
+  if (o.status === 'needs_review' && v?.verdict === 'fail')
+    return 'The AI thinks this was missed — nothing is charged until you decide.';
   if (o.status === 'needs_review' && v?.verdict === 'needs_review')
     return v.confidence != null
       ? `The AI wasn’t confident enough to call it (${Math.round(v.confidence * 100)}%).`

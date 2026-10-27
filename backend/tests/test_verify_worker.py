@@ -179,7 +179,9 @@ async def test_llm_auto_pass_credits_exactly_once(client, db_session, household,
 
 
 @respx.mock
-async def test_llm_auto_fail_debits_penalty(client, db_session, household, child_user):
+async def test_llm_auto_fail_is_held_for_a_parent_not_charged(
+    client, db_session, household, admin_user, child_user
+):
     respx.post(LLM_URL).mock(return_value=_completion(_model_reply([(1, "no", 0.9)])))
     occ = await _mk_occ(db_session, household, child_user, reward=200, penalty=100)
     await db_session.commit()
@@ -188,8 +190,23 @@ async def test_llm_auto_fail_debits_penalty(client, db_session, household, child
 
     await verify.drain(db_session)
     await db_session.refresh(occ)
-    assert occ.status == OccurrenceStatus.verified_fail
-    assert await balance_cents(db_session, child_user.id) == -100
+    # spec §6.3 rule 2: the model's fail is a recommendation; only a parent takes money
+    assert occ.status == OccurrenceStatus.needs_review
+    assert await balance_cents(db_session, child_user.id) == 0
+    assert await _ledger_count(db_session, occ.id) == 0
+
+    v = (
+        await db_session.execute(select(Verification).where(Verification.occurrence_id == occ.id))
+    ).scalar_one()
+    assert v.verdict == Verdict.fail  # the model's call stays on record for the parent
+    assert v.child_message == "A parent will take a look."
+    kid = (
+        await db_session.execute(
+            select(NotificationLog).where(NotificationLog.user_id == child_user.id)
+        )
+    ).scalar_one()
+    assert kid.kind == "verdict.needs_review" and kid.title != "Not quite yet"
+    assert await _review_pings(db_session) == 1
 
 
 @respx.mock
@@ -399,7 +416,11 @@ async def test_sparse_checklist_ids_still_decide_the_verdict(
     assert "1. Is the sink empty?" in sent
     assert "3. Is the counter clear?" in sent
     # The required "no" on id 3 is what fails it — the check was not silently dropped.
-    assert occ.status == OccurrenceStatus.verified_fail
+    v = (
+        await db_session.execute(select(Verification).where(Verification.occurrence_id == occ.id))
+    ).scalar_one()
+    assert v.verdict == Verdict.fail
+    assert occ.status == OccurrenceStatus.needs_review
 
 
 # --- decider backend (spec §7.2 "Decider backend") ---------------------------------------

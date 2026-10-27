@@ -181,6 +181,10 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
         _fill_decider_message(result)
     elif decider_note:
         result.reasoning = decider_note + "scored by LLM; " + result.reasoning
+    if result.outcome == "fail":
+        # The model's "not quite" is only a hint to the parent now; telling the kid they
+        # missed it, on a call that is usually wrong, is the false accusation §6.1 avoids.
+        result.child_message = _DECIDER_MESSAGES["needs_review"]
 
     v = _write_verification(
         db,
@@ -198,7 +202,10 @@ async def process_job(db: AsyncSession, job: VerificationJob) -> None:
     )
     await _apply_outcome(db, occ, mode, result.outcome)
     await queue.complete(db, job)
-    await notifications.notify_verdict(db, occ, v)
+    # A held "fail" reaches the kid as "sent to a parent", not "not quite yet".
+    await notifications.notify_verdict(
+        db, occ, v, outcome="needs_review" if result.outcome == "fail" else None
+    )
     if occ.status == OccurrenceStatus.needs_review:
         await notifications.notify_needs_review(db, occ)
     # Passed on its own: nobody would otherwise hear that the chore is done.
@@ -225,10 +232,9 @@ async def _apply_outcome(
     if outcome == "pass":
         occ.status = OccurrenceStatus.verified_pass
         await ledger.credit_earning(db, occurrence=occ, reason="auto-verified pass")
-    elif outcome == "fail":
-        occ.status = OccurrenceStatus.verified_fail
-        await ledger.debit_penalty(db, occurrence=occ, reason="auto-verified fail")
     else:
+        # A "fail" is held for a parent like any other non-pass, never charged (spec §6.3
+        # rule 2): on prod history 12 of 13 model fails were chores a parent then approved.
         occ.status = OccurrenceStatus.needs_review
 
 

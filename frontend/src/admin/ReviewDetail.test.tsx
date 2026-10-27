@@ -36,7 +36,7 @@ const BASE = {
   verification_error: null,
 };
 
-function setup(occurrence: Record<string, unknown>) {
+function setup(occurrence: Record<string, unknown>, verifications: unknown[] = []) {
   const calls: { url: string; method: string; body: unknown }[] = [];
   vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
     const url = String(input);
@@ -45,6 +45,7 @@ function setup(occurrence: Record<string, unknown>) {
       calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
     if (method === 'POST') return Promise.resolve(json(occurrence));
     if (url.endsWith('/occurrences/o1')) return Promise.resolve(json(occurrence));
+    if (url.endsWith('/occurrences/o1/verifications')) return Promise.resolve(json(verifications));
     return Promise.resolve(json([]));
   });
 
@@ -162,5 +163,33 @@ describe('ReviewDetail — decisions', () => {
 
     expect(await screen.findByText('Add a reason when changing the amount.')).toBeInTheDocument();
     expect(calls).toEqual([]);
+  });
+});
+
+describe('ReviewDetail — why it is held', () => {
+  const ver = (verdict: string) => ({
+    id: 'v1',
+    kind: 'llm',
+    verdict,
+    confidence: 0.9,
+    reasoning: '#1:no(0.90)',
+    child_message: 'A parent will take a look.',
+    checks: [{ id: 1, answer: 'no', confidence: 0.9, evidence: 'dishes in the basin' }],
+    image_quality_issue: 'none',
+    created_by: 'system',
+    created_at: due,
+  });
+
+  it('says a held AI fail costs nothing until the parent decides', async () => {
+    setup({ ...BASE, status: 'needs_review' }, [ver('fail')]);
+    expect(
+      await screen.findByText(/AI thinks this was missed — nothing is charged until you decide/),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps the low-confidence wording for an ordinary review', async () => {
+    setup({ ...BASE, status: 'needs_review' }, [ver('needs_review')]);
+    expect(await screen.findByText(/wasn’t confident enough/)).toBeInTheDocument();
+    expect(screen.queryByText(/AI thinks this was missed/)).not.toBeInTheDocument();
   });
 });

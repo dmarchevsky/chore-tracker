@@ -13,6 +13,9 @@ version's section. History before the first tag is in `git log`, not here.
 
 ### Changed
 
+- An automatic "fail" no longer takes money: on `llm_auto` chores it goes to the parent's
+  review queue, the kid is told a parent will look, and only the parent's reject charges a
+  penalty. Automatic passes are unchanged.
 - Decider verdicts now say which photo each answer came from, and what every photo said,
   on the review screen, so an answer taken from the wrong photo is visible at a glance.
 

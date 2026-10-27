@@ -249,11 +249,17 @@ _VERDICT_COPY = {
 
 
 async def notify_verdict(
-    db: AsyncSession, occ: ChoreOccurrence, verification: Verification | None
+    db: AsyncSession,
+    occ: ChoreOccurrence,
+    verification: Verification | None,
+    *,
+    outcome: str | None = None,
 ) -> None:
+    """``outcome`` overrides the verdict's copy — the worker holds a model "fail" for a
+    parent, and the kid should hear that, not the model's verdict."""
     if occ.assignee_id is None:
         return
-    outcome = str(verification.verdict) if verification else "needs_review"
+    outcome = outcome or (str(verification.verdict) if verification else "needs_review")
     title, body = _VERDICT_COPY.get(outcome, _VERDICT_COPY["needs_review"])
     if verification and verification.child_message:
         body = verification.child_message
