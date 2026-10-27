@@ -4,6 +4,7 @@ import type { Chore } from '../api/types';
 import { Capture } from './Capture';
 
 vi.mock('../pwa/downscale', () => ({
+  CAPTURE_IDEAL: { w: 1920, h: 1440 },
   toDownscaledJpeg: vi.fn().mockResolvedValue(new Blob(['jpeg'], { type: 'image/jpeg' })),
   prepareGalleryUpload: vi.fn().mockResolvedValue(new Blob(['jpeg'])),
 }));
@@ -47,7 +48,11 @@ describe('Capture', () => {
     render(<Capture chore={chore} onSubmit={noop} onClose={close} busy={false} />);
 
     await waitFor(() => expect(screen.getByLabelText('Take photo')).toBeEnabled());
-    expect(getUserMedia).toHaveBeenCalled();
+    // Asks for a real photo size: left unasked, browsers open the camera at 640x480.
+    expect(getUserMedia).toHaveBeenCalledWith({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1440 } },
+      audio: false,
+    });
   });
 
   it('captures the frame via ImageCapture (drawImage(<video>) is black on some Android)', async () => {

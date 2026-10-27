@@ -13,6 +13,8 @@ version's section. History before the first tag is in `git log`, not here.
 
 ### Changed
 
+- The in-app camera asks for a 1920x1440 picture instead of the browser's 640x480
+  default, so photo checks see real detail (uploads stay capped at 1568 px).
 - An automatic "fail" no longer takes money: on `llm_auto` chores it goes to the parent's
   review queue, the kid is told a parent will look, and only the parent's reject charges a
   penalty. Automatic passes are unchanged.

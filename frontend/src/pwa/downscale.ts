@@ -3,6 +3,9 @@
 
 export const MAX_LONG_EDGE = 1568;
 export const JPEG_QUALITY = 0.82;
+// What the camera is asked for (4:3, a little over MAX_LONG_EDGE so the downscale has detail
+// to keep). Browsers open it at 640x480 when nothing is asked.
+export const CAPTURE_IDEAL = { w: 1920, h: 1440 };
 
 export function fittedSize(w: number, h: number, max = MAX_LONG_EDGE) {
   const long = Math.max(w, h);

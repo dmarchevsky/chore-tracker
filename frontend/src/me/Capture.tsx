@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Chore } from '../api/types';
 import { Button, Card } from '../shared/ui';
 import { useBodyScrollLock } from '../shared/useBodyScrollLock';
-import { prepareGalleryUpload, toDownscaledJpeg } from '../pwa/downscale';
+import { CAPTURE_IDEAL, prepareGalleryUpload, toDownscaledJpeg } from '../pwa/downscale';
 
 type Perm = 'starting' | 'live' | 'denied' | 'error' | 'gallery' | 'unsupported';
 
@@ -64,7 +64,12 @@ export function Capture({ chore, onSubmit, onClose, busy }: Props) {
       setPerm('live');
     }
 
-    gum({ video: { facingMode: 'environment' }, audio: false })
+    // Without a size the browser opens the camera at 640x480, and every photo the model saw
+    // was 480x640 — too coarse to tell a sponge caddy from a plate. `ideal` never rejects,
+    // so a camera that can't do it just gives its nearest; the upload is still capped at
+    // MAX_LONG_EDGE by toDownscaledJpeg.
+    const size = { width: { ideal: CAPTURE_IDEAL.w }, height: { ideal: CAPTURE_IDEAL.h } };
+    gum({ video: { facingMode: 'environment', ...size }, audio: false })
       .catch(() => gum({ video: true, audio: false })) // Samsung multi-camera fallback
       .then(attach)
       .catch((e: unknown) => {
