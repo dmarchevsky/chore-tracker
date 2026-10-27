@@ -11,6 +11,11 @@ version's section. History before the first tag is in `git log`, not here.
 
 ## [Unreleased]
 
+### Changed
+
+- Decider verdicts now say which photo each answer came from, and what every photo said,
+  on the review screen, so an answer taken from the wrong photo is visible at a glance.
+
 ## [0.1.0] - 2026-10-26
 
 The first tagged release.

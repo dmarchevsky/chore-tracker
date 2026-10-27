@@ -14,6 +14,7 @@ from app.services.verification.decider import (
     QUALITY_KEY,
     RETAKE_MIN_PROB,
     _combine,
+    _evidence,
     build_questions,
 )
 
@@ -112,15 +113,34 @@ async def test_one_request_per_photo():
     ]
     # the photo that could not see the sink does not override the one that could
     assert (resp.checks[0].answer, resp.checks[0].confidence) == ("yes", pytest.approx(0.9))
+    assert resp.checks[0].evidence == "from photo 1 (sink); photos: 1 yes 0.90, 2 unclear 0.80"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_single_photo_evidence_names_it():
+    respx.post(URL).mock(return_value=_reply({1: ("no", 0.7)}))
+    resp, _, _ = await _run([CheckSpec(id=1, text="Is the sink empty?")])
+    assert resp.checks[0].evidence == "from photo 1 (sink)"
 
 
 def test_combine_is_any_photo():
     # each photo shows a different area: the one that saw it decides
-    assert _combine([("yes", 0.9), ("no", 0.95)]) == ("yes", 0.9)
-    assert _combine([("yes", 0.7), ("yes", 0.9)]) == ("yes", 0.9)
-    assert _combine([("no", 0.9), ("no", 0.6)]) == ("no", 0.6)  # weakest "no" holds
-    assert _combine([("no", 0.9), ("unclear", 0.99)]) == ("no", 0.9)
-    assert _combine([("unclear", 0.6), ("unclear", 0.8)]) == ("unclear", 0.8)
+    assert _combine([("yes", 0.9), ("no", 0.95)]) == ("yes", 0.9, 0)
+    assert _combine([("yes", 0.7), ("yes", 0.9)]) == ("yes", 0.9, 1)
+    assert _combine([("no", 0.9), ("no", 0.6)]) == ("no", 0.6, 1)  # weakest "no" holds
+    assert _combine([("no", 0.9), ("unclear", 0.99)]) == ("no", 0.9, 0)
+    assert _combine([("unclear", 0.6), ("unclear", 0.8)]) == ("unclear", 0.8, 1)
+
+
+def test_evidence_shows_the_photo_that_decided():
+    # prod 2026-10-27: the dishwasher photo said "yes" to dishes in the sink basin
+    per_image = [("no", 0.69), ("unclear", 0.79), ("yes", 0.59)]
+    labels = ["sink close-up", "wide kitchen countertop", "dishwasher inside"]
+    assert _evidence(per_image, labels, _combine(per_image)[2]) == (
+        "from photo 3 (dishwasher inside); photos: 1 no 0.69, 2 unclear 0.79, 3 yes 0.59"
+    )
+    assert _evidence([("yes", 0.9), ("no", 0.6)], ["", ""], 0).startswith("from photo 1;")
 
 
 @pytest.mark.asyncio

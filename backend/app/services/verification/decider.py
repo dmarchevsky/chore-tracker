@@ -100,7 +100,7 @@ def _top(answer: _Answer) -> tuple[str, float]:
     return answer.choice, float(answer.probabilities.get(answer.choice, 0.0))
 
 
-def _combine(per_image: list[tuple[str, float]]) -> tuple[str, float]:
+def _combine(per_image: list[tuple[str, float]]) -> tuple[str, float, int]:
     """Fold one check's per-photo answers into one: "is it in *any* of the photos?"
 
     Checks ask about presence ("Are there dishes in the basin?"), and each photo of a
@@ -110,14 +110,30 @@ def _combine(per_image: list[tuple[str, float]]) -> tuple[str, float]:
     answer (its strongest), "no" only when no photo saw it (the weakest "no", so one
     unsure photo still holds it in review), and "unclear" only when every photo said so.
     A wrong "yes" on an ``expect: "no"`` check still has to clear auto-pass to fail.
+
+    Returns the answer, its probability, and the index of the photo it came from.
     """
-    yes = [p for a, p in per_image if a == "yes"]
-    if yes:
-        return "yes", max(yes)
-    no = [p for a, p in per_image if a == "no"]
-    if no:
-        return "no", min(no)
-    return "unclear", max(p for _, p in per_image)
+    for answer, pick in (("yes", max), ("no", min)):
+        hits = [(p, i) for i, (a, p) in enumerate(per_image) if a == answer]
+        if hits:
+            p, i = pick(hits)
+            return answer, p, i
+    p, i = max((p, i) for i, (_, p) in enumerate(per_image))
+    return "unclear", p, i
+
+
+def _evidence(per_image: list[tuple[str, float]], labels: list[str], chosen: int) -> str:
+    """Which photo decided, and what every photo said — a decider writes no evidence of
+    its own, and a "yes" from the dishwasher photo to "dishes in the sink?" is only
+    visible to a reviewer who can see where it came from (prod, 2026-10-27)."""
+
+    def name(i: int) -> str:
+        return f"photo {i + 1}" + (f" ({labels[i]})" if labels[i] else "")
+
+    if len(per_image) == 1:
+        return f"from {name(0)}"
+    each = ", ".join(f"{i + 1} {a} {p:.2f}" for i, (a, p) in enumerate(per_image))
+    return f"from {name(chosen)}; photos: {each}"
 
 
 async def run_decider(
@@ -184,8 +200,16 @@ async def run_decider(
 
     out_checks = []
     for c in checks:
-        answer, conf = _combine([_top(r.answers[_key(c.id)]) for r in parsed])
-        out_checks.append(Check(id=c.id, answer=answer, confidence=conf))
+        per_image = [_top(r.answers[_key(c.id)]) for r in parsed]
+        answer, conf, chosen = _combine(per_image)
+        out_checks.append(
+            Check(
+                id=c.id,
+                answer=answer,
+                confidence=conf,
+                evidence=_evidence(per_image, labels, chosen),
+            )
+        )
 
     quality = "none"
     for r in parsed:
